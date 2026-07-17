@@ -3,7 +3,9 @@ import { X } from "lucide-react";
 import { basename } from "../../stores/libraryStore";
 import { humanSize } from "../FileRow";
 import type { ModelStats } from "../../model/loadModel";
+import type { RescueResult } from "../../model/rescueTextures";
 import ModelViewport from "./ModelViewport";
+import AtlasPicker from "./AtlasPicker";
 
 export interface ModelInspectorProps {
   path: string | null;
@@ -19,6 +21,8 @@ const fmt = (n: number): string => n.toLocaleString();
 export default function ModelInspector({ path, size, onClose }: ModelInspectorProps): ReactElement {
   const [stats, setStats] = useState<ModelStats | null>(null);
   const onStats = useCallback((s: ModelStats | null) => setStats(s), []);
+  const [rescue, setRescue] = useState<RescueResult | null>(null);
+  const onRescue = useCallback((r: RescueResult | null) => setRescue(r), []);
 
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-border bg-panel">
@@ -31,8 +35,17 @@ export default function ModelInspector({ path, size, onClose }: ModelInspectorPr
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         <div className="aspect-square w-full shrink-0">
-          <ModelViewport path={path} onStats={onStats} />
+          <ModelViewport path={path} onStats={onStats} onRescue={onRescue} />
         </div>
+
+        {path !== null && rescue !== null && (
+          <AtlasPicker
+            modelPath={path}
+            candidates={rescue.candidates}
+            applied={rescue.applied}
+            manual={rescue.manual === true}
+          />
+        )}
 
         {path === null ? (
           <p className="text-[11px] text-dim">Select a model to preview it.</p>

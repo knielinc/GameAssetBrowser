@@ -87,6 +87,8 @@ export default function FullscreenPreview({
                 mesh={preview3d.mesh}
                 light={preview3d.light}
                 tiles={preview3d.tiles}
+                relief={preview3d.relief}
+                channel={preview3d.channel}
               />
             </div>
           ) : (
@@ -97,7 +99,12 @@ export default function FullscreenPreview({
         </div>
         {file.kind === "texture" && Object.keys(keys).length > 0 && (
           <div className="shrink-0">
-            <PreviewControls value={preview3d} onChange={onPreviewChange} inline />
+            <PreviewControls
+              value={preview3d}
+              onChange={onPreviewChange}
+              inline
+              hasHeight={keys.height !== undefined}
+            />
           </div>
         )}
       </div>

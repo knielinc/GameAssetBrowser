@@ -5,10 +5,13 @@ import { Loader2 } from "lucide-react";
 import { analyze, loadModel, type ModelStats } from "../../model/loadModel";
 import { disposeModel } from "../../model/dispose";
 import { rescueTextures, type RescueResult } from "../../model/rescueTextures";
+import { packDirOf, useAtlasStore } from "../../stores/atlasStore";
 
 export interface ModelViewportProps {
   path: string | null;
   onStats?: (stats: ModelStats | null) => void;
+  /** Surfaced so the inspector can offer the manual atlas picker. */
+  onRescue?: (r: RescueResult | null) => void;
 }
 
 /**
@@ -19,7 +22,9 @@ export interface ModelViewportProps {
  * reconciler and be the largest abstraction in a codebase that hand-rolls its
  * own waveform loop and derives its own folder tree.
  */
-export default function ModelViewport({ path, onStats }: ModelViewportProps): ReactElement {
+export default function ModelViewport({ path, onStats, onRescue }: ModelViewportProps): ReactElement {
+  // Re-run the load when the user picks a different atlas for this pack.
+  const atlasChoice = useAtlasStore((s) => (path === null ? undefined : s.overrides[packDirOf(path).toLowerCase()]));
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -200,7 +205,10 @@ export default function ModelViewport({ path, onStats }: ModelViewportProps): Re
         // so materials arrive with no map. Find the pack atlas ourselves.
         try {
           const r = await rescueTextures(root, path);
-          if (!cancelled) setRescued(r.applied === null ? null : { ...r });
+          if (!cancelled) {
+            setRescued(r.applied === null ? null : { ...r });
+            onRescue?.(r);
+          }
         } catch (e) {
           console.debug("[rescue]", e);
         }
@@ -251,7 +259,8 @@ export default function ModelViewport({ path, onStats }: ModelViewportProps): Re
     return () => {
       cancelled = true;
     };
-  }, [path, onStats]);
+    // atlasChoice: re-load so a manual atlas pick takes effect immediately.
+  }, [path, onStats, onRescue, atlasChoice]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg border border-border bg-[#0c0c12]">

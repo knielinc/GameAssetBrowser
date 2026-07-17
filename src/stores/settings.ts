@@ -4,6 +4,7 @@ import {
   EXTENSIONS,
   SORT_FIELDS_BY_KIND,
   type AssetKind,
+  type AtlasChoiceSettings,
   type Settings,
   type SortDir,
   type SortField,
@@ -12,6 +13,7 @@ import {
 } from "../types";
 import { playerSetLoop, playerSetVolume, settingsStorePath } from "../ipc/commands";
 import { defaultTabs, useLibraryStore, type TabState } from "./libraryStore";
+import { useAtlasStore } from "./atlasStore";
 import { usePlayerStore } from "./playerStore";
 
 function defaultTabSettings(kind: AssetKind): TabSettings {
@@ -37,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
     texture: defaultTabSettings("texture"),
     model: defaultTabSettings("model"),
   },
+  atlases: {},
 };
 
 const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
@@ -136,7 +139,21 @@ export function sanitize(raw: unknown): Settings {
       texture: sanitizeTab("texture", tabs.texture),
       model: sanitizeTab("model", tabs.model),
     },
+    atlases: sanitizeAtlases(v2.atlases),
   };
+}
+
+/** Keys are absolute paths, values {path, flipY}. Anything malformed is
+ *  dropped rather than crashing startup — the sanitizer stays total. */
+function sanitizeAtlases(raw: unknown): Record<string, AtlasChoiceSettings> {
+  if (!isObj(raw)) return {};
+  const out: Record<string, AtlasChoiceSettings> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!isObj(v)) continue;
+    if (typeof v.path !== "string" || v.path === "") continue;
+    out[k.toLowerCase()] = { path: v.path, flipY: bool(v.flipY, false) };
+  }
+  return out;
 }
 
 function tabToSettings(t: TabState): TabSettings {
@@ -165,6 +182,7 @@ function currentSettings(): Settings {
       texture: tabToSettings(lib.tabs.texture),
       model: tabToSettings(lib.tabs.model),
     },
+    atlases: useAtlasStore.getState().overrides,
   };
 }
 
@@ -203,6 +221,10 @@ function installSubscriptions(): void {
     ) {
       saveSettings();
     }
+  });
+
+  useAtlasStore.subscribe((state, prev) => {
+    if (state.overrides !== prev.overrides) saveSettings();
   });
 
   usePlayerStore.subscribe((state, prev) => {
@@ -247,6 +269,7 @@ export async function loadSettings(): Promise<Settings> {
     };
   }
   useLibraryStore.setState({ roots: settings.roots, activeTab: settings.activeTab, tabs });
+  useAtlasStore.getState().hydrate(settings.atlases);
   usePlayerStore.setState({
     volume: settings.volume,
     loop: settings.loop,

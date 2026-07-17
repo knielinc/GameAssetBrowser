@@ -31,17 +31,23 @@ export function keysForMaterial(
   put("baseColor", "baseColor");
   put("normal", "normal");
   put("roughness", "roughness");
+  put("metallic", "metallic");
   put("ao", "ao");
   put("height", "height");
+  put("emissive", "emissive");
+  put("opacity", "opacity");
 
   for (const packed of ["packedORM", "packedARM", "packedRMA", "packedMRA"] as Channel[]) {
     const m = material.channels.get(packed);
     if (m === undefined) continue;
     const t = thumbs.get(m.file.id);
     if (t === undefined) continue;
-    // Same texture into both slots — three reads the right channel from each.
+    // The same texture into all three slots — three reads aoMap from .r,
+    // roughnessMap from .g and metalnessMap from .b, so a packed map needs no
+    // channel extraction and no extra VRAM. ORM was designed for exactly this.
     keys.roughness ??= t.key;
     keys.ao ??= t.key;
+    keys.metallic ??= t.key;
   }
   return keys;
 }
@@ -60,8 +66,17 @@ export function keysForFile(
       return { normal: t.key, baseColor: undefined };
     case "roughness":
       return { roughness: t.key };
+    case "metallic":
+      return { metallic: t.key };
     case "ao":
       return { ao: t.key };
+    case "height":
+      // A lone height map should SHOW as relief, not as a grey albedo.
+      return { height: t.key };
+    case "emissive":
+      return { emissive: t.key };
+    case "opacity":
+      return { opacity: t.key };
     default:
       return { baseColor: t.key };
   }
@@ -131,13 +146,24 @@ export default function TextureInspector({
               Select a texture
             </div>
           ) : (
-            <TexturePreview keys={keys} mesh={preview.mesh} light={preview.light} tiles={preview.tiles} />
+            <TexturePreview
+              keys={keys}
+              mesh={preview.mesh}
+              light={preview.light}
+              tiles={preview.tiles}
+              relief={preview.relief}
+              channel={preview.channel}
+            />
           )}
         </div>
 
         {item !== null && (
           <>
-            <PreviewControls value={preview} onChange={onPreviewChange} />
+            <PreviewControls
+              value={preview}
+              onChange={onPreviewChange}
+              hasHeight={keys.height !== undefined}
+            />
 
             <div>
               <div className="break-words text-[14px] font-semibold tracking-tight">{title}</div>

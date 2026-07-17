@@ -26,15 +26,29 @@ export interface ChannelKeys {
   baseColor?: string;
   normal?: string;
   roughness?: string;
+  metallic?: string;
   ao?: string;
   height?: string;
+  emissive?: string;
+  opacity?: string;
 }
+
+/** Height relief presets. Values are in mesh units — the preview meshes are
+ *  ~1–2 units across, so 0.12 is already a dramatic silhouette. */
+export const RELIEF_STEPS: { id: string; label: string; value: number }[] = [
+  { id: "off", label: "Off", value: 0 },
+  { id: "low", label: "Low", value: 0.04 },
+  { id: "med", label: "Med", value: 0.09 },
+  { id: "high", label: "High", value: 0.18 },
+];
 
 export interface TexturePreviewProps {
   keys: ChannelKeys;
   mesh: MeshMode;
   light: LightMode;
   tiles: number;
+  /** Displacement amount in mesh units. 0 = flat surface. */
+  relief: number;
   /** Flat mode only: which channel's raw image to show. Lets you inspect the
    *  normal / roughness / AO / height maps themselves, not just their effect
    *  on the composed surface. */
@@ -104,6 +118,7 @@ export default function TexturePreview({
   mesh,
   light,
   tiles,
+  relief,
   channel,
 }: TexturePreviewProps): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -301,10 +316,11 @@ export default function TexturePreview({
     const map = load(keys.baseColor, true);
     const normalMap = load(keys.normal, false);
     const roughnessMap = load(keys.roughness, false);
+    const metalnessMap = load(keys.metallic, false);
     const aoMap = load(keys.ao, false);
-    // Height is not wired into the standard material (displacement needs
-    // dense geometry to mean anything) — it exists so flat mode can show it.
     const heightMap = load(keys.height, false);
+    const emissiveMap = load(keys.emissive, true);
+    const opacityMap = load(keys.opacity, false);
 
     if (mesh === "env") {
       // Equirect panorama seen from inside — the view HDRIs and skyboxes want.
@@ -340,8 +356,11 @@ export default function TexturePreview({
         baseColor: map,
         normal: normalMap,
         roughness: roughnessMap,
+        metallic: metalnessMap,
         ao: aoMap,
         height: heightMap,
+        emissive: emissiveMap,
+        opacity: opacityMap,
       };
       const raw =
         (channel !== undefined ? byChannel[channel] : null) ??
@@ -377,20 +396,27 @@ export default function TexturePreview({
       return;
     }
 
+    // Displacement moves VERTICES, so relief is only as good as the tessellation
+    // — the old 96x64 sphere and un-segmented cube could not show a height map
+    // at all, which is why it looked flat. These counts are heavy for a game
+    // mesh and trivial for one preview object.
+    const dense = relief > 0 && heightMap !== null;
     let geo: THREE.BufferGeometry;
     switch (mesh) {
       case "sphere":
-        geo = new THREE.SphereGeometry(1, 96, 64);
+        geo = new THREE.SphereGeometry(1, dense ? 320 : 96, dense ? 200 : 64);
         break;
       case "cube":
-        geo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+        geo = dense
+          ? new THREE.BoxGeometry(1.5, 1.5, 1.5, 120, 120, 120)
+          : new THREE.BoxGeometry(1.5, 1.5, 1.5);
         break;
       default:
-        geo = new THREE.PlaneGeometry(2, 2, 64, 64);
+        geo = new THREE.PlaneGeometry(2, 2, dense ? 320 : 64, dense ? 320 : 64);
     }
     // aoMap samples uv2 in three; without this the AO channel silently does
     // nothing on geometry that only has uv.
-    if (aoMap !== null && geo.attributes.uv !== undefined) {
+    if ((aoMap !== null || opacityMap !== null) && geo.attributes.uv !== undefined) {
       geo.setAttribute("uv1", geo.attributes.uv);
     }
 
@@ -400,14 +426,41 @@ export default function TexturePreview({
     // material is what unlit actually means.
     const mat: THREE.Material =
       light === "unlit"
-        ? new THREE.MeshBasicMaterial({ map, side, toneMapped: false })
+        ? new THREE.MeshBasicMaterial({
+            map,
+            side,
+            toneMapped: false,
+            alphaMap: opacityMap,
+            transparent: opacityMap !== null,
+          })
         : new THREE.MeshStandardMaterial({
             map,
             normalMap,
             roughnessMap,
+            metalnessMap,
             aoMap,
+            emissiveMap,
+            // emissive multiplies emissiveMap and defaults to black, so an
+            // emissive map with the default colour contributes exactly nothing.
+            emissive: new THREE.Color(emissiveMap !== null ? 0xffffff : 0x000000),
+            alphaMap: opacityMap,
+            transparent: opacityMap !== null,
+            // Displacement changes the SILHOUETTE but three does not recompute
+            // normals for it, so relief alone still shades flat. With a normal
+            // map the two compose correctly; without one, drive the shading
+            // from the same height field via bumpMap — otherwise you get a
+            // lumpy outline on a suspiciously smooth surface.
+            displacementMap: relief > 0 ? heightMap : null,
+            displacementScale: relief,
+            // Centre the displacement on the original surface instead of
+            // inflating the whole mesh outward.
+            displacementBias: -relief / 2,
+            bumpMap: normalMap === null ? heightMap : null,
+            bumpScale: normalMap === null && heightMap !== null ? 1 : 0,
+            // A roughnessMap/metalnessMap multiplies these scalars, so they
+            // must be 1 for the map to have full range.
             roughness: roughnessMap !== null ? 1 : 0.75,
-            metalness: 0,
+            metalness: metalnessMap !== null ? 1 : 0,
             side,
           });
     const m = new THREE.Mesh(geo, mat);
@@ -423,7 +476,11 @@ export default function TexturePreview({
     c.panX = 0;
     c.panY = 0;
     dirty.current = true;
-  }, [keys.baseColor, keys.normal, keys.roughness, keys.ao, keys.height, mesh, light, tiles, channel, ready]);
+  }, [
+    keys.baseColor, keys.normal, keys.roughness, keys.metallic,
+    keys.ao, keys.height, keys.emissive, keys.opacity,
+    mesh, light, tiles, relief, channel, ready,
+  ]);
 
   return <div ref={hostRef} className="h-full w-full" />;
 }

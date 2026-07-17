@@ -66,6 +66,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     mesh: "sphere",
     light: "studio",
     tiles: 2,
+    relief: 0.09,
   });
   const patchPreview = useCallback(
     (p: Partial<PreviewState>) => setPreview3d((s) => ({ ...s, ...p })),

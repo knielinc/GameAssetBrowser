@@ -156,6 +156,13 @@ export interface TabSettings {
  * v1 (SoundPreviewer) had single-valued sortField/sortDir/extFilter at the top
  * level; `version` was absent. sanitize() upgrades that shape — see settings.ts.
  */
+/** A manually-chosen atlas for one asset pack. See stores/atlasStore.ts for
+ *  why this cannot be inferred. */
+export interface AtlasChoiceSettings {
+  path: string;
+  flipY: boolean;
+}
+
 export interface Settings {
   version: 2;
   roots: string[];
@@ -164,4 +171,7 @@ export interface Settings {
   autoplay: boolean;
   activeTab: AssetKind;
   tabs: Record<AssetKind, TabSettings>;
+  /** packDir (lowercased) -> chosen atlas. Persisted because re-picking the
+   *  atlas on every launch would be worse than the bug it fixes. */
+  atlases: Record<string, AtlasChoiceSettings>;
 }

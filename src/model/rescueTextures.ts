@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { invoke } from "@tauri-apps/api/core";
+import { atlasFor } from "../stores/atlasStore";
 import { modelUrl } from "./loadModel";
 
 interface TextureHints {
@@ -117,6 +118,8 @@ export interface RescueResult {
   confident: boolean;
   /** Every nearby image, for the manual picker. */
   candidates: string[];
+  /** True when the user picked this, rather than the heuristic. */
+  manual?: boolean;
 }
 
 /**
@@ -139,24 +142,30 @@ export async function rescueTextures(root: THREE.Object3D, path: string): Promis
   if (empty.length === 0) return { applied: null, confident: true, candidates: [] };
 
   const hints = await invoke<TextureHints>("model_texture_hints", { path });
-  const pick = pickAtlas(hints, path);
+
+  // A manual choice always wins. The heuristic below is a convenience for the
+  // first look; the user's pick is ground truth, and re-guessing over it would
+  // be infuriating.
+  const manual = atlasFor(path);
+  const pick: { path: string; confident: boolean } | null =
+    manual !== undefined ? { path: manual.path, confident: true } : pickAtlas(hints, path);
   if (pick === null) return { applied: null, confident: true, candidates: hints.candidates };
 
   const tex = await new THREE.TextureLoader().loadAsync(modelUrl(pick.path));
   tex.colorSpace = THREE.SRGBColorSpace;
-  // flipY = false, established empirically, NOT from first principles.
-  //
-  // Synty atlases are palettes — a grid of flat colour swatches — and each
-  // model's UVs point at one swatch. Flipping Y does not distort anything, it
-  // samples a DIFFERENT SWATCH, so this is a colour bug, not a mirroring bug.
-  //
-  // The textbook rule says FBX/OBJ have a bottom-left UV origin and want
-  // three's default flipY = true. Tried it: the OBJ went from correctly green
-  // to pink. flipY = false is what actually renders these packs right. Do not
-  // "correct" this back without looking at a Synty plant on screen.
-  tex.flipY = false;
+  // flipY defaults false, established empirically and NOT from first
+  // principles — the textbook rule (FBX/OBJ = bottom-left origin = flipY true)
+  // was tried and made the Synty OBJ worse. On a palette/ramp atlas a wrong
+  // flip is not a mirrored image, it is a different COLOUR, which is why it is
+  // so easy to reason your way into backwards. The user can override it.
+  tex.flipY = manual?.flipY ?? false;
   applyTexture(empty, tex);
-  return { applied: pick.path, confident: pick.confident, candidates: hints.candidates };
+  return {
+    applied: pick.path,
+    confident: pick.confident,
+    candidates: hints.candidates,
+    manual: manual !== undefined,
+  };
 }
 
 /** Assign `tex` as base color on `mats`, unlit-safe. Exported so the manual

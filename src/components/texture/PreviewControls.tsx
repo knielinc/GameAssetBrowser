@@ -3,6 +3,8 @@ import clsx from "clsx";
 import {
   LIGHT_MODES,
   MESH_MODES,
+  RELIEF_STEPS,
+  type ChannelKeys,
   type LightMode,
   type MeshMode,
 } from "./TexturePreview";
@@ -11,8 +13,10 @@ export interface PreviewState {
   mesh: MeshMode;
   light: LightMode;
   tiles: number;
+  /** Height displacement in mesh units. 0 = flat. */
+  relief: number;
   /** Flat mode: which map to show raw. Set by clicking a row in the Maps list. */
-  channel?: "baseColor" | "normal" | "roughness" | "ao" | "height";
+  channel?: keyof ChannelKeys;
 }
 
 export interface PreviewControlsProps {
@@ -20,6 +24,9 @@ export interface PreviewControlsProps {
   onChange: (patch: Partial<PreviewState>) => void;
   /** Horizontal row (fullscreen) vs stacked (drawer). */
   inline?: boolean;
+  /** Whether this material actually has a height map — the Relief control is
+   *  hidden without one, since it would do nothing. */
+  hasHeight?: boolean;
 }
 
 function Row({ children }: { children: ReactElement[] }): ReactElement {
@@ -62,7 +69,12 @@ const Label = ({ children }: { children: string }): ReactElement => (
 
 /** Mesh / lighting / tiling selectors. Shared by the drawer and the
  *  fullscreen overlay so the two never drift apart. */
-export default function PreviewControls({ value, onChange, inline }: PreviewControlsProps): ReactElement {
+export default function PreviewControls({
+  value,
+  onChange,
+  inline,
+  hasHeight,
+}: PreviewControlsProps): ReactElement {
   const groups = (
     <>
       <div className="flex min-w-[190px] flex-1 flex-col gap-1">
@@ -84,6 +96,25 @@ export default function PreviewControls({ value, onChange, inline }: PreviewCont
             {LIGHT_MODES.map((l) => (
               <Seg key={l.id} on={value.light === l.id} onClick={() => onChange({ light: l.id })}>
                 {l.label}
+              </Seg>
+            ))}
+          </Row>
+        </div>
+      )}
+      {/* Height only means something on a lit 3D surface: it displaces
+          geometry. Hidden without a height map, and on flat/env. */}
+      {hasHeight === true && value.mesh !== "env" && value.mesh !== "flat" && (
+        <div className="flex w-[160px] flex-col gap-1">
+          <Label>Relief</Label>
+          <Row>
+            {RELIEF_STEPS.map((r) => (
+              <Seg
+                key={r.id}
+                on={value.relief === r.value}
+                onClick={() => onChange({ relief: r.value })}
+                title="Displaces the mesh by the height map — the silhouette changes, not just the shading"
+              >
+                {r.label}
               </Seg>
             ))}
           </Row>
