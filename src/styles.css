@@ -1,0 +1,323 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0a0f;
+  --color-panel: #111118;
+  --color-raised: #181822;
+  --color-border: #23232e;
+  --color-text: #e6e6ef;
+  --color-dim: #8a8a9a;
+  --color-accent: #7c5cff;
+  --color-accent-hover: #8f73ff;
+  --color-danger: #ff5c7a;
+
+  --font-sans:
+    "Inter", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* ---------------------------------------------------------------- base --- */
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+/* WebView2 is Chromium — style the scrollbars to match the chrome. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-raised);
+  border-radius: 5px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a38;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ---------------------------------------------------------- components --- */
+
+/* Virtualized list rows: subtle raise on hover, accent tint + left bar when
+   selected. 120 ms everywhere for that tight, deliberate feel. */
+.file-row {
+  height: 28px;
+  cursor: default;
+  transition: background-color 120ms ease;
+}
+.file-row:hover {
+  background: var(--color-raised);
+}
+.file-row.row-selected {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+.file-row.row-selected:hover {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+/* Sidebar resize handle: an invisible 6px hit strip straddling the
+   sidebar/main boundary (negative margins keep it out of the flex flow).
+   Hover or an active drag fades in a 1px accent line over the panel border —
+   the same 120 ms cadence as everything else. */
+.sidebar-resizer {
+  position: relative;
+  z-index: 10;
+  flex: 0 0 6px;
+  width: 6px;
+  margin-left: -3px;
+  margin-right: -3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--color-accent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer.sidebar-resizer-active::after {
+  opacity: 1;
+}
+
+/* While a sidebar drag is live (class set by useSidebarWidth): keep the
+   col-resize cursor everywhere and make sure nothing becomes selectable. */
+html.sidebar-resizing,
+html.sidebar-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* Sidebar folder-tree rows: same hover/selected language as the file rows. */
+.tree-row {
+  cursor: default;
+  transition: background-color 120ms ease;
+}
+.tree-row:hover {
+  background: var(--color-raised);
+}
+.tree-row.tree-row-selected {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+.tree-row.tree-row-selected:hover {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+/* Extension filter chips. */
+.chip {
+  padding: 2px 9px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-dim);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.chip:hover {
+  color: var(--color-text);
+  background: var(--color-raised);
+}
+.chip-active {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.chip-active:hover {
+  color: var(--color-accent-hover);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+/* Ghost icon buttons (sidebar remove, rescan, transport toggles). */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--color-dim);
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.icon-btn:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-raised);
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+}
+.icon-btn-active {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.icon-btn-active:hover:not(:disabled) {
+  color: var(--color-accent-hover);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+/* Primary action (Add Folder / empty-state CTA). */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 7px;
+  background: var(--color-accent);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    background-color 120ms ease,
+    transform 120ms ease;
+}
+.btn-primary:hover {
+  background: var(--color-accent-hover);
+}
+.btn-primary:active {
+  transform: translateY(1px);
+}
+
+/* Round play/pause button in the player bar. */
+.play-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  background: var(--color-accent);
+  color: #ffffff;
+  transition:
+    background-color 120ms ease,
+    transform 120ms ease;
+}
+.play-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+.play-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.play-btn:disabled {
+  background: var(--color-raised);
+  color: var(--color-dim);
+}
+
+/* Sort dropdown in the toolbar. */
+.sort-select {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-text);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+.sort-select:focus {
+  border-color: var(--color-accent);
+}
+
+/* Volume slider: accent fill driven by the --fill custom property. */
+input[type="range"].volume {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--fill, 50%),
+    var(--color-raised) var(--fill, 50%)
+  );
+  outline: none;
+}
+input[type="range"].volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--color-text);
+  border: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.45);
+  transition: transform 120ms ease;
+}
+input[type="range"].volume:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+/* Tiny animated equalizer shown on the row that's currently playing. */
+.eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 10px;
+}
+.eq span {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  animation: eq-bar 0.9s ease-in-out infinite;
+}
+.eq span:nth-child(2) {
+  animation-delay: 0.25s;
+}
+.eq span:nth-child(3) {
+  animation-delay: 0.5s;
+}
+@keyframes eq-bar {
+  0%,
+  100% {
+    height: 3px;
+  }
+  50% {
+    height: 10px;
+  }
+}
