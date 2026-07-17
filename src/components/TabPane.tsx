@@ -66,7 +66,12 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     mesh: "sphere",
     light: "studio",
     tiles: 2,
-    relief: 0.09,
+    relief: 0.05,
+    spriteOn: false,
+    spriteCols: 4,
+    spriteRows: 4,
+    spriteFps: 12,
+    spritePlaying: true,
   });
   const patchPreview = useCallback(
     (p: Partial<PreviewState>) => setPreview3d((s) => ({ ...s, ...p })),

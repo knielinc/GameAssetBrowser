@@ -7,8 +7,9 @@ pub const AUDIO_EXTENSIONS: [&str; 7] = ["wav", "mp3", "flac", "ogg", "aiff", "a
 
 /// `psd` is deliberately absent: Synty and freestylized ship PSD *sources*,
 /// which would roughly double the texture grid with files that aren't assets.
-pub const TEXTURE_EXTENSIONS: [&str; 10] = [
-    "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr",
+/// `gif` and `webp` are here for 2D artists — animated GIFs preview and play.
+pub const TEXTURE_EXTENSIONS: [&str; 12] = [
+    "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp",
 ];
 
 /// `blend` is scanned but not previewable — listing it beats it silently

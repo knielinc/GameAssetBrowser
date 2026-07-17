@@ -8,6 +8,7 @@ import { CHANNEL_LABEL, type Channel } from "../../material/table";
 import type { Material, TextureItem } from "../../material/classify";
 import TexturePreview, { type ChannelKeys } from "./TexturePreview";
 import PreviewControls, { type PreviewState } from "./PreviewControls";
+import Sprite2DView from "./Sprite2DView";
 
 /**
  * Map a material's resolved channels onto the preview's texture slots.
@@ -130,6 +131,11 @@ export default function TextureInspector({
     item === null ? "" : item.kind === "material" ? item.material.display : item.file.name;
   const path = item === null ? "" : item.kind === "material" ? item.material.dir : item.file.path;
 
+  // The 2D lens (Flat mode) previews the actual file — a lone texture or a
+  // material's base color — as a DOM image/gif/sprite sheet, not a 3D surface.
+  const file2d = item === null ? null : item.kind === "file" ? item.file : item.material.channels.get("baseColor")?.file ?? null;
+  const use2D = preview.mesh === "flat" && file2d !== null;
+
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-border bg-panel">
       <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-border px-2.5">
@@ -145,6 +151,19 @@ export default function TextureInspector({
             <div className="flex h-full items-center justify-center text-[11px] text-dim">
               Select a texture
             </div>
+          ) : use2D && file2d !== null ? (
+            <Sprite2DView
+              path={file2d.path}
+              ext={file2d.ext}
+              thumbKey={thumbs.get(file2d.id)?.key}
+              sprite={{
+                enabled: preview.spriteOn,
+                cols: preview.spriteCols,
+                rows: preview.spriteRows,
+                fps: preview.spriteFps,
+                playing: preview.spritePlaying,
+              }}
+            />
           ) : (
             <TexturePreview
               keys={keys}
@@ -163,6 +182,7 @@ export default function TextureInspector({
               value={preview}
               onChange={onPreviewChange}
               hasHeight={keys.height !== undefined}
+              is2D={use2D}
             />
 
             <div>

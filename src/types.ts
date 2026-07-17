@@ -112,7 +112,7 @@ export const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4
 export type AudioExt = (typeof AUDIO_EXTENSIONS)[number];
 
 export const TEXTURE_EXTENSIONS = [
-  "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr",
+  "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp",
 ] as const;
 export const MODEL_EXTENSIONS = [
   "fbx", "obj", "gltf", "glb", "dae", "3ds", "ply", "stl", "blend",

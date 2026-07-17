@@ -100,4 +100,6 @@ image = { version = "0.25", default-features = false, features = [
     "tiff",
     "hdr",
     "exr",
+    "gif",
+    "webp",
 ] }

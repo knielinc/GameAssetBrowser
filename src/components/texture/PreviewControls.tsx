@@ -17,6 +17,12 @@ export interface PreviewState {
   relief: number;
   /** Flat mode: which map to show raw. Set by clicking a row in the Maps list. */
   channel?: keyof ChannelKeys;
+  /** Flat (2D) mode: sprite-sheet playback. */
+  spriteOn: boolean;
+  spriteCols: number;
+  spriteRows: number;
+  spriteFps: number;
+  spritePlaying: boolean;
 }
 
 export interface PreviewControlsProps {
@@ -27,6 +33,44 @@ export interface PreviewControlsProps {
   /** Whether this material actually has a height map — the Relief control is
    *  hidden without one, since it would do nothing. */
   hasHeight?: boolean;
+  /** Flat (2D) mode is active — show the sprite-sheet / animation controls
+   *  instead of the 3D mesh/lighting/relief ones. */
+  is2D?: boolean;
+}
+
+function Stepper({
+  label,
+  value,
+  min,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  onChange: (v: number) => void;
+}): ReactElement {
+  return (
+    <div className="flex items-center justify-between rounded-md border border-border px-2 py-1">
+      <span className="text-[10px] text-dim">{label}</span>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className="text-dim transition-colors duration-[120ms] hover:text-text"
+          onClick={() => onChange(Math.max(min, value - 1))}
+        >
+          −
+        </button>
+        <span className="w-5 text-center text-[11px] tabular-nums">{value}</span>
+        <button
+          type="button"
+          className="text-dim transition-colors duration-[120ms] hover:text-text"
+          onClick={() => onChange(value + 1)}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function Row({ children }: { children: ReactElement[] }): ReactElement {
@@ -74,19 +118,68 @@ export default function PreviewControls({
   onChange,
   inline,
   hasHeight,
+  is2D,
 }: PreviewControlsProps): ReactElement {
+  const meshRow = (
+    <div className="flex min-w-[190px] flex-1 flex-col gap-1">
+      <Label>Preview mesh</Label>
+      <Row>
+        {MESH_MODES.map((m) => (
+          <Seg key={m.id} on={value.mesh === m.id} onClick={() => onChange({ mesh: m.id })}>
+            {m.label}
+          </Seg>
+        ))}
+      </Row>
+    </div>
+  );
+
+  // Flat mode is the 2D lens: its sub-settings are animation, not lighting.
+  if (is2D === true) {
+    return (
+      <div className={clsx("flex gap-3", inline ? "flex-row items-end" : "flex-col")}>
+        {meshRow}
+        <div className="flex flex-col gap-1.5">
+          <Label>Sprite sheet</Label>
+          <button
+            type="button"
+            className={clsx(
+              "h-[23px] rounded-md border text-[10px] transition-colors duration-[120ms]",
+              value.spriteOn
+                ? "border-accent/45 bg-accent/12 text-accent"
+                : "border-border text-dim hover:bg-raised hover:text-text",
+            )}
+            onClick={() => onChange({ spriteOn: !value.spriteOn })}
+            title="Slice the image into a grid and play it as an animation"
+          >
+            {value.spriteOn ? "On" : "Off"}
+          </button>
+          {value.spriteOn && (
+            <div className="flex flex-col gap-1.5">
+              <Stepper label="Cols" value={value.spriteCols} min={1} onChange={(v) => onChange({ spriteCols: v })} />
+              <Stepper label="Rows" value={value.spriteRows} min={1} onChange={(v) => onChange({ spriteRows: v })} />
+              <Stepper label="FPS" value={value.spriteFps} min={1} onChange={(v) => onChange({ spriteFps: v })} />
+              <button
+                type="button"
+                className={clsx(
+                  "h-[23px] rounded-md border text-[10px] transition-colors duration-[120ms]",
+                  value.spritePlaying
+                    ? "border-accent/45 bg-accent/12 text-accent"
+                    : "border-border text-dim hover:bg-raised hover:text-text",
+                )}
+                onClick={() => onChange({ spritePlaying: !value.spritePlaying })}
+              >
+                {value.spritePlaying ? "⏸ Pause" : "▶ Play"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const groups = (
     <>
-      <div className="flex min-w-[190px] flex-1 flex-col gap-1">
-        <Label>Preview mesh</Label>
-        <Row>
-          {MESH_MODES.map((m) => (
-            <Seg key={m.id} on={value.mesh === m.id} onClick={() => onChange({ mesh: m.id })}>
-              {m.label}
-            </Seg>
-          ))}
-        </Row>
-      </div>
+      {meshRow}
       {/* Flat is an unlit 2D image view — a lighting control there would do
           nothing, and a control that does nothing is worse than no control. */}
       {value.mesh !== "flat" && (
@@ -101,9 +194,10 @@ export default function PreviewControls({
           </Row>
         </div>
       )}
-      {/* Height only means something on a lit 3D surface: it displaces
-          geometry. Hidden without a height map, and on flat/env. */}
-      {hasHeight === true && value.mesh !== "env" && value.mesh !== "flat" && (
+      {/* Parallax depth from the height map — a fragment-shader effect, so it
+          adds surface relief on any mesh without moving geometry or seaming
+          edges. Hidden without a height map, and on flat/env/unlit. */}
+      {hasHeight === true && value.mesh !== "env" && value.mesh !== "flat" && value.light !== "unlit" && (
         <div className="flex w-[160px] flex-col gap-1">
           <Label>Relief</Label>
           <Row>
@@ -112,7 +206,7 @@ export default function PreviewControls({
                 key={r.id}
                 on={value.relief === r.value}
                 onClick={() => onChange({ relief: r.value })}
-                title="Displaces the mesh by the height map — the silhouette changes, not just the shading"
+                title="Parallax depth from the height map — surface relief without changing the silhouette or seaming edges"
               >
                 {r.label}
               </Seg>

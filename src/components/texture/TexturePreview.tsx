@@ -2,6 +2,19 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { thumbUrl } from "../../types";
+import { applyParallax } from "./parallax";
+
+/** Shared 1×1 white — the parallax shader keys off a base-color map, so a
+ *  material with no albedo needs one to exist. */
+let _white: THREE.DataTexture | null = null;
+function whiteTex(): THREE.DataTexture {
+  if (_white === null) {
+    _white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    _white.colorSpace = THREE.SRGBColorSpace;
+    _white.needsUpdate = true;
+  }
+  return _white;
+}
 
 export type MeshMode = "flat" | "plane" | "sphere" | "cube" | "env";
 export type LightMode = "studio" | "sun" | "rim" | "soft" | "unlit";
@@ -33,13 +46,13 @@ export interface ChannelKeys {
   opacity?: string;
 }
 
-/** Height relief presets. Values are in mesh units — the preview meshes are
- *  ~1–2 units across, so 0.12 is already a dramatic silhouette. */
+/** Parallax depth presets, in UV units (the shader marches the height field in
+ *  texture space, so these are fractions of a tile, not mesh units). */
 export const RELIEF_STEPS: { id: string; label: string; value: number }[] = [
   { id: "off", label: "Off", value: 0 },
-  { id: "low", label: "Low", value: 0.04 },
-  { id: "med", label: "Med", value: 0.09 },
-  { id: "high", label: "High", value: 0.18 },
+  { id: "low", label: "Low", value: 0.02 },
+  { id: "med", label: "Med", value: 0.05 },
+  { id: "high", label: "High", value: 0.1 },
 ];
 
 export interface TexturePreviewProps {
@@ -396,23 +409,21 @@ export default function TexturePreview({
       return;
     }
 
-    // Displacement moves VERTICES, so relief is only as good as the tessellation
-    // — the old 96x64 sphere and un-segmented cube could not show a height map
-    // at all, which is why it looked flat. These counts are heavy for a game
-    // mesh and trivial for one preview object.
-    const dense = relief > 0 && heightMap !== null;
+    // Height is applied as PARALLAX, not displacement — see parallax.ts. So the
+    // geometry never moves and needs no special tessellation: a 1-segment cube
+    // keeps clean edges (displacement seamed them), and parallax gives the
+    // depth. Moderate density only for smooth base shading.
+    const useParallax = relief > 0 && heightMap !== null && light !== "unlit";
     let geo: THREE.BufferGeometry;
     switch (mesh) {
       case "sphere":
-        geo = new THREE.SphereGeometry(1, dense ? 320 : 96, dense ? 200 : 64);
+        geo = new THREE.SphereGeometry(1, 128, 96);
         break;
       case "cube":
-        geo = dense
-          ? new THREE.BoxGeometry(1.5, 1.5, 1.5, 120, 120, 120)
-          : new THREE.BoxGeometry(1.5, 1.5, 1.5);
+        geo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
         break;
       default:
-        geo = new THREE.PlaneGeometry(2, 2, dense ? 320 : 64, dense ? 320 : 64);
+        geo = new THREE.PlaneGeometry(2, 2, 1, 1);
     }
     // aoMap samples uv2 in three; without this the AO channel silently does
     // nothing on geometry that only has uv.
@@ -424,6 +435,9 @@ export default function TexturePreview({
     // "Unlit" means SHOW THE ALBEDO, not "a PBR material with the lights off"
     // — that is just black, which is what this used to render. A basic
     // material is what unlit actually means.
+    // Parallax needs a base-color map to exist (its shader keys off vMapUv),
+    // so fall back to solid white when the asset has none.
+    const baseMap = useParallax && map === null ? whiteTex() : map;
     const mat: THREE.Material =
       light === "unlit"
         ? new THREE.MeshBasicMaterial({
@@ -434,7 +448,7 @@ export default function TexturePreview({
             transparent: opacityMap !== null,
           })
         : new THREE.MeshStandardMaterial({
-            map,
+            map: baseMap,
             normalMap,
             roughnessMap,
             metalnessMap,
@@ -445,16 +459,8 @@ export default function TexturePreview({
             emissive: new THREE.Color(emissiveMap !== null ? 0xffffff : 0x000000),
             alphaMap: opacityMap,
             transparent: opacityMap !== null,
-            // Displacement changes the SILHOUETTE but three does not recompute
-            // normals for it, so relief alone still shades flat. With a normal
-            // map the two compose correctly; without one, drive the shading
-            // from the same height field via bumpMap — otherwise you get a
-            // lumpy outline on a suspiciously smooth surface.
-            displacementMap: relief > 0 ? heightMap : null,
-            displacementScale: relief,
-            // Centre the displacement on the original surface instead of
-            // inflating the whole mesh outward.
-            displacementBias: -relief / 2,
+            // With no normal map, still drive shading from the height field so
+            // the surface isn't suspiciously smooth under the parallax.
             bumpMap: normalMap === null ? heightMap : null,
             bumpScale: normalMap === null && heightMap !== null ? 1 : 0,
             // A roughnessMap/metalnessMap multiplies these scalars, so they
@@ -463,6 +469,9 @@ export default function TexturePreview({
             metalness: metalnessMap !== null ? 1 : 0,
             side,
           });
+    if (useParallax && heightMap !== null && mat instanceof THREE.MeshStandardMaterial) {
+      applyParallax(mat, heightMap, relief);
+    }
     const m = new THREE.Mesh(geo, mat);
     scene.add(m);
     refs.current.obj = m;

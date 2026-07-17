@@ -4,6 +4,7 @@ import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import type { TextureItem } from "../material/classify";
 import ModelViewport from "./model/ModelViewport";
 import TexturePreview from "./texture/TexturePreview";
+import Sprite2DView from "./texture/Sprite2DView";
 import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
 import { keysForFile, keysForMaterial } from "./texture/TextureInspector";
 
@@ -46,6 +47,9 @@ export default function FullscreenPreview({
         ? keysForMaterial(item.material, thumbs)
         : keysForFile(item.file, item.channel, thumbs);
 
+  // Flat mode on a texture is the 2D lens — image / GIF / sprite sheet.
+  const use2D = file.kind === "texture" && preview3d.mesh === "flat";
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.code === "Escape" || e.code === "Space") {
@@ -77,6 +81,21 @@ export default function FullscreenPreview({
         <div className="min-h-0 flex-1">
           {file.kind === "model" ? (
             <ModelViewport path={file.path} />
+          ) : use2D ? (
+            <div className="relative h-full w-full overflow-hidden rounded-lg border border-border bg-[#07070b]">
+              <Sprite2DView
+                path={file.path}
+                ext={file.ext}
+                thumbKey={thumb?.key}
+                sprite={{
+                  enabled: preview3d.spriteOn,
+                  cols: preview3d.spriteCols,
+                  rows: preview3d.spriteRows,
+                  fps: preview3d.spriteFps,
+                  playing: preview3d.spritePlaying,
+                }}
+              />
+            </div>
           ) : Object.keys(keys).length > 0 ? (
             // Wrapped on a real mesh, same renderer as the drawer — a flat
             // <img> here was the gap: you could not see the material, only
@@ -97,13 +116,14 @@ export default function FullscreenPreview({
             </div>
           )}
         </div>
-        {file.kind === "texture" && Object.keys(keys).length > 0 && (
+        {file.kind === "texture" && (Object.keys(keys).length > 0 || use2D) && (
           <div className="shrink-0">
             <PreviewControls
               value={preview3d}
               onChange={onPreviewChange}
               inline
               hasHeight={keys.height !== undefined}
+              is2D={use2D}
             />
           </div>
         )}

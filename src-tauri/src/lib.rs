@@ -19,7 +19,7 @@ use tauri::Manager;
 /// matters: without it a crafted glTF could reference
 /// `../../../../Windows/System32/config/SAM` and exfiltrate it. Only paths
 /// inside a root the user explicitly picked are served.
-fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<Vec<u8>> {
+fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<(Vec<u8>, &'static str)> {
     let decoded = percent_decode(uri_path.trim_start_matches('/'));
     if decoded.is_empty() {
         return None;
@@ -29,7 +29,29 @@ fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<Vec<u8>> {
         eprintln!("[model] refused out-of-scope read: {}", path.display());
         return None;
     }
-    std::fs::read(&path).ok()
+    let bytes = std::fs::read(&path).ok()?;
+    Some((bytes, mime_for(&path)))
+}
+
+/// Content-Type by extension. Correct image MIMEs matter for the 2D preview:
+/// with `image/gif` the browser ANIMATES the gif in an `<img>`, and a
+/// browser-decodable original (png/webp) can be shown at full resolution
+/// rather than through the 256px thumbnail. Everything else is served as
+/// octet-stream — three.js loaders sniff their own formats.
+fn mime_for(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("gif") => "image/gif",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("bmp") => "image/bmp",
+        _ => "application/octet-stream",
+    }
 }
 
 /// Minimal percent-decoder. glTF spec-compliant exporters encode URIs
@@ -122,8 +144,8 @@ pub fn run() {
             let uri = req.uri().clone();
             std::thread::spawn(move || {
                 let resp = match model_bytes(&app, uri.path()) {
-                    Some(bytes) => tauri::http::Response::builder()
-                        .header("Content-Type", "application/octet-stream")
+                    Some((bytes, mime)) => tauri::http::Response::builder()
+                        .header("Content-Type", mime)
                         .header("Access-Control-Allow-Origin", "*")
                         .body(bytes),
                     None => tauri::http::Response::builder()
