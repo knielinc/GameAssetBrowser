@@ -4,6 +4,7 @@ mod metadata;
 mod modeltex;
 mod portable;
 mod scanner;
+mod thumbcache;
 mod thumbs;
 mod types;
 mod waveform;
@@ -104,7 +105,7 @@ pub fn run() {
             // Never decode here: no cancellation, no batching, and a 4K PNG
             // would block the handler. Memory/disk lookup only.
             std::thread::spawn(move || {
-                let resp = match thumbs::thumb_file(&app, &key).and_then(|p| std::fs::read(p).ok()) {
+                let resp = match thumbs::thumb_bytes(&app, &key) {
                     Some(bytes) => tauri::http::Response::builder()
                         .header("Content-Type", "image/png")
                         // The key already encodes size+mtime, so a given URL's
@@ -169,14 +170,26 @@ pub fn run() {
             // Redirecting the WebView2 profile only applies to portable
             // copies; installed copies keep tauri's %LOCALAPPDATA% default.
             let webview_dir = data_home.is_portable().then(|| data_home.webview_dir());
-            // Managed before the window exists so `settings_store_path` can
-            // never race the state registration.
-            let thumbs_dir = data_home.thumbs_dir();
+            // Open the single-file thumbnail cache (rebuilds its index and
+            // compacts if bloated), and clean up any legacy loose-PNG dir from
+            // an older build. Managed before the window exists so the thumb://
+            // handler can never race the state registration.
+            let cache_path = data_home.thumbs_cache_path();
+            thumbcache::remove_legacy_dir(data_home.dir());
+            // Fall back to a temp-dir cache if the data home is unwritable, so
+            // the cache is ALWAYS managed and the thumb:// handler can never
+            // panic on an unmanaged-state access.
+            let cache = thumbcache::ThumbCache::open(cache_path).or_else(|e| {
+                eprintln!("[thumbs] cache open failed ({e}); using a temp cache");
+                thumbcache::ThumbCache::open(std::env::temp_dir().join("assetpreviewer-thumbs.cache"))
+            });
+            match cache {
+                Ok(c) => {
+                    app.manage(c);
+                }
+                Err(e) => eprintln!("[thumbs] no thumbnail cache available: {e}"),
+            }
             app.manage(data_home);
-
-            // Trim the thumbnail cache in the background — never block startup
-            // on a directory walk that may hold thousands of entries.
-            std::thread::spawn(move || thumbs::gc(thumbs_dir, 512 * 1024 * 1024));
 
             // The main window is built here instead of being declared in
             // tauri.conf.json because config windows are created before

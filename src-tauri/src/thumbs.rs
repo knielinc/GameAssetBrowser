@@ -1,28 +1,31 @@
-//! Texture thumbnails: decode in Rust, cache on disk, serve over a custom URI
-//! scheme.
+//! Texture thumbnails: decode in Rust, cache in ONE file, serve over a custom
+//! URI scheme.
 //!
 //! Rust decodes because Chromium cannot read DDS/TGA/EXR/HDR at all, and even
 //! for PNG a 4K image in a 128px cell would decode at full resolution — 200
 //! visible cells of that is an OOM, not a slow frame.
+//!
+//! Storage is a single append-only blob (see `thumbcache.rs`), not thousands
+//! of loose PNGs — one tidy file in the data folder instead of clutter.
 //!
 //! Two channels, mirroring `waveform.rs`'s split of "cheap request, fat
 //! result":
 //!
 //! ```text
 //! invoke request_thumbs(ids, gen)   <- cheap, cancellable, batched
-//!   -> worker pool decodes + writes <hash>.png
+//!   -> worker pool decodes + writes the PNG into thumbs.cache
 //!   -> event thumb:ready            <- cheap notification: "key K exists"
 //!   -> frontend sets <img src="http://thumb.localhost/K">
 //!   -> WebView2 GETs it             <- the fat payload, off the JS main thread
 //! ```
 //!
-//! The protocol handler NEVER decodes. Memory LRU -> disk -> 404. Decoding
+//! The protocol handler NEVER decodes. Memory LRU -> blob -> 404. Decoding
 //! inside it would block on a 4K PNG with no cancellation and no batching —
 //! exactly what this design exists to avoid.
 
 use std::fs;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
@@ -32,7 +35,7 @@ use lru::LruCache;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::portable::DataHome;
+use crate::thumbcache::ThumbCache;
 use crate::types::{events, ThumbBatch, ThumbInfo};
 
 /// Thumbnail edge in px. 256 covers the largest grid cell (220) plus a little
@@ -74,29 +77,32 @@ impl Default for ThumbState {
     }
 }
 
-/// FNV-1a over `version:edge:size:mtime:path`.
+/// FNV-1a over `version:edge:size:mtime:path`, as a u64.
 ///
 /// size+mtime means a texture overwritten by a DCC re-decodes, same reasoning
 /// as waveform.rs's key. FNV inline rather than a hashing crate: collisions
 /// across 100k thumbs are ~1e-10 and self-heal on the next mtime change.
-fn cache_key(path: &str, size: u64, mtime: i64) -> String {
-    keyed("t", path, size, mtime)
-}
-
+///
 /// `kind` namespaces the key so a model and a texture at the same path can
 /// never collide, and so bumping one pipeline's version cannot invalidate the
-/// other's cache.
+/// other's cache. The u64 is the store's key; `hex_key` formats it for the
+/// `thumb://<key>` URL.
 ///
 /// MIRRORED in `src/thumbKey.ts` (the "t" case) so the frontend can compute a
 /// warm-cache thumb URL with no IPC. If CACHE_VERSION, THUMB_EDGE, the format
 /// string, or the hash changes here, change it there too.
-fn keyed(kind: &str, path: &str, size: u64, mtime: i64) -> String {
+fn hash_key(kind: &str, path: &str, size: u64, mtime: i64) -> u64 {
     let raw = format!("{kind}:{CACHE_VERSION}:{THUMB_EDGE}:{size}:{mtime}:{path}");
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in raw.as_bytes() {
         h ^= *b as u64;
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
+    h
+}
+
+/// The 16-hex-char form used in `thumb://<key>` URLs and by thumbKey.ts.
+fn hex_key(h: u64) -> String {
     format!("{h:016x}")
 }
 
@@ -214,30 +220,31 @@ fn to_ldr(img: DynamicImage) -> DynamicImage {
     }
 }
 
-/// Decode -> downscale -> PNG -> disk. Returns the cache key and stats.
-fn build(path: &str, dir: &Path) -> Result<(String, ThumbInfo), String> {
+/// Decode -> downscale -> PNG bytes -> the one-file cache. Returns the hex key
+/// and stats. The PNG never becomes a loose file; it lives in `thumbs.cache`.
+fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> {
     let p = Path::new(path);
     let (size, mtime) = file_stamp(p);
-    let key = cache_key(path, size, mtime);
-    let out = dir.join(format!("{key}.png"));
+    let h = hash_key("t", path, size, mtime);
+    let key = hex_key(h);
 
-    // Cache hit: still need the dims/stats, so read back the thumb (small and
-    // already decoded once) rather than touching the 4K original again.
-    if out.exists() {
-        if let Ok(img) = image::open(&out) {
+    // Cache hit: still need the dims/stats, so decode the stored 256px PNG
+    // (small, already downscaled) rather than touching the 4K original again.
+    if let Some(bytes) = cache.get(h) {
+        if let Ok(img) = image::load_from_memory(&bytes) {
             return Ok((key, analyze(&img)));
         }
-        let _ = fs::remove_file(&out); // corrupt entry — rebuild it
+        // corrupt entry — fall through and rebuild it (put overwrites the key)
     }
 
     let img = image::open(p).map_err(|e| format!("decode {path}: {e}"))?;
-    let (w, h) = img.dimensions();
-    if w == 0 || h == 0 {
+    let (w, ih) = img.dimensions();
+    if w == 0 || ih == 0 {
         return Err(format!("{path}: zero-sized image"));
     }
     // Triangle over Lanczos: at a 16:1 downscale the ringing Lanczos adds is
     // visible on the hard-edged art these packs ship, and it is ~3x slower.
-    let thumb = if w.max(h) > THUMB_EDGE {
+    let thumb = if w.max(ih) > THUMB_EDGE {
         img.resize(THUMB_EDGE, THUMB_EDGE, FilterType::Triangle)
     } else {
         img
@@ -251,7 +258,9 @@ fn build(path: &str, dir: &Path) -> Result<(String, ThumbInfo), String> {
     thumb
         .write_to(&mut buf, image::ImageFormat::Png)
         .map_err(|e| format!("encode {path}: {e}"))?;
-    fs::write(&out, buf.into_inner()).map_err(|e| format!("write {}: {e}", out.display()))?;
+    cache
+        .put(h, &buf.into_inner())
+        .map_err(|e| format!("cache write {path}: {e}"))?;
     Ok((key, info))
 }
 
@@ -310,13 +319,6 @@ pub async fn request_thumbs(
 }
 
 fn drain(app: AppHandle) {
-    let dir = app.state::<DataHome>().thumbs_dir();
-    if let Err(e) = fs::create_dir_all(&dir) {
-        eprintln!("[thumbs] cannot create {}: {e}", dir.display());
-        *app.state::<ThumbState>().running.lock() = false;
-        return;
-    }
-
     let pool = match rayon::ThreadPoolBuilder::new()
         .num_threads(DECODE_THREADS)
         .thread_name(|i| format!("thumb-{i}"))
@@ -356,7 +358,8 @@ fn drain(app: AppHandle) {
             continue;
         }
 
-        let dir_ref = &dir;
+        let blob = app.state::<ThumbCache>();
+        let blob_ref: &ThumbCache = &blob;
         let pending_ref = &pending;
         pool.install(|| {
             use rayon::prelude::*;
@@ -367,17 +370,16 @@ fn drain(app: AppHandle) {
                 // by file id, so a late result is simply a correct result that
                 // arrived late. Dropping it would strand the cell forever —
                 // the frontend never re-asks for an id it already asked for.
-                // The generation still governs what gets QUEUED (clear + LIFO),
-                // which is where cancellation actually pays.
-                // Memory hit: no disk probe, no decode. build() re-opens the
-                // cached PNG purely to recompute stats that cannot have
-                // changed — cheap per cell, but it recurs for every cell on
-                // every warm-cache launch, and this LRU exists to skip it.
+                //
+                // Memory hit: skip the blob decode entirely. build() decodes
+                // the stored 256px PNG purely to recompute stats that cannot
+                // have changed — cheap per cell, but it recurs for every cell
+                // on every warm launch, and this in-RAM LRU exists to skip it.
                 if let Some(hit) = app.state::<ThumbState>().cache.lock().get(&job.path) {
                     pending_ref.lock().push((job.id, hit.1, hit.0.clone()));
                     return;
                 }
-                match build(&job.path, dir_ref) {
+                match build(&job.path, blob_ref) {
                     Ok((key, info)) => {
                         app.state::<ThumbState>()
                             .cache
@@ -421,13 +423,13 @@ fn flush(app: &AppHandle, pending: &Arc<Mutex<Vec<(u32, ThumbInfo, String)>>>) {
 /// framing, and rasterization all happen in three.js.
 #[tauri::command]
 pub fn model_thumb_lookup(app: AppHandle, items: Vec<(u32, String)>) -> Vec<(u32, String)> {
-    let dir = app.state::<DataHome>().thumbs_dir();
+    let cache = app.state::<ThumbCache>();
     items
         .into_iter()
         .filter_map(|(id, path)| {
             let (size, mtime) = file_stamp(Path::new(&path));
-            let key = keyed("m", &path, size, mtime);
-            dir.join(format!("{key}.png")).exists().then_some((id, key))
+            let h = hash_key("m", &path, size, mtime);
+            cache.contains(h).then(|| (id, hex_key(h)))
         })
         .collect()
 }
@@ -440,47 +442,17 @@ pub fn model_thumb_lookup(app: AppHandle, items: Vec<(u32, String)>) -> Vec<(u32
 /// file dance) buys nothing at that volume.
 #[tauri::command]
 pub fn model_thumb_store(app: AppHandle, path: String, bytes: Vec<u8>) -> Result<String, String> {
-    let dir = app.state::<DataHome>().thumbs_dir();
-    fs::create_dir_all(&dir).map_err(|e| format!("thumbs dir: {e}"))?;
     let (size, mtime) = file_stamp(Path::new(&path));
-    let key = keyed("m", &path, size, mtime);
-    fs::write(dir.join(format!("{key}.png")), bytes).map_err(|e| format!("write thumb: {e}"))?;
-    Ok(key)
+    let h = hash_key("m", &path, size, mtime);
+    app.state::<ThumbCache>()
+        .put(h, &bytes)
+        .map_err(|e| format!("cache write thumb: {e}"))?;
+    Ok(hex_key(h))
 }
 
-/// Resolve a cache key to its file, for the URI-scheme handler.
-pub fn thumb_file(app: &AppHandle, key: &str) -> Option<PathBuf> {
-    // Keys are our own 16 hex chars; refuse anything else rather than letting
-    // a crafted URL walk out of the cache dir.
-    if key.len() != 16 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let p = app.state::<DataHome>().thumbs_dir().join(format!("{key}.png"));
-    p.exists().then_some(p)
-}
-
-/// Prune the cache to a size cap, oldest-first. Dumb and sufficient.
-pub fn gc(dir: PathBuf, cap_bytes: u64) {
-    let Ok(rd) = fs::read_dir(&dir) else { return };
-    let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = rd
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let md = e.metadata().ok()?;
-            Some((e.path(), md.len(), md.modified().ok()?))
-        })
-        .collect();
-    let total: u64 = files.iter().map(|f| f.1).sum();
-    if total <= cap_bytes {
-        return;
-    }
-    files.sort_by_key(|f| f.2);
-    let mut freed = 0u64;
-    for (p, len, _) in files {
-        if total - freed <= cap_bytes {
-            break;
-        }
-        if fs::remove_file(&p).is_ok() {
-            freed += len;
-        }
-    }
+/// Bytes for a cache key, for the URI-scheme handler. Keys are our own 16 hex
+/// chars; anything else is refused rather than trusted.
+pub fn thumb_bytes(app: &AppHandle, key: &str) -> Option<Vec<u8>> {
+    let h = crate::thumbcache::parse_key(key)?;
+    app.state::<ThumbCache>().get(h)
 }
