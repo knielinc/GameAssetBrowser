@@ -182,6 +182,14 @@ fn classify(path: &Path) -> Option<(String, AssetKind)> {
     let kind = if AUDIO_EXTENSIONS.contains(&e) {
         AssetKind::Audio
     } else if TEXTURE_EXTENSIONS.contains(&e) {
+        // Documentation images that ship inside asset packs (a vendor's
+        // "- Thank You.png", a readme screenshot) are the one common way the
+        // Textures tab fills with non-assets. They only masquerade as textures;
+        // skip them. Audio/models never carry these names, so the check is
+        // texture-only.
+        if is_doc_image(path) {
+            return None;
+        }
         AssetKind::Texture
     } else if MODEL_EXTENSIONS.contains(&e) {
         AssetKind::Model
@@ -189,6 +197,28 @@ fn classify(path: &Path) -> Option<(String, AssetKind)> {
         return None;
     };
     Some((ext, kind))
+}
+
+/// True if an image's name marks it as documentation rather than a game asset.
+///
+/// Deliberately narrow — these words essentially never name a real texture, so
+/// the false-positive risk is nil, while "- Thank You.png" is exactly what
+/// OVNI/audio packs ship and what clutters the Textures tab.
+fn is_doc_image(path: &Path) -> bool {
+    const DOC_MARKERS: [&str; 7] = [
+        "thank you",
+        "thankyou",
+        "readme",
+        "read me",
+        "license",
+        "licence",
+        "changelog",
+    ];
+    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    let low = stem.to_ascii_lowercase();
+    DOC_MARKERS.iter().any(|m| low.contains(m))
 }
 
 /// True for directories we never descend into: dot-prefixed tooling metadata
