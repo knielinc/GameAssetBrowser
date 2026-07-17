@@ -9,9 +9,10 @@ import WaveformCanvas from "./WaveformCanvas";
 export default function PlayerBar(): ReactElement {
   const currentPath = usePlayerStore((s) => s.currentPath);
   const selectedExt = useLibraryStore((s) => {
-    if (s.selectedPath === null) return null;
-    const dot = s.selectedPath.lastIndexOf(".");
-    return dot >= 0 ? s.selectedPath.slice(dot + 1).toLowerCase() : null;
+    const selectedPath = s.tabs.audio.selectedPath;
+    if (selectedPath === null) return null;
+    const dot = selectedPath.lastIndexOf(".");
+    return dot >= 0 ? selectedPath.slice(dot + 1).toLowerCase() : null;
   });
 
   return (

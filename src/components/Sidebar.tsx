@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import clsx from "clsx";
-import { AudioLines, FolderPlus, RefreshCw } from "lucide-react";
+import { Box, FolderPlus, RefreshCw } from "lucide-react";
 import { addFolders, rescanRoots, useLibraryStore } from "../stores/libraryStore";
 import FolderTree from "./FolderTree";
 
@@ -20,8 +20,8 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
       className="flex shrink-0 flex-col border-r border-border bg-panel"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <AudioLines size={16} className="text-accent" />
-        <span className="text-[13px] font-semibold tracking-tight">SoundPreviewer</span>
+        <Box size={16} className="text-accent" />
+        <span className="text-[13px] font-semibold tracking-tight">AssetPreviewer</span>
       </div>
 
       <div className="flex items-center justify-between px-4 pb-1 pt-3">

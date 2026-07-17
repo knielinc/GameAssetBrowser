@@ -1,13 +1,17 @@
 import { create } from "zustand";
 import { open } from "@tauri-apps/plugin-dialog";
 import { startScan } from "../ipc/commands";
+import { ASSET_KINDS } from "../types";
 import type {
-  AudioExt,
+  AssetKind,
   DurationBatch,
   FileEntry,
   ScanDone,
   SortDir,
   SortField,
+  ThumbBatch,
+  ThumbInfo,
+  ViewMode,
 } from "../types";
 
 /** A scanned file plus the precomputed lowercase name used for filtering. */
@@ -15,8 +19,28 @@ export interface LibFile extends FileEntry {
   nameLower: string;
 }
 
+/** View state owned by one tab. Never shared — switching tabs must not carry
+ *  a texture sort field into the audio list. */
+export interface TabState {
+  query: string;
+  /** Empty set = show all extensions. */
+  extFilter: Set<string>;
+  sortField: SortField;
+  sortDir: SortDir;
+  /** Index into the *visible* (filtered/sorted) list; -1 = none. */
+  selectedIndex: number;
+  selectedPath: string | null;
+  viewMode: ViewMode;
+  /** Grid cell edge in px. */
+  cellSize: number;
+  /** Textures only: collapse loose files into materials. */
+  groupMaterials: boolean;
+}
+
 export interface LibraryState {
+  // ---- shared: one library, three lenses ----
   roots: string[];
+  /** Every scanned file of every kind. Filtered per tab by `kind`. */
   allFiles: LibFile[];
   /** Generation id of the scan we accept batches from. */
   scanGen: number;
@@ -26,32 +50,65 @@ export interface LibraryState {
   /** file id → duration seconds. Mutated in place; `durationsVersion` signals changes. */
   durations: Map<number, number>;
   durationsVersion: number;
-  query: string;
-  /** Empty set = show all extensions. */
-  extFilter: Set<AudioExt>;
-  sortField: SortField;
-  sortDir: SortDir;
+  /** file id → thumbnail cache key + image stats. Same mutate-in-place +
+   *  version-counter idiom as `durations`. */
+  thumbs: Map<number, { key: string; info: ThumbInfo | null }>;
+  thumbsVersion: number;
   /**
    * Folder subtree the file list is scoped to (a root or any subfolder);
    * null = whole library. Session-only — deliberately not persisted.
+   * SHARED across tabs on purpose: scoping to one pack and flipping tabs to
+   * see its audio/textures/models is the core interaction.
    */
   folderScope: string | null;
-  /** Index into the *visible* (filtered/sorted) list; -1 = none. */
-  selectedIndex: number;
-  selectedPath: string | null;
+  activeTab: AssetKind;
+
+  // ---- per-tab ----
+  tabs: Record<AssetKind, TabState>;
 
   setRoots: (roots: string[]) => void;
   beginScan: (gen: number) => void;
   appendFiles: (files: FileEntry[]) => void;
   finishScan: (done: ScanDone) => void;
   mergeDurations: (entries: DurationBatch["entries"]) => void;
-  setQuery: (query: string) => void;
-  toggleExt: (ext: AudioExt) => void;
+  mergeThumbs: (entries: ThumbBatch["entries"]) => void;
+  /** Model thumbnails: rendered in the webview, so they arrive as a bare key
+   *  with no image statistics (those are a texture-decode by-product). */
+  setModelThumbs: (entries: [id: number, key: string][]) => void;
+  setActiveTab: (kind: AssetKind) => void;
+  patchTab: (kind: AssetKind, patch: Partial<TabState>) => void;
+  setQuery: (kind: AssetKind, query: string) => void;
+  toggleExt: (kind: AssetKind, ext: string) => void;
+  clearExts: (kind: AssetKind) => void;
   /** Header-click semantics: same field toggles direction, new field resets to asc. */
-  setSort: (field: SortField) => void;
-  toggleSortDir: () => void;
+  setSort: (kind: AssetKind, field: SortField) => void;
+  toggleSortDir: (kind: AssetKind) => void;
   setFolderScope: (scope: string | null) => void;
-  select: (index: number, path: string | null) => void;
+  select: (kind: AssetKind, index: number, path: string | null) => void;
+}
+
+function defaultTab(kind: AssetKind): TabState {
+  return {
+    query: "",
+    extFilter: new Set<string>(),
+    sortField: "name",
+    sortDir: "asc",
+    selectedIndex: -1,
+    selectedPath: null,
+    // Audio's list is the workflow that already works; visual assets are
+    // scanned by eye, so they default to the grid.
+    viewMode: kind === "audio" ? "list" : "grid",
+    cellSize: 132,
+    groupMaterials: true,
+  };
+}
+
+export function defaultTabs(): Record<AssetKind, TabState> {
+  return {
+    audio: defaultTab("audio"),
+    texture: defaultTab("texture"),
+    model: defaultTab("model"),
+  };
 }
 
 /**
@@ -95,13 +152,11 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   total: 0,
   durations: new Map<number, number>(),
   durationsVersion: 0,
-  query: "",
-  extFilter: new Set<AudioExt>(),
-  sortField: "name",
-  sortDir: "asc",
+  thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
+  thumbsVersion: 0,
   folderScope: null,
-  selectedIndex: -1,
-  selectedPath: null,
+  activeTab: "audio",
+  tabs: defaultTabs(),
 
   setRoots: (roots) => set({ roots }),
 
@@ -113,6 +168,9 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       total: 0,
       durations: new Map<number, number>(),
       durationsVersion: s.durationsVersion + 1,
+      // File ids are per-scan, so a stale id would index the wrong texture.
+      thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
+      thumbsVersion: s.thumbsVersion + 1,
     })),
 
   appendFiles: (files) =>
@@ -137,33 +195,96 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       return { durationsVersion: s.durationsVersion + 1 };
     }),
 
-  setQuery: (query) => set({ query }),
-
-  toggleExt: (ext) =>
+  mergeThumbs: (entries) =>
     set((s) => {
-      const next = new Set(s.extFilter);
+      for (const [id, info, key] of entries) {
+        s.thumbs.set(id, { key, info });
+      }
+      return { thumbsVersion: s.thumbsVersion + 1 };
+    }),
+
+  setModelThumbs: (entries) =>
+    set((s) => {
+      for (const [id, key] of entries) {
+        s.thumbs.set(id, { key, info: null });
+      }
+      return { thumbsVersion: s.thumbsVersion + 1 };
+    }),
+
+  setActiveTab: (kind) => set({ activeTab: kind }),
+
+  // Every per-tab mutation funnels through here, so `tabs` gets a fresh
+  // identity exactly when something persisted changed — which is what the
+  // settings subscription in settings.ts watches.
+  patchTab: (kind, patch) =>
+    set((s) => ({ tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], ...patch } } })),
+
+  setQuery: (kind, query) =>
+    set((s) => ({ tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], query } } })),
+
+  toggleExt: (kind, ext) =>
+    set((s) => {
+      const next = new Set(s.tabs[kind].extFilter);
       if (next.has(ext)) {
         next.delete(ext);
       } else {
         next.add(ext);
       }
-      return { extFilter: next };
+      return { tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], extFilter: next } } };
     }),
 
-  setSort: (field) =>
-    set((s) =>
-      field === s.sortField
-        ? { sortDir: s.sortDir === "asc" ? "desc" : "asc" }
-        : { sortField: field, sortDir: "asc" },
-    ),
+  clearExts: (kind) =>
+    set((s) => ({
+      tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], extFilter: new Set<string>() } },
+    })),
 
-  toggleSortDir: () =>
-    set((s) => ({ sortDir: s.sortDir === "asc" ? "desc" : "asc" })),
+  setSort: (kind, field) =>
+    set((s) => {
+      const t = s.tabs[kind];
+      const patch: Partial<TabState> =
+        field === t.sortField
+          ? { sortDir: t.sortDir === "asc" ? "desc" : "asc" }
+          : { sortField: field, sortDir: "asc" };
+      return { tabs: { ...s.tabs, [kind]: { ...t, ...patch } } };
+    }),
+
+  toggleSortDir: (kind) =>
+    set((s) => ({
+      tabs: {
+        ...s.tabs,
+        [kind]: { ...s.tabs[kind], sortDir: s.tabs[kind].sortDir === "asc" ? "desc" : "asc" },
+      },
+    })),
 
   setFolderScope: (scope) => set({ folderScope: scope }),
 
-  select: (index, path) => set({ selectedIndex: index, selectedPath: path }),
+  select: (kind, index, path) =>
+    set((s) => ({
+      tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], selectedIndex: index, selectedPath: path } },
+    })),
 }));
+
+/** `id → ThumbInfo` view of the thumbs map, for the material classifier.
+ *  Call inside a memo keyed on `thumbsVersion` — the copy is O(n) but so is
+ *  the grouping pass it feeds. */
+export function thumbInfos(): Map<number, ThumbInfo> {
+  const out = new Map<number, ThumbInfo>();
+  for (const [id, t] of useLibraryStore.getState().thumbs) {
+    if (t.info !== null) out.set(id, t.info);
+  }
+  return out;
+}
+
+/** Files of one kind. The single O(n) pass callers already do is cheap enough
+ *  that pre-partitioning by kind would be speculative — `useVisibleFiles`
+ *  folds this into its existing filter loop. */
+export function countByKind(files: readonly LibFile[]): Record<AssetKind, number> {
+  const counts: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0 };
+  for (const f of files) counts[f.kind]++;
+  return counts;
+}
+
+export { ASSET_KINDS };
 
 /** Last path segment of a file or folder path (Windows or POSIX separators). */
 export function basename(path: string): string {

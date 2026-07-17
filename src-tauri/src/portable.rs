@@ -1,5 +1,5 @@
 //! Portable mode: when the exe is a loose standalone copy, ALL app data
-//! lives in one `SoundPreviewer.data` folder next to the exe. Installed
+//! lives in one `AssetPreviewer.data` folder next to the exe. Installed
 //! copies (MSI/NSIS) keep using the OS-standard app-data locations.
 
 use std::fs;
@@ -29,6 +29,13 @@ impl DataHome {
     pub fn webview_dir(&self) -> PathBuf {
         self.dir.join("webview")
     }
+
+    /// Decoded texture thumbnails, keyed by content hash. Lives under the data
+    /// home so a portable copy carries its cache with it — re-decoding a few
+    /// thousand 4K textures on every launch is not acceptable.
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.dir.join("thumbs")
+    }
 }
 
 /// Resolve the data home once at startup.
@@ -39,7 +46,7 @@ impl DataHome {
 /// Everything else falls back to the OS app-data dir — the previous behavior.
 pub fn resolve(app: &tauri::App) -> Result<DataHome, Box<dyn std::error::Error>> {
     if let Some(exe_dir) = portable_exe_dir() {
-        let dir = exe_dir.join("SoundPreviewer.data");
+        let dir = exe_dir.join("AssetPreviewer.data");
         // One call covers both: creating `webview` creates `dir` as well.
         match fs::create_dir_all(dir.join("webview")) {
             Ok(()) => return Ok(DataHome { dir, portable: true }),
@@ -123,7 +130,7 @@ fn dir_is_writable(dir: &Path) -> bool {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    let probe = dir.join(format!(".sp-write-probe-{}-{nanos}", std::process::id()));
+    let probe = dir.join(format!(".ap-write-probe-{}-{nanos}", std::process::id()));
     let created = fs::OpenOptions::new()
         .write(true)
         .create_new(true) // never clobber an existing file

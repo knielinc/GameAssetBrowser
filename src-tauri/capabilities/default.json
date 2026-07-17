@@ -6,6 +6,8 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "store:default"
+    "store:default",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
   ]
 }

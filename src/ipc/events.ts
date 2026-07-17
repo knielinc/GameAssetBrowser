@@ -9,6 +9,7 @@ import {
   type ScanBatch,
   type ScanDone,
   type StatePayload,
+  type ThumbBatch,
   type WaveformReady,
 } from "../types";
 import { useLibraryStore, type LibraryState } from "../stores/libraryStore";
@@ -72,10 +73,17 @@ export function initIpcEvents(): void {
     }
   });
 
+  // No generation guard here: the backend already drops stale results before
+  // emitting, and file ids are reset by beginScan, so a late batch from a
+  // superseded scan can only carry ids that no longer exist — harmless.
+  void listen<ThumbBatch>(EVT.THUMB_READY, (event) => {
+    useLibraryStore.getState().mergeThumbs(event.payload.entries);
+  });
+
   void listen<WaveformReady>(EVT.WAVEFORM_READY, (event) => {
     const { path, peaks } = event.payload;
     // Stale guard: selection may have moved on while the decode ran.
-    if (path !== useLibraryStore.getState().selectedPath) return;
+    if (path !== useLibraryStore.getState().tabs.audio.selectedPath) return;
     usePlayerStore.setState({ peaks: new Float32Array(peaks) });
   });
 

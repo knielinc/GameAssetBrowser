@@ -43,6 +43,18 @@ export function requestWaveform(path: string, bins: number): Promise<void> {
   return invoke<void>("request_waveform", { path, bins });
 }
 
+/**
+ * Queue thumbnails for `items` ([file id, path] pairs), superseding any
+ * earlier request. Results arrive batched via `thumb:ready`; the pixels
+ * themselves come over `thumb://`.
+ *
+ * Resolves to the ids that were DROPPED unstarted by this call. The caller
+ * must forget it ever asked for those, or their cells strand forever.
+ */
+export function requestThumbs(items: [number, string][]): Promise<number[]> {
+  return invoke<number[]>("request_thumbs", { items });
+}
+
 /** Open a Windows Explorer window with `path` pre-selected. Rejects if the path no longer exists. */
 export function showInExplorer(path: string): Promise<void> {
   return invoke<void>("show_in_explorer", { path });

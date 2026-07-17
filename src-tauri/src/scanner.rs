@@ -11,7 +11,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
 use crate::metadata;
-use crate::types::{events, FileEntry, ScanBatch, ScanDone, AUDIO_EXTENSIONS};
+use crate::types::{
+    events, AssetKind, FileEntry, ScanBatch, ScanDone, AUDIO_EXTENSIONS, MODEL_EXTENSIONS,
+    SKIP_DIRS, TEXTURE_EXTENSIONS,
+};
 
 const BATCH_SIZE: usize = 1000;
 
@@ -20,6 +23,37 @@ const BATCH_SIZE: usize = 1000;
 #[derive(Default)]
 pub struct ScanState {
     pub generation: AtomicU32,
+    /// The roots the user has consented to, as of the last scan. The `model://`
+    /// scheme checks reads against these — a crafted glTF referencing
+    /// `../../../../Windows/System32/...` must not resolve. `start_scan` is the
+    /// single choke point every root passes through, including hydration from
+    /// persisted settings, so this is the one place worth setting it.
+    pub roots: parking_lot::Mutex<Vec<String>>,
+}
+
+/// True if `path` sits inside a root the user picked. Case-insensitive because
+/// Windows paths are, and separator-normalized because the URL carries `/`.
+pub fn is_within_roots(app: &AppHandle, path: &Path) -> bool {
+    let Ok(canon) = path.canonicalize() else {
+        return false;
+    };
+    let target = canon.to_string_lossy().to_lowercase().replace('/', "\\");
+    // Bind the State guard: `app.state::<T>()` is a temporary, and locking
+    // through it inline would drop it while the lock still borrows it.
+    let state = app.state::<ScanState>();
+    let roots = state.roots.lock();
+    roots.iter().any(|r| {
+        let Ok(rc) = Path::new(r).canonicalize() else {
+            return false;
+        };
+        let root = rc.to_string_lossy().to_lowercase().replace('/', "\\");
+        // Trailing-separator trim so the boundary test lands on the right char
+        // (a drive root is "C:\"), then require a separator so `C:\AB` never
+        // matches root `C:\A`.
+        let root = root.trim_end_matches('\\');
+        target.starts_with(root)
+            && (target.len() == root.len() || target.as_bytes().get(root.len()) == Some(&b'\\'))
+    })
 }
 
 /// The scan generation currently considered live.
@@ -34,6 +68,9 @@ pub async fn start_scan(
     roots: Vec<String>,
 ) -> Result<u32, String> {
     let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    // Record consent before the walk: the model:// scheme reads this, and a
+    // preview can be requested the moment the first batch lands.
+    *state.roots.lock() = roots.clone();
     std::thread::Builder::new()
         .name(format!("scanner-{gen}"))
         .spawn(move || scan_worker(app, roots, gen))
@@ -50,7 +87,13 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
     let mut meta_queue: Vec<(u32, String)> = Vec::new();
 
     for root in &roots {
-        for entry in WalkDir::new(root) {
+        // filter_entry prunes whole subtrees (build dirs, VCS metadata) before
+        // walkdir descends — a straight speed win, and the only thing keeping
+        // a C++ build's COFF `.obj` files out of the Models tab.
+        let walker = WalkDir::new(root)
+            .into_iter()
+            .filter_entry(|e| !is_skipped_dir(e));
+        for entry in walker {
             if current_generation(&app) != gen {
                 return; // superseded by a newer scan — go quiet
             }
@@ -64,7 +107,7 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             if !entry.file_type().is_file() {
                 continue;
             }
-            let Some(ext) = audio_ext(entry.path()) else {
+            let Some((ext, kind)) = classify(entry.path()) else {
                 continue;
             };
             // walkdir already has this metadata on Windows — no extra stat.
@@ -80,12 +123,19 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             next_id += 1;
             total += 1;
             let path = entry.path().to_string_lossy().into_owned();
-            meta_queue.push((id, path.clone()));
+            // AUDIO ONLY. probe_durations hands every queued path to symphonia;
+            // queueing textures/models would make it try to decode `.png` and
+            // `.fbx` — thousands of them in a Synty pack — burning CPU and
+            // flooding stderr for results that can never exist.
+            if matches!(kind, AssetKind::Audio) {
+                meta_queue.push((id, path.clone()));
+            }
             batch.push(FileEntry {
                 id,
                 path,
                 name: entry.file_name().to_string_lossy().into_owned(),
                 ext,
+                kind,
                 size,
                 modified,
             });
@@ -123,10 +173,37 @@ fn emit_batch(app: &AppHandle, gen: u32, batch: &mut Vec<FileEntry>) {
     }
 }
 
-/// Lower-cased extension if the path is a whitelisted audio file.
-fn audio_ext(path: &Path) -> Option<String> {
+/// Lower-cased extension + which tab it belongs to, or `None` if the file is
+/// not an asset we handle. One classification for one walk — the scanner never
+/// walks the tree per kind.
+fn classify(path: &Path) -> Option<(String, AssetKind)> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    AUDIO_EXTENSIONS.contains(&ext.as_str()).then_some(ext)
+    let e = ext.as_str();
+    let kind = if AUDIO_EXTENSIONS.contains(&e) {
+        AssetKind::Audio
+    } else if TEXTURE_EXTENSIONS.contains(&e) {
+        AssetKind::Texture
+    } else if MODEL_EXTENSIONS.contains(&e) {
+        AssetKind::Model
+    } else {
+        return None;
+    };
+    Some((ext, kind))
+}
+
+/// True for directories we never descend into: dot-prefixed tooling metadata
+/// (`.git`, `.svn`, `.mayaSwatches`, `.vs`) plus the [`SKIP_DIRS`] list.
+///
+/// Files are never skipped here — only directories — and depth 0 is exempt so
+/// a root the user explicitly picked always scans, whatever it's called.
+fn is_skipped_dir(entry: &walkdir::DirEntry) -> bool {
+    if entry.depth() == 0 || !entry.file_type().is_dir() {
+        return false;
+    }
+    let Some(name) = entry.file_name().to_str() else {
+        return false;
+    };
+    name.starts_with('.') || SKIP_DIRS.iter().any(|s| name.eq_ignore_ascii_case(s))
 }
 
 fn unix_seconds(md: &std::fs::Metadata) -> i64 {

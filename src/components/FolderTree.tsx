@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { ChevronRight, Copy, Folder, FolderOpen, Library, X } from "lucide-react";
 import { basename, removeRoot, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { openInExplorer } from "../ipc/commands";
+import type { AssetKind } from "../types";
 import ContextMenu from "./ContextMenu";
 
 /** One directory in the derived folder tree. */
@@ -11,11 +12,13 @@ export interface FolderNode {
   path: string;
   /** Last path segment, precomputed for display + sorting. */
   name: string;
-  /** Number of audio files in this directory's subtree. */
-  count: number;
-  /** Subdirectories that (transitively) contain audio files, sorted by name. */
+  /** Per-kind asset counts in this directory's subtree. */
+  counts: Record<AssetKind, number>;
+  /** Subdirectories that (transitively) contain assets of ANY kind. */
   children: FolderNode[];
 }
+
+const emptyCounts = (): Record<AssetKind, number> => ({ audio: 0, texture: 0, model: 0 });
 
 /** Natural, case-insensitive folder ordering ("Kick 2" before "Kick 10"). */
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -36,7 +39,15 @@ function sortChildrenDeep(nodes: FolderNode[]): void {
  * Derive the sidebar folder tree from the flat scan results — one O(n·depth)
  * pass, no backend calls. Every root always gets a node (so it can be removed
  * even when empty); subdirectories appear only if their subtree contains at
- * least one audio file, and each file increments the count of every ancestor.
+ * least one asset OF ANY KIND, and each file increments its own kind's count
+ * on every ancestor.
+ *
+ * The tree structure is deliberately kind-AGNOSTIC. The tab is a filter; the
+ * tree is navigation, and navigation must be stable or it isn't navigation.
+ * Synty packs ship Models/, Textures/, Materials/ as siblings — hiding two of
+ * three while you browse the third destroys the map of the pack you're in
+ * (and silently drops your expansion state, which is keyed by path). Folders
+ * with nothing for the active tab dim instead.
  *
  * Directory paths are built by slicing the file path at separator positions,
  * never by re-joining segments, so a node's `path` is byte-for-byte the prefix
@@ -55,7 +66,7 @@ export function buildFolderTree(files: readonly LibFile[], roots: readonly strin
   const nodeByPath = new Map<string, FolderNode>();
 
   for (const root of roots) {
-    const node: FolderNode = { path: root, name: basename(root), count: 0, children: [] };
+    const node: FolderNode = { path: root, name: basename(root), counts: emptyCounts(), children: [] };
     rootNodes.push(node);
     const trimmed = root.replace(/[\\/]+$/, "");
     specs.push({ node, trimmed });
@@ -82,7 +93,7 @@ export function buildFolderTree(files: readonly LibFile[], roots: readonly strin
     // Files from a superseded root set can flash by mid-rescan — skip them.
     if (owner === undefined) continue;
 
-    owner.node.count++;
+    owner.node.counts[f.kind]++;
     let parent = owner.node;
     let segStart = owner.trimmed.length + 1;
     for (;;) {
@@ -91,11 +102,11 @@ export function buildFolderTree(files: readonly LibFile[], roots: readonly strin
       const dirPath = p.slice(0, sep);
       let node = nodeByPath.get(dirPath);
       if (node === undefined) {
-        node = { path: dirPath, name: p.slice(segStart, sep), count: 0, children: [] };
+        node = { path: dirPath, name: p.slice(segStart, sep), counts: emptyCounts(), children: [] };
         nodeByPath.set(dirPath, node);
         parent.children.push(node);
       }
-      node.count++;
+      node.counts[f.kind]++;
       parent = node;
       segStart = sep + 1;
     }
@@ -126,9 +137,14 @@ interface TreeNodeProps {
 
 function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }: TreeNodeProps): ReactElement {
   const selected = useLibraryStore((s) => s.folderScope === node.path);
+  const activeTab = useLibraryStore((s) => s.activeTab);
   const setFolderScope = useLibraryStore((s) => s.setFolderScope);
   const hasChildren = node.children.length > 0;
   const isExpanded = hasChildren && expanded.has(node.path);
+  const count = node.counts[activeTab];
+  // Nothing here for this lens — dim it, keep it. See buildFolderTree's note.
+  const emptyForTab = count === 0;
+  const breakdown = `${node.counts.audio} audio · ${node.counts.texture} textures · ${node.counts.model} models`;
 
   // Single-click UX: selecting a folder also expands it; clicking the already
   // active folder collapses it again (scope stays). The chevron still toggles
@@ -158,8 +174,11 @@ function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }
   );
 
   const badge = (
-    <span className={clsx("shrink-0 text-[10px] tabular-nums", selected ? "text-accent" : "text-dim")}>
-      {node.count.toLocaleString()}
+    <span
+      className={clsx("shrink-0 text-[10px] tabular-nums", selected ? "text-accent" : "text-dim")}
+      title={breakdown}
+    >
+      {count.toLocaleString()}
     </span>
   );
 
@@ -170,6 +189,7 @@ function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }
           className={clsx(
             "group tree-row flex items-start gap-1 rounded-md py-1.5 pl-1 pr-2",
             selected && "tree-row-selected",
+            emptyForTab && !selected && "opacity-40",
           )}
           onClick={selectNode}
           onContextMenu={(e) => onNodeContextMenu(node.path, e)}
@@ -199,11 +219,12 @@ function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }
           className={clsx(
             "tree-row flex h-[26px] items-center gap-1 rounded-md pr-2",
             selected && "tree-row-selected",
+            emptyForTab && !selected && "opacity-40",
           )}
           style={{ paddingLeft: `${Math.min(depth, MAX_INDENT_DEPTH) * INDENT_PX + 4}px` }}
           onClick={selectNode}
           onContextMenu={(e) => onNodeContextMenu(node.path, e)}
-          title={node.path}
+          title={`${node.path}\n${breakdown}`}
         >
           {chevron}
           {isExpanded ? (
@@ -241,9 +262,13 @@ function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }
 export default function FolderTree(): ReactElement {
   const roots = useLibraryStore((s) => s.roots);
   const allFiles = useLibraryStore((s) => s.allFiles);
-  const totalCount = allFiles.length;
+  const activeTab = useLibraryStore((s) => s.activeTab);
   const scopeIsAll = useLibraryStore((s) => s.folderScope === null);
   const setFolderScope = useLibraryStore((s) => s.setFolderScope);
+  const totalCount = useMemo(
+    () => allFiles.reduce((n, f) => (f.kind === activeTab ? n + 1 : n), 0),
+    [allFiles, activeTab],
+  );
 
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
   const onToggle = (path: string): void => {
@@ -269,7 +294,7 @@ export default function FolderTree(): ReactElement {
   if (roots.length === 0) {
     return (
       <p className="px-2 py-1.5 text-[11px] leading-relaxed text-dim">
-        No folders yet. Add one to start browsing your samples.
+        No folders yet. Add one to start browsing your assets.
       </p>
     );
   }

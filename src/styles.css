@@ -11,6 +11,13 @@
   --color-accent-hover: #8f73ff;
   --color-danger: #ff5c7a;
 
+  /* Per-kind hues. Tab icons and badge tints ONLY — selection, focus, and
+     active states stay accent violet on every tab. Three competing accents
+     read as a toy; one accent reads as deliberate. */
+  --color-kind-audio: #7c5cff;
+  --color-kind-texture: #3ddc97;
+  --color-kind-model: #ffb454;
+
   --font-sans:
     "Inter", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
@@ -141,6 +148,17 @@ html.sidebar-resizing * {
 }
 .tree-row.tree-row-selected:hover {
   background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+/* Alpha checkerboard behind texture thumbnails. Without it, cutout foliage
+   and masked decals read as "the thumbnail is broken" on a dark panel. */
+.alpha-checker {
+  background-color: var(--color-raised);
+  background-image: repeating-conic-gradient(
+    var(--color-panel) 0% 25%,
+    var(--color-raised) 0% 50%
+  );
+  background-size: 16px 16px;
 }
 
 /* Extension filter chips. */

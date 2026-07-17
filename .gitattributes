@@ -1,0 +1,26 @@
+# core.autocrlf=true is set globally on this machine, so without this file
+# every commit warns "LF will be replaced by CRLF" and the index churns.
+# Normalize to LF in the repo; git still checks out CRLF locally.
+* text=auto eol=lf
+
+# Keep Windows-native tooling happy.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Never touch these — a stray CRLF corrupts them.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.svg text eol=lf
+*.wav binary
+*.mp3 binary
+*.flac binary
+*.ogg binary
+*.fbx binary
+*.glb binary
+*.dds binary
+*.tga binary
+*.exr binary
+*.hdr binary

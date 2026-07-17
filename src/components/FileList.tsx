@@ -9,13 +9,13 @@ import {
 import clsx from "clsx";
 import { ChevronDown, ChevronUp, Copy, FolderOpen } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { SortField } from "../types";
+import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { showInExplorer } from "../ipc/commands";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import ContextMenu from "./ContextMenu";
-import FileRow, { ROW_GRID } from "./FileRow";
+import FileRow, { rowGrid } from "./FileRow";
 
 const ROW_HEIGHT = 28;
 
@@ -25,7 +25,7 @@ interface HeaderSpec {
   alignRight?: boolean;
 }
 
-const HEADERS: HeaderSpec[] = [
+const ALL_HEADERS: HeaderSpec[] = [
   { field: "name", label: "Name" },
   { field: "ext", label: "Type" },
   { field: "size", label: "Size", alignRight: true },
@@ -33,7 +33,15 @@ const HEADERS: HeaderSpec[] = [
   { field: "duration", label: "Length", alignRight: true },
 ];
 
+/** Columns follow the same per-kind gate as the sort dropdown, so a texture
+ *  list can neither show nor sort by "Length". */
+function headersFor(kind: AssetKind): HeaderSpec[] {
+  const allowed = SORT_FIELDS_BY_KIND[kind];
+  return ALL_HEADERS.filter((h) => allowed.includes(h.field));
+}
+
 export interface FileListProps {
+  kind: AssetKind;
   files: LibFile[];
 }
 
@@ -44,20 +52,22 @@ interface RowMenu {
   file: LibFile;
 }
 
-export default function FileList({ files }: FileListProps): ReactElement {
+export default function FileList({ kind, files }: FileListProps): ReactElement {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const filesRef = useRef(files);
   filesRef.current = files;
+  const kindRef = useRef(kind);
+  kindRef.current = kind;
 
-  const selectedPath = useLibraryStore((s) => s.selectedPath);
+  const tab = useLibraryStore((s) => s.tabs[kind]);
+  const { selectedPath, sortField, sortDir } = tab;
   const durations = useLibraryStore((s) => s.durations);
-  const sortField = useLibraryStore((s) => s.sortField);
-  const sortDir = useLibraryStore((s) => s.sortDir);
   const setSort = useLibraryStore((s) => s.setSort);
   const anyFiles = useLibraryStore((s) => s.allFiles.length > 0);
   const folderScope = useLibraryStore((s) => s.folderScope);
   const currentPath = usePlayerStore((s) => s.currentPath);
   const playing = usePlayerStore((s) => s.playing);
+  const headers = headersFor(kind);
 
   const virtualizer = useVirtualizer({
     count: files.length,
@@ -85,9 +95,15 @@ export default function FileList({ files }: FileListProps): ReactElement {
   }, [folderScope, virtualizer]);
 
   // Stable click handler so memo'd rows never re-render from a callback churn.
+  // Only audio loads into the player; other kinds just move the selection.
   const onSelect = useCallback((index: number) => {
     const file = filesRef.current[index];
-    if (file) loadAndSelect(file, index);
+    if (!file) return;
+    if (kindRef.current === "audio") {
+      loadAndSelect(file, index);
+    } else {
+      useLibraryStore.getState().select(kindRef.current, index, file.path);
+    }
   }, []);
 
   // Single menu state = at most one menu. Right-click selects the row like a
@@ -99,7 +115,7 @@ export default function FileList({ files }: FileListProps): ReactElement {
   const onRowContextMenu = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
     const file = filesRef.current[index];
     if (!file) return;
-    useLibraryStore.getState().select(index, file.path);
+    useLibraryStore.getState().select(kindRef.current, index, file.path);
     setMenu({ x: e.clientX, y: e.clientY, file });
   }, []);
 
@@ -107,12 +123,12 @@ export default function FileList({ files }: FileListProps): ReactElement {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* pr-[10px] mirrors the scrollbar width so header and rows align. */}
       <div className="shrink-0 border-b border-border pr-[10px]">
-        <div className={clsx(ROW_GRID, "h-8")}>
-          {HEADERS.map((h) => (
+        <div className={clsx(rowGrid(kind === "audio"), "h-8")}>
+          {headers.map((h) => (
             <button
               key={h.field}
               type="button"
-              onClick={() => setSort(h.field)}
+              onClick={() => setSort(kind, h.field)}
               className={clsx(
                 "flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest transition-colors duration-[120ms]",
                 h.alignRight && "justify-end",
@@ -129,7 +145,7 @@ export default function FileList({ files }: FileListProps): ReactElement {
 
       {files.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-xs text-dim">
-          {anyFiles ? "No samples match the current filters" : "No samples found"}
+          {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
         </div>
       ) : (
         <div ref={parentRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-scroll">
@@ -159,8 +175,9 @@ export default function FileList({ files }: FileListProps): ReactElement {
                     size={file.size}
                     modified={file.modified}
                     durationSeconds={durations.get(file.id)}
+                    showDuration={kind === "audio"}
                     selected={file.path === selectedPath}
-                    playing={playing && file.path === currentPath}
+                    playing={kind === "audio" && playing && file.path === currentPath}
                     onSelect={onSelect}
                     onContextMenu={onRowContextMenu}
                   />
