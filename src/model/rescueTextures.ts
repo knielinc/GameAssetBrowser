@@ -144,7 +144,17 @@ export async function rescueTextures(root: THREE.Object3D, path: string): Promis
 
   const tex = await new THREE.TextureLoader().loadAsync(modelUrl(pick.path));
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.flipY = false; // FBX/glTF UV origin — matches what the loaders expect
+  // flipY = false, established empirically, NOT from first principles.
+  //
+  // Synty atlases are palettes — a grid of flat colour swatches — and each
+  // model's UVs point at one swatch. Flipping Y does not distort anything, it
+  // samples a DIFFERENT SWATCH, so this is a colour bug, not a mirroring bug.
+  //
+  // The textbook rule says FBX/OBJ have a bottom-left UV origin and want
+  // three's default flipY = true. Tried it: the OBJ went from correctly green
+  // to pink. flipY = false is what actually renders these packs right. Do not
+  // "correct" this back without looking at a Synty plant on screen.
+  tex.flipY = false;
   applyTexture(empty, tex);
   return { applied: pick.path, confident: pick.confident, candidates: hints.candidates };
 }
