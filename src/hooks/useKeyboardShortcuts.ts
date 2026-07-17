@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { playerSeek } from "../ipc/commands";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { switchTab } from "../stores/tabs";
 import {
   loadAndSelect,
   positionRef,
@@ -8,29 +9,42 @@ import {
   usePlayerStore,
   usePositionStore,
 } from "../stores/playerStore";
+import { ASSET_KINDS, type AssetKind } from "../types";
 
 /**
- * FileList registers its virtualizer's scrollToIndex here so the window-level
- * keyboard handler (which lives in App) can keep the selection in view.
+ * The active pane registers its virtualizer's scrollToIndex here so the
+ * window-level keyboard handler (which lives above it) can keep the selection
+ * in view. Always a FLAT item index — the grid converts to rows internally.
  */
 export const scrollToIndexRef: { current: ((index: number) => void) | null } = {
   current: null,
 };
+
+/**
+ * The grid publishes its live column count here. Same module-ref idiom as
+ * scrollToIndexRef rather than inventing a second mechanism. null = a list is
+ * mounted, so vertical nav steps by 1.
+ */
+export const gridNavRef: { current: { columns: number } | null } = { current: null };
 
 const SEEK_STEP_SECONDS = 2;
 /** Trailing debounce on the player_load invoke while arrow-scrubbing. */
 const AUTOPLAY_DEBOUNCE_MS = 60;
 
 /**
- * Global keyboard shortcuts. Install once in App; the listener stays mounted
- * for the app's lifetime and reads the latest visible list through a ref.
+ * Global keyboard shortcuts. Install once per pane; the listener reads the
+ * latest visible list and kind through refs.
  *
- *   ArrowUp/Down  move selection (clamped) + autoplay
- *   Space         play/pause · Enter replay · L loop · ←/→ seek ±2 s
+ *   ↑/↓        move selection — by 1 in a list, by one row in a grid
+ *   ←/→        seek ±2 s (audio list) · move ∓1 cell (grid)
+ *   Space      play/pause · Enter replay · L loop
+ *   Ctrl+1/2/3 switch tab
  */
-export function useKeyboardShortcuts(visible: LibFile[]): void {
+export function useKeyboardShortcuts(kind: AssetKind, visible: LibFile[]): void {
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const kindRef = useRef(kind);
+  kindRef.current = kind;
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -43,51 +57,62 @@ export function useKeyboardShortcuts(visible: LibFile[]): void {
         }
       }
 
+      if (e.ctrlKey && ["Digit1", "Digit2", "Digit3"].includes(e.code)) {
+        e.preventDefault();
+        const next = ASSET_KINDS[Number(e.code.slice(-1)) - 1];
+        if (next !== undefined) switchTab(next);
+        return;
+      }
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+      const activeKind = kindRef.current;
+      const isAudio = activeKind === "audio";
+      const grid = gridNavRef.current;
+
+      /** Move the selection by `delta` in the flat visible order. */
+      const move = (delta: number): void => {
+        const files = visibleRef.current;
+        if (files.length === 0) return;
+        const tab = useLibraryStore.getState().tabs[activeKind];
+        let base = tab.selectedIndex;
+        if (tab.selectedPath !== null && files[base]?.path !== tab.selectedPath) {
+          // Reconcile the index if filtering/sorting shifted the selection.
+          const located = files.findIndex((f) => f.path === tab.selectedPath);
+          if (located >= 0) base = located;
+        }
+        // A fresh pane has no selection (-1); the first press should land on
+        // the first item, not skip it.
+        if (base < 0) base = delta > 0 ? -1 : 0;
+        const next = Math.min(files.length - 1, Math.max(0, base + delta));
+        const file = files[next];
+        if (!file) return;
+        if (isAudio) {
+          loadAndSelect(file, next, AUTOPLAY_DEBOUNCE_MS);
+        } else {
+          useLibraryStore.getState().select(activeKind, next, file.path);
+        }
+        scrollToIndexRef.current?.(next);
+      };
+
       switch (e.code) {
         case "ArrowDown":
         case "ArrowUp": {
           e.preventDefault();
-          const files = visibleRef.current;
-          if (files.length === 0) return;
-
-          const { selectedIndex, selectedPath } = useLibraryStore.getState();
-          let base = selectedIndex;
-          if (selectedPath !== null) {
-            // Reconcile the index if filtering/sorting shifted the selection.
-            if (files[base]?.path !== selectedPath) {
-              const located = files.findIndex((f) => f.path === selectedPath);
-              if (located >= 0) base = located;
-            }
-          }
-
-          const delta = e.code === "ArrowDown" ? 1 : -1;
-          const next = Math.min(files.length - 1, Math.max(0, base + delta));
-          const file = files[next];
-          if (!file) return;
-          loadAndSelect(file, next, AUTOPLAY_DEBOUNCE_MS);
-          scrollToIndexRef.current?.(next);
-          break;
-        }
-
-        case "Space": {
-          e.preventDefault();
-          usePlayerStore.getState().togglePlay();
-          break;
-        }
-
-        case "Enter": {
-          e.preventDefault();
-          replayCurrent();
-          break;
-        }
-
-        case "KeyL": {
-          usePlayerStore.getState().toggleLoop();
+          const step = grid?.columns ?? 1;
+          move(e.code === "ArrowDown" ? step : -step);
           break;
         }
 
         case "ArrowLeft":
         case "ArrowRight": {
+          // In a grid, horizontal is navigation. In the audio list it is a
+          // seek — the one genuine conflict between the two modes.
+          if (grid !== null) {
+            e.preventDefault();
+            move(e.code === "ArrowRight" ? 1 : -1);
+            break;
+          }
+          if (!isAudio) return;
           const { currentPath, duration } = usePlayerStore.getState();
           if (currentPath === null) return;
           e.preventDefault();
@@ -97,6 +122,26 @@ export function useKeyboardShortcuts(visible: LibFile[]): void {
           positionRef.seconds = next;
           usePositionStore.setState({ seconds: next });
           void playerSeek(next);
+          break;
+        }
+
+        case "Space": {
+          if (!isAudio) return;
+          e.preventDefault();
+          usePlayerStore.getState().togglePlay();
+          break;
+        }
+
+        case "Enter": {
+          if (!isAudio) return;
+          e.preventDefault();
+          replayCurrent();
+          break;
+        }
+
+        case "KeyL": {
+          if (!isAudio) return;
+          usePlayerStore.getState().toggleLoop();
           break;
         }
       }

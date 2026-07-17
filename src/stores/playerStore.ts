@@ -92,7 +92,8 @@ let loadTimer: number | undefined;
  */
 export function loadAndSelect(file: LibFile, index: number, debounceMs = 0): void {
   const lib = useLibraryStore.getState();
-  lib.select(index, file.path);
+  // The player is audio-only by construction; other kinds never reach here.
+  lib.select("audio", index, file.path);
 
   // Re-selecting the already-loaded track (clicking the selected row, or a
   // clamped arrow press at the list edge): leave peaks/playhead/playback

@@ -75,7 +75,7 @@ export function initIpcEvents(): void {
   void listen<WaveformReady>(EVT.WAVEFORM_READY, (event) => {
     const { path, peaks } = event.payload;
     // Stale guard: selection may have moved on while the decode ran.
-    if (path !== useLibraryStore.getState().selectedPath) return;
+    if (path !== useLibraryStore.getState().tabs.audio.selectedPath) return;
     usePlayerStore.setState({ peaks: new Float32Array(peaks) });
   });
 
