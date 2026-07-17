@@ -9,6 +9,8 @@ import type {
   ScanDone,
   SortDir,
   SortField,
+  ThumbBatch,
+  ThumbInfo,
   ViewMode,
 } from "../types";
 
@@ -46,6 +48,10 @@ export interface LibraryState {
   /** file id → duration seconds. Mutated in place; `durationsVersion` signals changes. */
   durations: Map<number, number>;
   durationsVersion: number;
+  /** file id → thumbnail cache key + image stats. Same mutate-in-place +
+   *  version-counter idiom as `durations`. */
+  thumbs: Map<number, { key: string; info: ThumbInfo }>;
+  thumbsVersion: number;
   /**
    * Folder subtree the file list is scoped to (a root or any subfolder);
    * null = whole library. Session-only — deliberately not persisted.
@@ -63,6 +69,7 @@ export interface LibraryState {
   appendFiles: (files: FileEntry[]) => void;
   finishScan: (done: ScanDone) => void;
   mergeDurations: (entries: DurationBatch["entries"]) => void;
+  mergeThumbs: (entries: ThumbBatch["entries"]) => void;
   setActiveTab: (kind: AssetKind) => void;
   patchTab: (kind: AssetKind, patch: Partial<TabState>) => void;
   setQuery: (kind: AssetKind, query: string) => void;
@@ -138,6 +145,8 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   total: 0,
   durations: new Map<number, number>(),
   durationsVersion: 0,
+  thumbs: new Map<number, { key: string; info: ThumbInfo }>(),
+  thumbsVersion: 0,
   folderScope: null,
   activeTab: "audio",
   tabs: defaultTabs(),
@@ -152,6 +161,9 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       total: 0,
       durations: new Map<number, number>(),
       durationsVersion: s.durationsVersion + 1,
+      // File ids are per-scan, so a stale id would index the wrong texture.
+      thumbs: new Map<number, { key: string; info: ThumbInfo }>(),
+      thumbsVersion: s.thumbsVersion + 1,
     })),
 
   appendFiles: (files) =>
@@ -174,6 +186,14 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       }
       // Map identity is stable on purpose — the version counter is the signal.
       return { durationsVersion: s.durationsVersion + 1 };
+    }),
+
+  mergeThumbs: (entries) =>
+    set((s) => {
+      for (const [id, info, key] of entries) {
+        s.thumbs.set(id, { key, info });
+      }
+      return { thumbsVersion: s.thumbsVersion + 1 };
     }),
 
   setActiveTab: (kind) => set({ activeTab: kind }),

@@ -29,6 +29,13 @@ impl DataHome {
     pub fn webview_dir(&self) -> PathBuf {
         self.dir.join("webview")
     }
+
+    /// Decoded texture thumbnails, keyed by content hash. Lives under the data
+    /// home so a portable copy carries its cache with it — re-decoding a few
+    /// thousand 4K textures on every launch is not acceptable.
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.dir.join("thumbs")
+    }
 }
 
 /// Resolve the data home once at startup.

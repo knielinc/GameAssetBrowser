@@ -39,6 +39,38 @@ pub mod events {
     pub const WAVEFORM_READY: &str = "waveform:ready";
     pub const PLAYBACK_POSITION: &str = "playback:position";
     pub const PLAYBACK_STATE: &str = "playback:state";
+    pub const THUMB_READY: &str = "thumb:ready";
+}
+
+/// Per-image facts derived while building the thumbnail — free, since the
+/// pixels are already decoded and downscaled.
+///
+/// These SUPPLEMENT the name-based channel classifier, never override it: a
+/// filename is the author's stated intent, a histogram is an inference.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbInfo {
+    /// Thumbnail dimensions, not the source's.
+    pub width: u32,
+    pub height: u32,
+    /// Mean ≈ (0.5, 0.5, 1.0) — tangent-space normal map.
+    pub normal_like: bool,
+    /// Near-zero chroma — roughness/height/AO/metallic are single-channel.
+    pub grayscale: bool,
+    /// Luma piles up at both ends, empty middle — an opacity/cutout mask.
+    pub bimodal: bool,
+    pub has_alpha: bool,
+    pub mean_r: f32,
+    pub mean_g: f32,
+    pub mean_b: f32,
+}
+
+/// Batched `(file id, stats, cache key)`. The key is a URL, not bytes — the
+/// pixels come back over the `thumb://` scheme, off the JS main thread.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbBatch {
+    pub entries: Vec<(u32, ThumbInfo, String)>,
 }
 
 /// Which lens (tab) a scanned file belongs to. Serializes as

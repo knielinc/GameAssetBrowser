@@ -43,6 +43,15 @@ export function requestWaveform(path: string, bins: number): Promise<void> {
   return invoke<void>("request_waveform", { path, bins });
 }
 
+/**
+ * Queue thumbnails for `items` ([file id, path] pairs) and supersede any
+ * earlier request. Resolves to the new generation; results arrive batched via
+ * the `thumb:ready` event, and the pixels themselves over `thumb://`.
+ */
+export function requestThumbs(items: [number, string][]): Promise<number> {
+  return invoke<number>("request_thumbs", { items });
+}
+
 /** Open a Windows Explorer window with `path` pre-selected. Rejects if the path no longer exists. */
 export function showInExplorer(path: string): Promise<void> {
   return invoke<void>("show_in_explorer", { path });

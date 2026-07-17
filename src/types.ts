@@ -73,7 +73,40 @@ export const EVT = {
   WAVEFORM_READY: "waveform:ready",
   PLAYBACK_POSITION: "playback:position",
   PLAYBACK_STATE: "playback:state",
+  THUMB_READY: "thumb:ready",
 } as const;
+
+/**
+ * Per-image facts derived while building the thumbnail. These SUPPLEMENT the
+ * name-based channel classifier, never override it — a filename is the
+ * author's stated intent, a histogram is an inference.
+ */
+export interface ThumbInfo {
+  /** Thumbnail dimensions, not the source's. */
+  width: number;
+  height: number;
+  /** Mean ≈ (0.5, 0.5, 1.0) — tangent-space normal map. */
+  normalLike: boolean;
+  /** Near-zero chroma — roughness/height/AO/metallic are single-channel. */
+  grayscale: boolean;
+  /** Luma at both ends, empty middle — an opacity/cutout mask. */
+  bimodal: boolean;
+  hasAlpha: boolean;
+  meanR: number;
+  meanG: number;
+  meanB: number;
+}
+
+/** Batched `[file id, stats, cache key]`. The key is a URL, not bytes. */
+export interface ThumbBatch {
+  entries: [id: number, info: ThumbInfo, key: string][];
+}
+
+/** Thumbnails are fetched by WebView2 over their own scheme, off the JS main
+ *  thread. On Windows a custom scheme resolves as http://<name>.localhost. */
+export function thumbUrl(key: string): string {
+  return `http://thumb.localhost/${key}`;
+}
 
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4a"] as const;
 export type AudioExt = (typeof AUDIO_EXTENSIONS)[number];

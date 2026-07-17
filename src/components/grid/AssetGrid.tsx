@@ -24,6 +24,10 @@ export interface AssetGridProps<T> {
   selectedIndex: number;
   onSelect: (index: number) => void;
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  /** Flat [start, end) item range currently rendered (incl. overscan). Drives
+   *  lazy thumbnail requests — decoding 2000 textures eagerly is not an
+   *  option at any concurrency. */
+  onVisibleRange?: (start: number, end: number) => void;
 }
 
 /**
@@ -43,6 +47,7 @@ export default function AssetGrid<T>({
   selectedIndex,
   onSelect,
   onContextMenu,
+  onVisibleRange,
 }: AssetGridProps<T>): ReactElement {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
@@ -110,6 +115,14 @@ export default function AssetGrid<T>({
     },
     [onContextMenu],
   );
+
+  // Report the rendered window so the owner can request just these thumbs.
+  // Derived from the virtual rows, so it already includes overscan.
+  const lastRow = virtualItems[virtualItems.length - 1]?.index ?? -1;
+  useEffect(() => {
+    if (onVisibleRange === undefined || lastRow < 0) return;
+    onVisibleRange(firstRow * columns, Math.min(items.length, (lastRow + 1) * columns));
+  }, [onVisibleRange, firstRow, lastRow, columns, items.length]);
 
   return (
     <div ref={parentRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-scroll">

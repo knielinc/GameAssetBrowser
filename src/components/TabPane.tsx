@@ -2,6 +2,7 @@ import { useCallback, useState, type MouseEvent, type ReactElement } from "react
 import { Copy, FolderOpen, Loader2 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { showInExplorer } from "../ipc/commands";
 import type { AssetKind } from "../types";
@@ -28,6 +29,7 @@ export interface TabPaneProps {
 export default function TabPane({ kind }: TabPaneProps): ReactElement {
   const visible = useVisibleFiles(kind);
   useKeyboardShortcuts(kind, visible);
+  const onVisibleRange = useThumbRequests(visible, kind === "texture");
 
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const scanning = useLibraryStore((s) => s.scanning);
@@ -73,6 +75,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         selectedIndex={tab.selectedIndex}
         onSelect={onCellSelect}
         onContextMenu={onCellContextMenu}
+        onVisibleRange={onVisibleRange}
         renderCell={(f) =>
           kind === "texture" ? (
             <TextureCell file={f} selected={f.path === tab.selectedPath} />
