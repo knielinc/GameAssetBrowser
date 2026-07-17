@@ -147,6 +147,7 @@ export interface TabSettings {
   extFilter: string[];
   viewMode: ViewMode;
   cellSize: number;
+  groupMaterials: boolean;
 }
 
 /**

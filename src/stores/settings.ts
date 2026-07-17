@@ -21,6 +21,7 @@ function defaultTabSettings(kind: AssetKind): TabSettings {
     extFilter: [],
     viewMode: kind === "audio" ? "list" : "grid",
     cellSize: 132,
+    groupMaterials: true,
   };
 }
 
@@ -87,6 +88,7 @@ function sanitizeTab(kind: AssetKind, raw: unknown): TabSettings {
     extFilter: strArray(raw.extFilter, d.extFilter).filter((e) => EXTENSIONS[kind].includes(e)),
     viewMode: oneOf<ViewMode>(raw.viewMode, VIEW_MODES, d.viewMode),
     cellSize: Math.round(clampNum(raw.cellSize, MIN_CELL, MAX_CELL, d.cellSize)),
+    groupMaterials: bool(raw.groupMaterials, d.groupMaterials),
   };
 }
 
@@ -144,6 +146,7 @@ function tabToSettings(t: TabState): TabSettings {
     extFilter: [...t.extFilter],
     viewMode: t.viewMode,
     cellSize: t.cellSize,
+    groupMaterials: t.groupMaterials,
   };
 }
 
@@ -240,6 +243,7 @@ export async function loadSettings(): Promise<Settings> {
       extFilter: new Set(p.extFilter),
       viewMode: p.viewMode,
       cellSize: p.cellSize,
+      groupMaterials: p.groupMaterials,
     };
   }
   useLibraryStore.setState({ roots: settings.roots, activeTab: settings.activeTab, tabs });

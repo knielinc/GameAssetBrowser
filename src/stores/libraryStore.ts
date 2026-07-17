@@ -33,6 +33,8 @@ export interface TabState {
   viewMode: ViewMode;
   /** Grid cell edge in px. */
   cellSize: number;
+  /** Textures only: collapse loose files into materials. */
+  groupMaterials: boolean;
 }
 
 export interface LibraryState {
@@ -93,6 +95,7 @@ function defaultTab(kind: AssetKind): TabState {
     // scanned by eye, so they default to the grid.
     viewMode: kind === "audio" ? "list" : "grid",
     cellSize: 132,
+    groupMaterials: true,
   };
 }
 
@@ -243,6 +246,15 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], selectedIndex: index, selectedPath: path } },
     })),
 }));
+
+/** `id → ThumbInfo` view of the thumbs map, for the material classifier.
+ *  Call inside a memo keyed on `thumbsVersion` — the copy is O(n) but so is
+ *  the grouping pass it feeds. */
+export function thumbInfos(): Map<number, ThumbInfo> {
+  const out = new Map<number, ThumbInfo>();
+  for (const [id, t] of useLibraryStore.getState().thumbs) out.set(id, t.info);
+  return out;
+}
 
 /** Files of one kind. The single O(n) pass callers already do is cheap enough
  *  that pre-partitioning by kind would be speculative — `useVisibleFiles`

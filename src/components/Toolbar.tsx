@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, LayoutGrid, List, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Layers, LayoutGrid, List, Search, X } from "lucide-react";
 import { EXTENSIONS, SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { useLibraryStore } from "../stores/libraryStore";
 import { MAX_CELL, MIN_CELL } from "../stores/settings";
@@ -31,7 +31,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const toggleSortDir = useLibraryStore((s) => s.toggleSortDir);
   const patchTab = useLibraryStore((s) => s.patchTab);
 
-  const { query, extFilter, sortField, sortDir, viewMode, cellSize } = tab;
+  const { query, extFilter, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
   // Audio has no grid implementation — never render a control that does nothing.
   const canGrid = kind !== "audio";
 
@@ -79,6 +79,23 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {kind === "texture" && viewMode === "grid" && (
+          <button
+            type="button"
+            title="Collapse loose files that form one PBR material into a single cell"
+            className={clsx(
+              "flex h-[26px] items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors duration-[120ms]",
+              groupMaterials
+                ? "border-accent/45 bg-accent/12 text-accent"
+                : "border-border text-dim hover:bg-raised hover:text-text",
+            )}
+            onClick={() => patchTab(kind, { groupMaterials: !groupMaterials })}
+          >
+            <Layers size={12} />
+            Group materials
+          </button>
+        )}
+
         {canGrid && viewMode === "grid" && (
           <input
             type="range"
