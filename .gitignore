@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Standalone release exports (produced by `npm run export`).
+export/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
