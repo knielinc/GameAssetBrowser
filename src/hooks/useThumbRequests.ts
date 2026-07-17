@@ -29,6 +29,12 @@ export function useThumbRequests(files: readonly LibFile[], enabled: boolean): (
     asked.current.clear();
   }, [files]);
 
+  // Re-arm the debounce after ids come back un-asked, so the cells that are
+  // still on screen get picked up on the next tick rather than waiting for
+  // the user to scroll again.
+  const scheduleRef = useRef<(() => void) | undefined>(undefined);
+  const schedule = useCallback(() => scheduleRef.current?.(), []);
+
   const flush = useCallback(() => {
     const [start, end] = range.current;
     const have = useLibraryStore.getState().thumbs;
@@ -41,13 +47,28 @@ export function useThumbRequests(files: readonly LibFile[], enabled: boolean): (
       items.push([f.id, f.path]);
     }
     if (items.length === 0) return;
-    void requestThumbs(items).catch((err: unknown) => {
-      // Let a failed batch be retried on the next scroll rather than
-      // permanently blanking those cells.
-      for (const [id] of items) asked.current.delete(id);
-      console.error("request_thumbs failed", err);
-    });
+    void requestThumbs(items)
+      .then((dropped) => {
+        // Each request supersedes the last, so anything still queued from a
+        // previous one is abandoned. Those ids are already in `asked` and
+        // would never be requested again — their cells would stay blank
+        // forever, with no error anywhere. Un-ask them so the next flush
+        // picks up whatever is still on screen.
+        for (const id of dropped) asked.current.delete(id);
+        if (dropped.length > 0) schedule();
+      })
+      .catch((err: unknown) => {
+        // Same reasoning for an outright failure.
+        for (const [id] of items) asked.current.delete(id);
+        console.error("request_thumbs failed", err);
+      });
   }, []);
+
+  const arm = useCallback(() => {
+    if (timer.current !== undefined) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(flush, DEBOUNCE_MS);
+  }, [flush]);
+  scheduleRef.current = arm;
 
   useEffect(() => {
     return () => {
@@ -59,9 +80,8 @@ export function useThumbRequests(files: readonly LibFile[], enabled: boolean): (
     (start: number, end: number) => {
       if (!enabled) return;
       range.current = [start, end];
-      if (timer.current !== undefined) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(flush, DEBOUNCE_MS);
+      arm();
     },
-    [enabled, flush],
+    [enabled, arm],
   );
 }

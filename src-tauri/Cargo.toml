@@ -14,6 +14,47 @@ edition = "2021"
 name = "asset_previewer_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Optimize the DECODE crates even in dev. Our own crate stays at opt-level 0,
+# so incremental builds stay fast.
+#
+# Measured on the real texture set: at opt-level 0 the mean decode is 964 ms
+# per file — 27.9x slower than release (34.6 ms). That turned a 42-cell
+# screenful into ~9.8 s instead of ~0.36 s, and the full 303-file set into
+# 58.6 s instead of 2.9 s. It was, by an order of magnitude, the entire reason
+# thumbnails felt slow; no amount of queue tuning touches it.
+#
+# Listed per-crate rather than as `package."*"` on purpose: the glob also
+# rebuilds every dependency's BUILD SCRIPT, and Windows Smart App Control
+# blocks the freshly-produced unsigned binaries outright ("An Application
+# Control policy has blocked this file", os error 4551). Naming the leaf
+# codecs leaves tauri's build scripts untouched.
+#
+# miniz_oxide matters as much as image itself — it is the zlib backend PNG
+# decoding actually spends its time in.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.zune-inflate]
+opt-level = 3
+[profile.dev.package.exr]
+opt-level = 3
+[profile.dev.package.tiff]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+# Audio decode and waveform peaks are the same shape of work.
+[profile.dev.package.symphonia]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.symphonia-codec-vorbis]
+opt-level = 3
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

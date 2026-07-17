@@ -23,7 +23,6 @@
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
@@ -48,10 +47,10 @@ const DECODE_THREADS: usize = 4;
 const FLUSH_MS: u64 = 100;
 
 pub struct ThumbState {
-    /// Bumped on every viewport change; stale jobs go quiet.
-    pub generation: AtomicU32,
-    /// path -> cache key, so a re-scrolled cell skips the disk probe.
-    cache: Mutex<LruCache<String, String>>,
+    /// path -> cache key. Read on the way in so a re-scrolled cell skips both
+    /// the disk probe and the PNG re-decode that `build` would otherwise do
+    /// just to recompute stats.
+    cache: Mutex<LruCache<String, (String, ThumbInfo)>>,
     queue: Mutex<Vec<Job>>,
     running: Mutex<bool>,
 }
@@ -68,7 +67,6 @@ struct Job {
 impl Default for ThumbState {
     fn default() -> Self {
         Self {
-            generation: AtomicU32::new(0),
             cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(2048).unwrap())),
             queue: Mutex::new(Vec::new()),
             running: Mutex::new(false),
@@ -175,6 +173,43 @@ fn analyze(img: &DynamicImage) -> ThumbInfo {
     }
 }
 
+/// Tone-map a floating-point image down to 8-bit.
+///
+/// `.hdr` decodes to Rgb32F and `.exr` to Rgba32F, and the PNG encoder cannot
+/// write either — it returns Unsupported, the thumbnail is never written, and
+/// the cell stays blank forever with only a line on stderr. That silently cost
+/// 38 of 303 real files here.
+///
+/// Straight truncation to 8-bit would "work" and look wrong: HDR values run
+/// well past 1.0, so everything bright clamps to flat white. Reinhard maps the
+/// whole range into [0,1] first, then gamma-encodes — the same shape of
+/// tone-mapping the 3D viewport applies, so an HDRI's thumbnail resembles what
+/// you get when you open it.
+fn to_ldr(img: DynamicImage) -> DynamicImage {
+    match img {
+        DynamicImage::ImageRgb32F(_) | DynamicImage::ImageRgba32F(_) => {
+            let src = img.to_rgba32f();
+            let mut out = image::RgbaImage::new(src.width(), src.height());
+            let map = |v: f32| -> u8 {
+                let v = if v.is_finite() { v.max(0.0) } else { 0.0 };
+                let tone = v / (1.0 + v); // Reinhard
+                (tone.powf(1.0 / 2.2) * 255.0).clamp(0.0, 255.0) as u8
+            };
+            for (s, d) in src.pixels().zip(out.pixels_mut()) {
+                *d = image::Rgba([
+                    map(s[0]),
+                    map(s[1]),
+                    map(s[2]),
+                    (s[3].clamp(0.0, 1.0) * 255.0) as u8,
+                ]);
+            }
+            DynamicImage::ImageRgba8(out)
+        }
+        // 16-bit types encode to PNG fine; leave them alone.
+        other => other,
+    }
+}
+
 /// Decode -> downscale -> PNG -> disk. Returns the cache key and stats.
 fn build(path: &str, dir: &Path) -> Result<(String, ThumbInfo), String> {
     let p = Path::new(path);
@@ -203,6 +238,9 @@ fn build(path: &str, dir: &Path) -> Result<(String, ThumbInfo), String> {
     } else {
         img
     };
+    // After the resize (cheaper on the smaller buffer) and before analyze(),
+    // so the stats see the same pixels the thumbnail shows.
+    let thumb = to_ldr(thumb);
 
     let info = analyze(&thumb);
     let mut buf = Cursor::new(Vec::new());
@@ -213,33 +251,48 @@ fn build(path: &str, dir: &Path) -> Result<(String, ThumbInfo), String> {
     Ok((key, info))
 }
 
-/// Queue thumbnails for the given (id, path) pairs.
+/// Queue thumbnails for the given (id, path) pairs, superseding the previous
+/// request. **Returns the ids that were dropped unstarted**, so the caller can
+/// forget it ever asked for them.
 ///
-/// LIFO drain: during a fast scroll the newest visible cells win, and the gen
-/// check drops everything the user has already scrolled past. Ported straight
-/// from waveform.rs's cancellation shape.
+/// That return value is the whole contract. Clearing the queue is how
+/// cancellation works — without it, scrolling a 2000-texture folder would
+/// eventually decode all of it, which the concurrency cap exists to prevent.
+/// But the frontend marks an id "asked" the moment the invoke resolves and
+/// never asks twice, so a silently-dropped job stranded that cell FOREVER: no
+/// thumbnail, no error, no retry. It bit on ordinary scrolling, not just fast
+/// flicks — the drain releases the queue lock across its multi-hundred-ms
+/// decode barrier, which is far longer than the frontend's 120 ms debounce.
+///
+/// Returning the dropped ids keeps both properties: the queue stays bounded,
+/// and nothing is lost. Cheap — it is a Vec<u32> of at most a screenful.
 #[tauri::command]
 pub async fn request_thumbs(
     app: AppHandle,
     state: State<'_, ThumbState>,
     items: Vec<(u32, String)>,
-) -> Result<u32, String> {
-    let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+) -> Result<Vec<u32>, String> {
     let n = items.len();
     // Take BOTH locks before touching either, and hold `running` across the
     // spawn. Otherwise a drain that is mid-exit can set running=false after we
     // observed it true, and the jobs we just queued sit there with nobody to
     // drain them — the cells stay blank forever with no error anywhere.
     let mut running = state.running.lock();
-    {
+    let dropped: Vec<u32> = {
         let mut q = state.queue.lock();
-        q.clear(); // drop unstarted stale jobs
+        // drain, not clear — we owe the caller the ids we are abandoning
+        let dropped = q.drain(..).map(|j| j.id).collect();
         for (id, path) in items {
             q.push(Job { id, path });
         }
-    }
+        dropped
+    };
     #[cfg(debug_assertions)]
-    eprintln!("[thumbs] queued {n} gen={gen} running={}", *running);
+    eprintln!(
+        "[thumbs] queued {n} dropped {} running={}",
+        dropped.len(),
+        *running
+    );
     let _ = n;
     if !*running {
         *running = true;
@@ -249,7 +302,7 @@ pub async fn request_thumbs(
             .spawn(move || drain(handle))
             .map_err(|e| format!("spawn thumb thread: {e}"))?;
     }
-    Ok(gen)
+    Ok(dropped)
 }
 
 fn drain(app: AppHandle) {
@@ -312,12 +365,20 @@ fn drain(app: AppHandle) {
                 // the frontend never re-asks for an id it already asked for.
                 // The generation still governs what gets QUEUED (clear + LIFO),
                 // which is where cancellation actually pays.
+                // Memory hit: no disk probe, no decode. build() re-opens the
+                // cached PNG purely to recompute stats that cannot have
+                // changed — cheap per cell, but it recurs for every cell on
+                // every warm-cache launch, and this LRU exists to skip it.
+                if let Some(hit) = app.state::<ThumbState>().cache.lock().get(&job.path) {
+                    pending_ref.lock().push((job.id, hit.1, hit.0.clone()));
+                    return;
+                }
                 match build(&job.path, dir_ref) {
                     Ok((key, info)) => {
                         app.state::<ThumbState>()
                             .cache
                             .lock()
-                            .put(job.path.clone(), key.clone());
+                            .put(job.path.clone(), (key.clone(), info));
                         pending_ref.lock().push((job.id, info, key));
                     }
                     Err(e) => eprintln!("[thumbs] {e}"),
