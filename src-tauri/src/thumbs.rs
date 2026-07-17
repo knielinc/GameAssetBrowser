@@ -56,10 +56,13 @@ pub struct ThumbState {
     running: Mutex<bool>,
 }
 
+/// No `gen` field: cancellation happens by CLEARING the queue in
+/// request_thumbs, not by tagging jobs. Results are never dropped for
+/// staleness (see the note in `drain`), so a job carries nothing a later
+/// generation would need to check.
 struct Job {
     id: u32,
     path: String,
-    gen: u32,
 }
 
 impl Default for ThumbState {
@@ -225,7 +228,7 @@ pub async fn request_thumbs(
         let mut q = state.queue.lock();
         q.clear(); // drop unstarted stale jobs
         for (id, path) in items {
-            q.push(Job { id, path, gen });
+            q.push(Job { id, path });
         }
     }
     #[cfg(debug_assertions)]

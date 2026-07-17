@@ -6,10 +6,14 @@ import TabBar from "./components/TabBar";
 import TabPane from "./components/TabPane";
 import PlayerBar from "./components/player/PlayerBar";
 import { useSidebarWidth } from "./hooks/useSidebarWidth";
+import { useWindowFullscreen } from "./hooks/useWindowFullscreen";
 import { addFolders, useLibraryStore } from "./stores/libraryStore";
 
 export default function App(): ReactElement {
   const { width: sidebarWidth, isDragging, handleProps } = useSidebarWidth();
+  // F11 = OS window fullscreen for the whole app. Distinct from Space, which
+  // opens an in-app overlay for one asset; the two compose.
+  useWindowFullscreen();
   const hasRoots = useLibraryStore((s) => s.roots.length > 0);
   const activeTab = useLibraryStore((s) => s.activeTab);
 

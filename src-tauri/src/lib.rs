@@ -10,6 +10,52 @@ mod waveform;
 use audio::{AudioController, PlayerCmd};
 use tauri::Manager;
 
+/// Read a model (or one of its sibling textures / .bin chunks) for the
+/// `model://` scheme.
+///
+/// The URL path is `/C:/Pack/model.gltf`. WebView2 has already normalized any
+/// `../` because it is a real HTTP URL, but the scope check is what actually
+/// matters: without it a crafted glTF could reference
+/// `../../../../Windows/System32/config/SAM` and exfiltrate it. Only paths
+/// inside a root the user explicitly picked are served.
+fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<Vec<u8>> {
+    let decoded = percent_decode(uri_path.trim_start_matches('/'));
+    if decoded.is_empty() {
+        return None;
+    }
+    let path = std::path::PathBuf::from(decoded.replace('/', "\\"));
+    if !scanner::is_within_roots(app, &path) {
+        eprintln!("[model] refused out-of-scope read: {}", path.display());
+        return None;
+    }
+    std::fs::read(&path).ok()
+}
+
+/// Minimal percent-decoder. glTF spec-compliant exporters encode URIs
+/// (`wood%20wall.png`); MTL and FBX emit raw names with literal spaces. A
+/// malformed `%` sequence is left as-is rather than throwing, because a
+/// filename containing a bare `%` is legal on Windows.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            match u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                Ok(v) => {
+                    out.push(v);
+                    i += 3;
+                    continue;
+                }
+                Err(_) => {}
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Unbounded: player commands are tiny and must never block the caller.
@@ -54,6 +100,39 @@ pub fn run() {
                 match resp {
                     Ok(r) => responder.respond(r),
                     Err(e) => eprintln!("[thumb] response build failed: {e}"),
+                }
+            });
+        })
+        // Models load in the webview (three.js) because Rust has no viable FBX
+        // story and Synty ships FBX. That means the loader resolves sibling
+        // textures and .bin chunks by RELATIVE URL, which is exactly what
+        // convertFileSrc breaks: it percent-encodes the whole path into ONE
+        // segment, so three's extractUrlBase returns "http://asset.localhost/"
+        // and every sibling resolves to garbage — silently, as an untextured
+        // model rather than an error.
+        //
+        // Registering our own scheme fixes it at the root, because we choose
+        // the URL shape: http://model.localhost/C:/Pack/model.gltf is
+        // slash-separated, so three's relative join works untouched and
+        // WebView2 normalizes "../" for us (it's a real HTTP URL). No vfs
+        // prefix, no setURLModifier.
+        .register_asynchronous_uri_scheme_protocol("model", |ctx, req, responder| {
+            let app = ctx.app_handle().clone();
+            let uri = req.uri().clone();
+            std::thread::spawn(move || {
+                let resp = match model_bytes(&app, uri.path()) {
+                    Some(bytes) => tauri::http::Response::builder()
+                        .header("Content-Type", "application/octet-stream")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes),
+                    None => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Vec::new()),
+                };
+                match resp {
+                    Ok(r) => responder.respond(r),
+                    Err(e) => eprintln!("[model] response build failed: {e}"),
                 }
             });
         })

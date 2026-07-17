@@ -40,11 +40,17 @@ const AUTOPLAY_DEBOUNCE_MS = 60;
  *   Space      play/pause · Enter replay · L loop
  *   Ctrl+1/2/3 switch tab
  */
-export function useKeyboardShortcuts(kind: AssetKind, visible: LibFile[]): void {
+export function useKeyboardShortcuts(
+  kind: AssetKind,
+  visible: LibFile[],
+  onPreview?: (file: LibFile) => void,
+): void {
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const kindRef = useRef(kind);
   kindRef.current = kind;
+  const previewRef = useRef(onPreview);
+  previewRef.current = onPreview;
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -126,9 +132,19 @@ export function useKeyboardShortcuts(kind: AssetKind, visible: LibFile[]): void 
         }
 
         case "Space": {
-          if (!isAudio) return;
           e.preventDefault();
-          usePlayerStore.getState().togglePlay();
+          // On Audio, Space is play/pause and always has been. On the visual
+          // tabs it is free, so it opens the fullscreen preview — the same
+          // "show me this thing" gesture, adapted to what the thing is.
+          if (isAudio) {
+            usePlayerStore.getState().togglePlay();
+            break;
+          }
+          const files = visibleRef.current;
+          const tab = useLibraryStore.getState().tabs[activeKind];
+          const file =
+            files.find((f) => f.path === tab.selectedPath) ?? files[tab.selectedIndex] ?? files[0];
+          if (file !== undefined) previewRef.current?.(file);
           break;
         }
 

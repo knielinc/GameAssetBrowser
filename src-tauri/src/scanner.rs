@@ -23,6 +23,37 @@ const BATCH_SIZE: usize = 1000;
 #[derive(Default)]
 pub struct ScanState {
     pub generation: AtomicU32,
+    /// The roots the user has consented to, as of the last scan. The `model://`
+    /// scheme checks reads against these — a crafted glTF referencing
+    /// `../../../../Windows/System32/...` must not resolve. `start_scan` is the
+    /// single choke point every root passes through, including hydration from
+    /// persisted settings, so this is the one place worth setting it.
+    pub roots: parking_lot::Mutex<Vec<String>>,
+}
+
+/// True if `path` sits inside a root the user picked. Case-insensitive because
+/// Windows paths are, and separator-normalized because the URL carries `/`.
+pub fn is_within_roots(app: &AppHandle, path: &Path) -> bool {
+    let Ok(canon) = path.canonicalize() else {
+        return false;
+    };
+    let target = canon.to_string_lossy().to_lowercase().replace('/', "\\");
+    // Bind the State guard: `app.state::<T>()` is a temporary, and locking
+    // through it inline would drop it while the lock still borrows it.
+    let state = app.state::<ScanState>();
+    let roots = state.roots.lock();
+    roots.iter().any(|r| {
+        let Ok(rc) = Path::new(r).canonicalize() else {
+            return false;
+        };
+        let root = rc.to_string_lossy().to_lowercase().replace('/', "\\");
+        // Trailing-separator trim so the boundary test lands on the right char
+        // (a drive root is "C:\"), then require a separator so `C:\AB` never
+        // matches root `C:\A`.
+        let root = root.trim_end_matches('\\');
+        target.starts_with(root)
+            && (target.len() == root.len() || target.as_bytes().get(root.len()) == Some(&b'\\'))
+    })
 }
 
 /// The scan generation currently considered live.
@@ -37,6 +68,9 @@ pub async fn start_scan(
     roots: Vec<String>,
 ) -> Result<u32, String> {
     let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    // Record consent before the walk: the model:// scheme reads this, and a
+    // preview can be requested the moment the first batch lands.
+    *state.roots.lock() = roots.clone();
     std::thread::Builder::new()
         .name(format!("scanner-{gen}"))
         .spawn(move || scan_worker(app, roots, gen))

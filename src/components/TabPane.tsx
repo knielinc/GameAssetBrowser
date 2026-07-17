@@ -14,6 +14,8 @@ import AssetGrid from "./grid/AssetGrid";
 import TextureCell from "./grid/TextureCell";
 import MaterialCell from "./grid/MaterialCell";
 import ModelCell from "./grid/ModelCell";
+import ModelInspector from "./model/ModelInspector";
+import FullscreenPreview from "./FullscreenPreview";
 import { groupTextures, type TextureItem } from "../material/classify";
 
 export interface TabPaneProps {
@@ -30,7 +32,9 @@ export interface TabPaneProps {
  */
 export default function TabPane({ kind }: TabPaneProps): ReactElement {
   const visible = useVisibleFiles(kind);
-  useKeyboardShortcuts(kind, visible);
+  const [preview, setPreview] = useState<LibFile | null>(null);
+  const onPreview = useCallback((f: LibFile) => setPreview(f), []);
+  useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview);
   const onVisibleRange = useThumbRequests(visible, kind === "texture");
 
   const tab = useLibraryStore((s) => s.tabs[kind]);
@@ -50,6 +54,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   }, [kind, tab.groupMaterials, tab.viewMode, visible, thumbsVersion]);
 
   const [menu, setMenu] = useState<{ x: number; y: number; file: LibFile } | null>(null);
+  const [showInspector, setShowInspector] = useState(true);
   const onCellSelect = useCallback(
     (index: number) => {
       const file = visible[index];
@@ -174,10 +179,24 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     content = <FileList kind={kind} files={visible} />;
   }
 
+  const selectedFile = visible.find((f) => f.path === tab.selectedPath) ?? null;
+
   return (
     <>
       <Toolbar kind={kind} />
-      {content}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">{content}</div>
+        {/* Hidden while the fullscreen preview is up: both host a WebGL
+            context, and there is no reason to pay for two. */}
+        {kind === "model" && showInspector && preview === null && (
+          <ModelInspector
+            path={selectedFile?.path ?? null}
+            size={selectedFile?.size ?? null}
+            onClose={() => setShowInspector(false)}
+          />
+        )}
+      </div>
+      {preview !== null && <FullscreenPreview file={preview} onClose={() => setPreview(null)} />}
       <StatusBar kind={kind} visibleCount={visible.length} />
       {menu !== null && (
         <ContextMenu
