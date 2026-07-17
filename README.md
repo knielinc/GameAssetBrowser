@@ -1,6 +1,12 @@
-# SoundPreviewer
+# AssetPreviewer
 
-A sleek dark-mode audio sample previewer for Windows — a faster, prettier take on Pulp.
+A sleek dark-mode game-asset previewer for Windows — built for navigating big
+asset packs (Synty, ambientCG/freestylized, Megascans, HDRIs) without opening an
+engine.
+
+> **Status:** the audio previewer below is complete and is what ships today.
+> Texture/material and 3D-model browsing are in progress — see *Roadmap*.
+> (The project began life as SoundPreviewer, a faster, prettier take on Pulp.)
 
 ## Features
 
@@ -20,6 +26,26 @@ A sleek dark-mode audio sample previewer for Windows — a faster, prettier take
 | Enter | Replay from start |
 | L | Toggle loop |
 | ← / → | Seek ∓/± 2 s |
+
+## Roadmap
+
+Three tabs over one library — audio keeps the list, visual assets get a grid.
+
+| Phase | Scope |
+| --- | --- |
+| 1 ✅ | Rename to AssetPreviewer |
+| 2 | Tab shell: `AssetKind`, per-tab store + settings, Audio unchanged |
+| 3 | Scanner classifies audio / texture / model in one walk |
+| 4 | Shared virtualized `AssetGrid` |
+| 5 | Inspector drawer |
+| 6a | Textures: Rust thumbnailer (DDS/TGA/EXR), **material grouping**, PBR preview |
+| 6b | Models: three.js viewport, glTF/OBJ/FBX |
+
+**Material grouping** is the headline: loose files that form one PBR material
+(`Rock_D.png` + `Rock_N.png` + `Rock_ORM.png`) collapse into a single material.
+Suffixes are resolved *per group, not per file* — `Rock_A.png` is undecidable
+alone (Albedo? Alpha? AO?) but decidable next to `Rock_D.png`, because `_D` is
+unambiguously Diffuse.
 
 ## Development
 

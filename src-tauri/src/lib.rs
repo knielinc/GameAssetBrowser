@@ -42,7 +42,7 @@ pub fn run() {
             // "main" (capabilities/default.json and the frontend assume it).
             let mut window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-                    .title("SoundPreviewer")
+                    .title("AssetPreviewer")
                     .inner_size(1200.0, 760.0)
                     .min_inner_size(900.0, 600.0)
                     .theme(Some(tauri::Theme::Dark))
