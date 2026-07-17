@@ -1,8 +1,9 @@
-import type { ReactElement } from "react";
+import { useMemo, type ReactElement } from "react";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, Layers, LayoutGrid, List, Search, X } from "lucide-react";
 import { EXTENSIONS, SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { useLibraryStore } from "../stores/libraryStore";
+import { usePresentExts } from "../hooks/useVisibleFiles";
 import { MAX_CELL, MIN_CELL } from "../stores/settings";
 
 const SORT_LABELS: Record<SortField, string> = {
@@ -27,6 +28,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const setQuery = useLibraryStore((s) => s.setQuery);
   const toggleExt = useLibraryStore((s) => s.toggleExt);
+  const clearExts = useLibraryStore((s) => s.clearExts);
   const setSort = useLibraryStore((s) => s.setSort);
   const toggleSortDir = useLibraryStore((s) => s.toggleSortDir);
   const patchTab = useLibraryStore((s) => s.patchTab);
@@ -34,6 +36,15 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const { query, extFilter, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
   // Audio has no grid implementation — never render a control that does nothing.
   const canGrid = kind !== "audio";
+
+  const present = usePresentExts(kind);
+  // Keep an active filter's chip even if its format has left the scope —
+  // otherwise the filter is applied with no way to see or clear it.
+  const chips = useMemo(() => {
+    const shown = new Map(present.map((p) => [p.ext, p]));
+    for (const e of extFilter) if (!shown.has(e)) shown.set(e, { ext: e, count: 0 });
+    return EXTENSIONS[kind].filter((e) => shown.has(e)).map((e) => shown.get(e)!);
+  }, [present, extFilter, kind]);
 
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
@@ -65,17 +76,33 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         )}
       </div>
 
-      <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
-        {EXTENSIONS[kind].map((ext) => (
+      {/* Only formats that actually exist here. No overflow scroll: the row is
+          short because the data is, and every chip can produce a result. An
+          active filter whose format left the scope stays visible, or you'd be
+          filtering by something you can no longer see or clear. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        {chips.map(({ ext, count }) => (
           <button
             key={ext}
             type="button"
+            title={`${count.toLocaleString()} ${ext} file${count === 1 ? "" : "s"}`}
             className={clsx("chip shrink-0", extFilter.has(ext) && "chip-active")}
             onClick={() => toggleExt(kind, ext)}
           >
             {ext}
+            <span className="ml-1 tabular-nums opacity-55">{count}</span>
           </button>
         ))}
+        {extFilter.size > 0 && (
+          <button
+            type="button"
+            title="Clear format filter"
+            className="text-dim transition-colors duration-[120ms] hover:text-text"
+            onClick={() => clearExts(kind)}
+          >
+            <X size={11} />
+          </button>
+        )}
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">

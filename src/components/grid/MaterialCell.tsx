@@ -34,10 +34,14 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
   const lowConfidence = material.confidence < 0.8;
 
   return (
-    <div className="relative ml-0 mr-1.5 mt-1.5">
+    // No margins here: AssetGrid computes row height from the cell box, so
+    // anything that grows the box overlaps the row below. The stacked cards
+    // are absolutely positioned and transform-offset, so they render outside
+    // the box without contributing to layout — the 12px grid gap absorbs them.
+    <div className="relative">
       {/* Stacked cards behind the frame — the "this is a set" signal. */}
-      <div className="pointer-events-none absolute inset-0 translate-x-[6px] translate-y-[-6px] rounded-lg border border-border bg-panel opacity-55" />
-      <div className="pointer-events-none absolute inset-0 translate-x-[3px] translate-y-[-3px] rounded-lg border border-border bg-panel" />
+      <div className="pointer-events-none absolute inset-0 translate-x-[5px] translate-y-[-5px] rounded-lg border border-border bg-panel opacity-55" />
+      <div className="pointer-events-none absolute inset-0 translate-x-[2.5px] translate-y-[-2.5px] rounded-lg border border-border bg-panel" />
 
       <div
         className={clsx(

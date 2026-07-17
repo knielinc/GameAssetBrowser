@@ -179,6 +179,8 @@ pub fn run() {
             portable::settings_store_path,
             scanner::start_scan,
             thumbs::request_thumbs,
+            thumbs::model_thumb_lookup,
+            thumbs::model_thumb_store,
             waveform::request_waveform,
             explorer::show_in_explorer,
             explorer::open_in_explorer,

@@ -82,7 +82,14 @@ impl Default for ThumbState {
 /// as waveform.rs's key. FNV inline rather than a hashing crate: collisions
 /// across 100k thumbs are ~1e-10 and self-heal on the next mtime change.
 fn cache_key(path: &str, size: u64, mtime: i64) -> String {
-    let raw = format!("{CACHE_VERSION}:{THUMB_EDGE}:{size}:{mtime}:{path}");
+    keyed("t", path, size, mtime)
+}
+
+/// `kind` namespaces the key so a model and a texture at the same path can
+/// never collide, and so bumping one pipeline's version cannot invalidate the
+/// other's cache.
+fn keyed(kind: &str, path: &str, size: u64, mtime: i64) -> String {
+    let raw = format!("{kind}:{CACHE_VERSION}:{THUMB_EDGE}:{size}:{mtime}:{path}");
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in raw.as_bytes() {
         h ^= *b as u64;
@@ -339,6 +346,41 @@ fn flush(app: &AppHandle, pending: &Arc<Mutex<Vec<(u32, ThumbInfo, String)>>>) {
         }
         Err(e) => eprintln!("[thumbs] emit failed: {e}"),
     }
+}
+
+/// Cached model-thumbnail keys for `items`, as `(id, key)` — only for entries
+/// that actually exist on disk. Callers render the misses themselves.
+///
+/// Models are rendered in the WEBVIEW (Rust has no FBX story), so unlike
+/// textures the Rust side only owns the cache: lookup and store. The decode,
+/// framing, and rasterization all happen in three.js.
+#[tauri::command]
+pub fn model_thumb_lookup(app: AppHandle, items: Vec<(u32, String)>) -> Vec<(u32, String)> {
+    let dir = app.state::<DataHome>().thumbs_dir();
+    items
+        .into_iter()
+        .filter_map(|(id, path)| {
+            let (size, mtime) = file_stamp(Path::new(&path));
+            let key = keyed("m", &path, size, mtime);
+            dir.join(format!("{key}.png")).exists().then_some((id, key))
+        })
+        .collect()
+}
+
+/// Persist a webview-rendered model thumbnail. Returns its cache key, which
+/// the frontend turns into a `thumb://` URL.
+///
+/// Bytes over IPC is fine here and only here: a 256px PNG is ~10-20 KB, at
+/// most a couple per second, and the alternative (a second scheme, or a temp
+/// file dance) buys nothing at that volume.
+#[tauri::command]
+pub fn model_thumb_store(app: AppHandle, path: String, bytes: Vec<u8>) -> Result<String, String> {
+    let dir = app.state::<DataHome>().thumbs_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("thumbs dir: {e}"))?;
+    let (size, mtime) = file_stamp(Path::new(&path));
+    let key = keyed("m", &path, size, mtime);
+    fs::write(dir.join(format!("{key}.png")), bytes).map_err(|e| format!("write thumb: {e}"))?;
+    Ok(key)
 }
 
 /// Resolve a cache key to its file, for the URI-scheme handler.

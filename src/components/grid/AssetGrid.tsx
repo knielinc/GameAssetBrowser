@@ -68,7 +68,12 @@ export default function AssetGrid<T>({
 
   const usable = Math.max(0, width - PAD * 2);
   const columns = Math.max(1, Math.floor((usable + GAP) / (cellSize + GAP)));
-  const rowHeight = cellSize + CELL_META_HEIGHT + GAP;
+  // Cells STRETCH to fill (minmax(cellSize, 1fr)), so the rendered width is
+  // >= cellSize. The thumb is aspect-square, so its height follows that real
+  // width — deriving rowHeight from cellSize instead let every row under-
+  // estimate itself and the rows overlapped.
+  const cellWidth = columns > 0 ? (usable - (columns - 1) * GAP) / columns : cellSize;
+  const rowHeight = Math.ceil(cellWidth + CELL_META_HEIGHT + GAP);
   const rowCount = Math.ceil(items.length / columns);
 
   const virtualizer = useVirtualizer({

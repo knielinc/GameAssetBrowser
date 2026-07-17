@@ -49,10 +49,14 @@ function AssetCellInner({
               <span
                 key={i}
                 title={b.title}
+                // NO backdrop-blur. It forces its own compositing layer, and
+                // inside a virtualizer whose rows move by translateY those
+                // layers visibly lag behind the content while scrolling. A
+                // solid tint reads the same and composites for free.
                 className={clsx(
-                  "rounded px-1.5 py-0.5 text-[9px] font-semibold tabular-nums backdrop-blur-sm",
+                  "rounded px-1.5 py-0.5 text-[9px] font-semibold tabular-nums",
                   i === badges.length - 1 && badges.length > 1 && "ml-auto",
-                  b.warn ? "bg-kind-model text-[#1a1208]" : "bg-black/60 text-text",
+                  b.warn ? "bg-kind-model text-[#1a1208]" : "bg-[#0a0a0fd9] text-text",
                 )}
               >
                 {b.text}

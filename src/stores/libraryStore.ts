@@ -52,7 +52,7 @@ export interface LibraryState {
   durationsVersion: number;
   /** file id → thumbnail cache key + image stats. Same mutate-in-place +
    *  version-counter idiom as `durations`. */
-  thumbs: Map<number, { key: string; info: ThumbInfo }>;
+  thumbs: Map<number, { key: string; info: ThumbInfo | null }>;
   thumbsVersion: number;
   /**
    * Folder subtree the file list is scoped to (a root or any subfolder);
@@ -72,10 +72,14 @@ export interface LibraryState {
   finishScan: (done: ScanDone) => void;
   mergeDurations: (entries: DurationBatch["entries"]) => void;
   mergeThumbs: (entries: ThumbBatch["entries"]) => void;
+  /** Model thumbnails: rendered in the webview, so they arrive as a bare key
+   *  with no image statistics (those are a texture-decode by-product). */
+  setModelThumbs: (entries: [id: number, key: string][]) => void;
   setActiveTab: (kind: AssetKind) => void;
   patchTab: (kind: AssetKind, patch: Partial<TabState>) => void;
   setQuery: (kind: AssetKind, query: string) => void;
   toggleExt: (kind: AssetKind, ext: string) => void;
+  clearExts: (kind: AssetKind) => void;
   /** Header-click semantics: same field toggles direction, new field resets to asc. */
   setSort: (kind: AssetKind, field: SortField) => void;
   toggleSortDir: (kind: AssetKind) => void;
@@ -148,7 +152,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   total: 0,
   durations: new Map<number, number>(),
   durationsVersion: 0,
-  thumbs: new Map<number, { key: string; info: ThumbInfo }>(),
+  thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
   thumbsVersion: 0,
   folderScope: null,
   activeTab: "audio",
@@ -165,7 +169,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       durations: new Map<number, number>(),
       durationsVersion: s.durationsVersion + 1,
       // File ids are per-scan, so a stale id would index the wrong texture.
-      thumbs: new Map<number, { key: string; info: ThumbInfo }>(),
+      thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
       thumbsVersion: s.thumbsVersion + 1,
     })),
 
@@ -199,6 +203,14 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       return { thumbsVersion: s.thumbsVersion + 1 };
     }),
 
+  setModelThumbs: (entries) =>
+    set((s) => {
+      for (const [id, key] of entries) {
+        s.thumbs.set(id, { key, info: null });
+      }
+      return { thumbsVersion: s.thumbsVersion + 1 };
+    }),
+
   setActiveTab: (kind) => set({ activeTab: kind }),
 
   // Every per-tab mutation funnels through here, so `tabs` gets a fresh
@@ -220,6 +232,11 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       }
       return { tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], extFilter: next } } };
     }),
+
+  clearExts: (kind) =>
+    set((s) => ({
+      tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], extFilter: new Set<string>() } },
+    })),
 
   setSort: (kind, field) =>
     set((s) => {
@@ -252,7 +269,9 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
  *  the grouping pass it feeds. */
 export function thumbInfos(): Map<number, ThumbInfo> {
   const out = new Map<number, ThumbInfo>();
-  for (const [id, t] of useLibraryStore.getState().thumbs) out.set(id, t.info);
+  for (const [id, t] of useLibraryStore.getState().thumbs) {
+    if (t.info !== null) out.set(id, t.info);
+  }
   return out;
 }
 

@@ -3,6 +3,7 @@ import { Copy, FolderOpen, Loader2 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useThumbRequests } from "../hooks/useThumbRequests";
+import { useModelThumbs } from "../hooks/useModelThumbs";
 import { thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { showInExplorer } from "../ipc/commands";
 import type { AssetKind } from "../types";
@@ -35,7 +36,9 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   const [preview, setPreview] = useState<LibFile | null>(null);
   const onPreview = useCallback((f: LibFile) => setPreview(f), []);
   useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview);
-  const onVisibleRange = useThumbRequests(visible, kind === "texture");
+  const onTextureRange = useThumbRequests(visible, kind === "texture");
+  const onModelRange = useModelThumbs(visible, kind === "model");
+  const onVisibleRange = kind === "model" ? onModelRange : onTextureRange;
 
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const scanning = useLibraryStore((s) => s.scanning);

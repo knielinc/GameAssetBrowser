@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { folderMatcher, useLibraryStore, type LibFile } from "../stores/libraryStore";
-import type { AssetKind, SortField } from "../types";
+import { EXTENSIONS, type AssetKind, type SortField } from "../types";
 
 function useDebounced<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -86,6 +86,34 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     }
     return files;
   }, [kind, allFiles, folderScope, debouncedQuery, extFilter, sortField, sortDir, durations, durationsVersion]);
+}
+
+/**
+ * Extensions of `kind` that actually exist in the current folder scope, with
+ * counts, in the canonical order from EXTENSIONS.
+ *
+ * The toolbar used to render every extension the app knows about — 10 chips
+ * for textures — which overflowed into a horizontal scroll and offered
+ * filters that could only ever produce zero results. Deriving from the data
+ * makes the row short, stable, and every chip meaningful. Canonical order
+ * (not count order) so chips never reshuffle under the cursor as a scan
+ * streams in.
+ */
+export function usePresentExts(kind: AssetKind): { ext: string; count: number }[] {
+  const allFiles = useLibraryStore((s) => s.allFiles);
+  const folderScope = useLibraryStore((s) => s.folderScope);
+  return useMemo(() => {
+    const inScope = folderScope === null ? null : folderMatcher(folderScope);
+    const counts = new Map<string, number>();
+    for (const f of allFiles) {
+      if (f.kind !== kind) continue;
+      if (inScope !== null && !inScope(f.path)) continue;
+      counts.set(f.ext, (counts.get(f.ext) ?? 0) + 1);
+    }
+    return EXTENSIONS[kind]
+      .filter((e) => counts.has(e))
+      .map((e) => ({ ext: e, count: counts.get(e)! }));
+  }, [kind, allFiles, folderScope]);
 }
 
 /** Count of one kind inside the active folder scope — the status bar's

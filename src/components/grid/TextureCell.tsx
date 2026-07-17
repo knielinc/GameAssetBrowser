@@ -17,7 +17,8 @@ export default function TextureCell({ file, selected }: TextureCellProps): React
   const thumb = useLibraryStore.getState().thumbs.get(file.id);
 
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];
-  if (thumb !== undefined) {
+  // info is null for webview-rendered model thumbs; textures always have it.
+  if (thumb?.info != null) {
     const { info } = thumb;
     // Content-derived hints, clearly marked as inference. The name-based
     // classifier is authoritative; this is what we can see in the pixels.

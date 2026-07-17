@@ -68,7 +68,7 @@ export default function FullscreenPreview({ file, onClose }: FullscreenPreviewPr
         )}
       </div>
 
-      {file.kind === "texture" && thumb !== undefined && (
+      {file.kind === "texture" && thumb?.info != null && (
         <div className="flex h-8 shrink-0 items-center gap-4 border-t border-border px-4 text-[11px] text-dim">
           <span className="tabular-nums">
             thumbnail {thumb.info.width}×{thumb.info.height}
