@@ -38,13 +38,10 @@ export default function ModelInspector({ path, size, onClose }: ModelInspectorPr
           <ModelViewport path={path} onStats={onStats} onRescue={onRescue} />
         </div>
 
-        {path !== null && rescue !== null && (
-          <AtlasPicker
-            modelPath={path}
-            candidates={rescue.candidates}
-            applied={rescue.applied}
-            manual={rescue.manual === true}
-          />
+        {/* Only offer the picker when the model actually has empty texture
+            slots — a fully-textured model needs no atlas. */}
+        {path !== null && rescue !== null && rescue.brokenSlots > 0 && (
+          <AtlasPicker modelPath={path} candidates={rescue.candidates} applied={rescue.applied} />
         )}
 
         {path === null ? (

@@ -29,18 +29,42 @@ pub struct ScanState {
     /// single choke point every root passes through, including hydration from
     /// persisted settings, so this is the one place worth setting it.
     pub roots: parking_lot::Mutex<Vec<String>>,
+    /// Individual files the user explicitly chose in the Browse dialog for a
+    /// model's atlas. They picked it themselves, so it is allowed even outside
+    /// the scanned roots — but ONLY these exact files, canonicalized.
+    pub approved: parking_lot::Mutex<std::collections::HashSet<String>>,
 }
 
-/// True if `path` sits inside a root the user picked. Case-insensitive because
-/// Windows paths are, and separator-normalized because the URL carries `/`.
+fn norm(path: &Path) -> Option<String> {
+    Some(
+        path.canonicalize()
+            .ok()?
+            .to_string_lossy()
+            .to_lowercase()
+            .replace('/', "\\"),
+    )
+}
+
+/// Allow a file the user explicitly browsed to as a model's atlas, so the
+/// `model://` scheme will serve it even if it lives outside the scanned roots.
+#[tauri::command]
+pub fn approve_texture(app: AppHandle, path: String) {
+    if let Some(n) = norm(Path::new(&path)) {
+        app.state::<ScanState>().approved.lock().insert(n);
+    }
+}
+
+/// True if `path` sits inside a root the user picked, or is a file they
+/// explicitly browsed to. Case-insensitive (Windows) and separator-normalized
+/// (the URL carries `/`).
 pub fn is_within_roots(app: &AppHandle, path: &Path) -> bool {
-    let Ok(canon) = path.canonicalize() else {
+    let Some(target) = norm(path) else {
         return false;
     };
-    let target = canon.to_string_lossy().to_lowercase().replace('/', "\\");
-    // Bind the State guard: `app.state::<T>()` is a temporary, and locking
-    // through it inline would drop it while the lock still borrows it.
     let state = app.state::<ScanState>();
+    if state.approved.lock().contains(&target) {
+        return true;
+    }
     let roots = state.roots.lock();
     roots.iter().any(|r| {
         let Ok(rc) = Path::new(r).canonicalize() else {

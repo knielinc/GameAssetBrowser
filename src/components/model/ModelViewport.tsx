@@ -202,11 +202,12 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
           return;
         }
         // Synty FBX bake absolute authoring paths and their OBJ ship no .mtl,
-        // so materials arrive with no map. Find the pack atlas ourselves.
+        // so materials arrive untextured. Apply the user's chosen atlas if they
+        // have picked one for this pack; otherwise leave it grey — no guessing.
         try {
           const r = await rescueTextures(root, path);
           if (!cancelled) {
-            setRescued(r.applied === null ? null : { ...r });
+            setRescued(r);
             onRescue?.(r);
           }
         } catch (e) {
@@ -282,14 +283,16 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
       )}
       {/* Say when a texture was found rather than declared — the model is not
           showing what the file asked for, and that is worth admitting. */}
-      {rescued !== null && rescued.applied !== null && (
+      {rescued !== null && rescued.brokenSlots > 0 && (
         <div
           className="pointer-events-none absolute right-1.5 top-1.5 max-w-[85%] truncate rounded bg-kind-model/85 px-1.5 py-0.5 text-[9px] font-medium text-[#1a1208]"
-          title={`The model's own texture path is broken. Applied the nearby atlas:\n${rescued.applied}${
-            rescued.confident ? "" : "\n(only candidate found — a guess)"
-          }`}
+          title={
+            rescued.applied !== null
+              ? `Textures assigned from your pick:\n${rescued.applied}`
+              : "This model's textures aren't embedded. Pick one below."
+          }
         >
-          {rescued.confident ? "atlas matched" : "atlas guessed"}
+          {rescued.applied !== null ? "atlas assigned" : "no texture — pick one"}
         </div>
       )}
     </div>

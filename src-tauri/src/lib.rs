@@ -170,25 +170,12 @@ pub fn run() {
             // Redirecting the WebView2 profile only applies to portable
             // copies; installed copies keep tauri's %LOCALAPPDATA% default.
             let webview_dir = data_home.is_portable().then(|| data_home.webview_dir());
-            // Open the single-file thumbnail cache (rebuilds its index and
-            // compacts if bloated), and clean up any legacy loose-PNG dir from
-            // an older build. Managed before the window exists so the thumb://
-            // handler can never race the state registration.
-            let cache_path = data_home.thumbs_cache_path();
+            // Thumbnails are cached in RAM only — nothing is written to disk.
+            // Delete any on-disk cache a previous build left behind. Managed
+            // before the window exists so the thumb:// handler can never race
+            // the state registration.
             thumbcache::remove_legacy_dir(data_home.dir());
-            // Fall back to a temp-dir cache if the data home is unwritable, so
-            // the cache is ALWAYS managed and the thumb:// handler can never
-            // panic on an unmanaged-state access.
-            let cache = thumbcache::ThumbCache::open(cache_path).or_else(|e| {
-                eprintln!("[thumbs] cache open failed ({e}); using a temp cache");
-                thumbcache::ThumbCache::open(std::env::temp_dir().join("assetpreviewer-thumbs.cache"))
-            });
-            match cache {
-                Ok(c) => {
-                    app.manage(c);
-                }
-                Err(e) => eprintln!("[thumbs] no thumbnail cache available: {e}"),
-            }
+            app.manage(thumbcache::ThumbCache::new());
             app.manage(data_home);
 
             // The main window is built here instead of being declared in
@@ -218,6 +205,7 @@ pub fn run() {
             thumbs::model_thumb_lookup,
             thumbs::model_thumb_store,
             modeltex::model_texture_hints,
+            scanner::approve_texture,
             waveform::request_waveform,
             explorer::show_in_explorer,
             explorer::open_in_explorer,
