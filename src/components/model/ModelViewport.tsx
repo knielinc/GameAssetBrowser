@@ -4,6 +4,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { Loader2 } from "lucide-react";
 import { analyze, loadModel, type ModelStats } from "../../model/loadModel";
 import { disposeModel } from "../../model/dispose";
+import { rescueTextures, type RescueResult } from "../../model/rescueTextures";
 
 export interface ModelViewportProps {
   path: string | null;
@@ -30,6 +31,7 @@ export default function ModelViewport({ path, onStats }: ModelViewportProps): Re
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rescued, setRescued] = useState<RescueResult | null>(null);
 
   // --- one-time init -------------------------------------------------------
   useEffect(() => {
@@ -189,7 +191,19 @@ export default function ModelViewport({ path, onStats }: ModelViewportProps): Re
 
     setLoading(true);
     void loadModel(path)
-      .then(({ root }) => {
+      .then(async ({ root }) => {
+        if (cancelled) {
+          disposeModel(root);
+          return;
+        }
+        // Synty FBX bake absolute authoring paths and their OBJ ship no .mtl,
+        // so materials arrive with no map. Find the pack atlas ourselves.
+        try {
+          const r = await rescueTextures(root, path);
+          if (!cancelled) setRescued(r.applied === null ? null : { ...r });
+        } catch (e) {
+          console.debug("[rescue]", e);
+        }
         if (cancelled) {
           disposeModel(root);
           return;
@@ -253,8 +267,20 @@ export default function ModelViewport({ path, onStats }: ModelViewportProps): Re
         </div>
       )}
       {!loading && error === null && path !== null && (
-        <div className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-dim backdrop-blur-sm">
+        <div className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-dim">
           drag orbit · right-drag pan · scroll zoom
+        </div>
+      )}
+      {/* Say when a texture was found rather than declared — the model is not
+          showing what the file asked for, and that is worth admitting. */}
+      {rescued !== null && rescued.applied !== null && (
+        <div
+          className="pointer-events-none absolute right-1.5 top-1.5 max-w-[85%] truncate rounded bg-kind-model/85 px-1.5 py-0.5 text-[9px] font-medium text-[#1a1208]"
+          title={`The model's own texture path is broken. Applied the nearby atlas:\n${rescued.applied}${
+            rescued.confident ? "" : "\n(only candidate found — a guess)"
+          }`}
+        >
+          {rescued.confident ? "atlas matched" : "atlas guessed"}
         </div>
       )}
     </div>

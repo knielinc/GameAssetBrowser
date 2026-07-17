@@ -3,6 +3,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { invoke } from "@tauri-apps/api/core";
 import { loadModel } from "./loadModel";
 import { disposeModel } from "./dispose";
+import { rescueTextures } from "./rescueTextures";
 /** Minimal shape this module needs — avoids importing the store, which would
  *  drag `three` into whatever imports the store. */
 export interface LibFileLike {
@@ -137,6 +138,13 @@ async function render(file: LibFileLike): Promise<string | null> {
   const { r, s, c } = ctx;
 
   const { root } = await loadModel(file.path);
+  // Same rescue as the inspector — otherwise the grid shows black FBX and
+  // white OBJ while the detail view shows them textured, which reads as a bug.
+  try {
+    await rescueTextures(root, file.path);
+  } catch {
+    /* untextured is still a usable thumbnail */
+  }
   s.add(root);
   try {
     const box = new THREE.Box3().setFromObject(root);

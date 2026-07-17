@@ -1,6 +1,7 @@
 mod audio;
 mod explorer;
 mod metadata;
+mod modeltex;
 mod portable;
 mod scanner;
 mod thumbs;
@@ -181,6 +182,7 @@ pub fn run() {
             thumbs::request_thumbs,
             thumbs::model_thumb_lookup,
             thumbs::model_thumb_store,
+            modeltex::model_texture_hints,
             waveform::request_waveform,
             explorer::show_in_explorer,
             explorer::open_in_explorer,

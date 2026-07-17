@@ -1,4 +1,5 @@
 import { type ReactElement } from "react";
+import clsx from "clsx";
 import { X } from "lucide-react";
 import { basename, useLibraryStore } from "../../stores/libraryStore";
 import type { LibFile } from "../../stores/libraryStore";
@@ -66,6 +67,27 @@ export function keysForFile(
   }
 }
 
+/** Resolved Channel -> the preview's texture slot. Packed maps ride in the
+ *  roughness slot, so flat mode shows the packed image itself. */
+function channelOf(ch: Channel): keyof ChannelKeys {
+  switch (ch) {
+    case "normal":
+      return "normal";
+    case "roughness":
+    case "packedORM":
+    case "packedARM":
+    case "packedRMA":
+    case "packedMRA":
+      return "roughness";
+    case "ao":
+      return "ao";
+    case "height":
+      return "height";
+    default:
+      return "baseColor";
+  }
+}
+
 export interface TextureInspectorProps {
   item: TextureItem | null;
   preview: PreviewState;
@@ -130,8 +152,27 @@ export default function TextureInspector({
                 {item.material.members.map((m) => (
                   <div
                     key={m.file.path}
-                    className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[11px] transition-colors duration-[120ms] hover:bg-raised"
-                    title={m.file.name}
+                    role="button"
+                    tabIndex={0}
+                    // Click a map to see THAT image, flat and raw. Otherwise a
+                    // normal or height map is only ever visible through its
+                    // effect on the composed surface.
+                    className={clsx(
+                      "flex cursor-default items-center gap-2 rounded-md border px-1.5 py-1 text-[11px] transition-colors duration-[120ms]",
+                      preview.mesh === "flat" && channelOf(m.channel) === preview.channel
+                        ? "border-accent/35 bg-accent/10"
+                        : "border-transparent hover:bg-raised",
+                    )}
+                    title={`${m.file.name}\nClick to view this map flat`}
+                    onClick={() =>
+                      onPreviewChange({ mesh: "flat", channel: channelOf(m.channel) })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onPreviewChange({ mesh: "flat", channel: channelOf(m.channel) });
+                      }
+                    }}
                   >
                     <div className="flex min-w-0 flex-1 flex-col">
                       <b className="text-[11px] font-semibold">{CHANNEL_LABEL[m.channel]}</b>

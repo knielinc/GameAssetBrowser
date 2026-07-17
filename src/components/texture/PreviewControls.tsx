@@ -11,6 +11,8 @@ export interface PreviewState {
   mesh: MeshMode;
   light: LightMode;
   tiles: number;
+  /** Flat mode: which map to show raw. Set by clicking a row in the Maps list. */
+  channel?: "baseColor" | "normal" | "roughness" | "ao" | "height";
 }
 
 export interface PreviewControlsProps {
@@ -73,16 +75,20 @@ export default function PreviewControls({ value, onChange, inline }: PreviewCont
           ))}
         </Row>
       </div>
-      <div className="flex min-w-[190px] flex-1 flex-col gap-1">
-        <Label>Lighting</Label>
-        <Row>
-          {LIGHT_MODES.map((l) => (
-            <Seg key={l.id} on={value.light === l.id} onClick={() => onChange({ light: l.id })}>
-              {l.label}
-            </Seg>
-          ))}
-        </Row>
-      </div>
+      {/* Flat is an unlit 2D image view — a lighting control there would do
+          nothing, and a control that does nothing is worse than no control. */}
+      {value.mesh !== "flat" && (
+        <div className="flex min-w-[190px] flex-1 flex-col gap-1">
+          <Label>Lighting</Label>
+          <Row>
+            {LIGHT_MODES.map((l) => (
+              <Seg key={l.id} on={value.light === l.id} onClick={() => onChange({ light: l.id })}>
+                {l.label}
+              </Seg>
+            ))}
+          </Row>
+        </div>
+      )}
       {/* Tiling is meaningless on a panorama — it must never repeat. */}
       {value.mesh !== "env" && (
         <div className="flex w-[132px] flex-col gap-1">

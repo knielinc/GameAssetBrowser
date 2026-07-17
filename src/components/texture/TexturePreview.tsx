@@ -35,6 +35,10 @@ export interface TexturePreviewProps {
   mesh: MeshMode;
   light: LightMode;
   tiles: number;
+  /** Flat mode only: which channel's raw image to show. Lets you inspect the
+   *  normal / roughness / AO / height maps themselves, not just their effect
+   *  on the composed surface. */
+  channel?: keyof ChannelKeys;
 }
 
 interface Rig {
@@ -95,7 +99,13 @@ const RIGS: Record<LightMode, Rig> = {
  * all, and the cache is the one representation that exists for every format.
  * It is a "does this look right" view, not a pixel-peeping one.
  */
-export default function TexturePreview({ keys, mesh, light, tiles }: TexturePreviewProps): ReactElement {
+export default function TexturePreview({
+  keys,
+  mesh,
+  light,
+  tiles,
+  channel,
+}: TexturePreviewProps): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const refs = useRef<{
     renderer?: THREE.WebGLRenderer;
@@ -109,6 +119,10 @@ export default function TexturePreview({ keys, mesh, light, tiles }: TexturePrev
   const cam = useRef({ yaw: 0.6, pitch: 0.3, dist: 3.2, panX: 0, panY: 0 });
   const dirty = useRef(true);
   const [ready, setReady] = useState(false);
+  // The pointer handler is installed once, so it reads the live mesh mode
+  // through a ref rather than closing over a stale value.
+  const meshRef = useRef(mesh);
+  meshRef.current = mesh;
 
   // --- init once ---
   useEffect(() => {
@@ -154,7 +168,11 @@ export default function TexturePreview({ keys, mesh, light, tiles }: TexturePrev
     let ly = 0;
     const el = renderer.domElement;
     const down = (e: PointerEvent): void => {
-      mode = e.button === 2 || e.button === 1 || e.shiftKey ? "pan" : "orbit";
+      // Flat is 2D — there is nothing to tumble. Every drag pans.
+      mode =
+        meshRef.current === "flat" || e.button === 2 || e.button === 1 || e.shiftKey
+          ? "pan"
+          : "orbit";
       lx = e.clientX;
       ly = e.clientY;
       el.setPointerCapture(e.pointerId);
@@ -284,18 +302,77 @@ export default function TexturePreview({ keys, mesh, light, tiles }: TexturePrev
     const normalMap = load(keys.normal, false);
     const roughnessMap = load(keys.roughness, false);
     const aoMap = load(keys.ao, false);
+    // Height is not wired into the standard material (displacement needs
+    // dense geometry to mean anything) — it exists so flat mode can show it.
+    const heightMap = load(keys.height, false);
 
     if (mesh === "env") {
       // Equirect panorama seen from inside — the view HDRIs and skyboxes want.
       const geo = new THREE.SphereGeometry(50, 64, 32);
       geo.scale(-1, 1, 1); // flip inward
-      const mat = new THREE.MeshBasicMaterial({ map });
+      // toneMapped:false — the thumbnail is already tone-mapped by the Rust
+      // decoder (an .hdr/.exr has to be, to become a PNG at all). Running ACES
+      // over it a second time crushes it.
+      const mat = new THREE.MeshBasicMaterial({ map, toneMapped: false });
       const m = new THREE.Mesh(geo, mat);
       scene.add(m);
       refs.current.obj = m;
       refs.current.mat = mat as unknown as THREE.MeshStandardMaterial;
       if (map !== null) map.repeat.set(1, 1); // never tile a panorama
       cam.current.dist = 0.01;
+      dirty.current = true;
+      return;
+    }
+
+    if (mesh === "flat") {
+      // Flat is an IMAGE VIEWER, not a material preview. Show the actual
+      // pixels: unlit, un-tone-mapped, sRGB — what Windows Photos would show.
+      //
+      // Lighting it is a lie for any texture, and obviously wrong for the ones
+      // that aren't game assets at all (a pack's readme PNG, a screenshot):
+      // MeshStandardMaterial + ACES rendered those darkened and washed out.
+      //
+      // `channel` picks WHICH map to look at: the point of flat mode on a
+      // material is to inspect the height/normal/roughness images themselves,
+      // not only their effect on the composed surface. Falls back to whatever
+      // the item actually has.
+      const byChannel: Record<string, THREE.Texture | null> = {
+        baseColor: map,
+        normal: normalMap,
+        roughness: roughnessMap,
+        ao: aoMap,
+        height: heightMap,
+      };
+      const raw =
+        (channel !== undefined ? byChannel[channel] : null) ??
+        map ??
+        normalMap ??
+        roughnessMap ??
+        aoMap ??
+        heightMap;
+      if (raw !== null) {
+        // Every map but base color was uploaded as linear DATA; to display it
+        // verbatim it has to be tagged sRGB like any other image file.
+        raw.colorSpace = THREE.SRGBColorSpace;
+        raw.needsUpdate = true;
+      }
+      const geo = new THREE.PlaneGeometry(2, 2);
+      const mat = new THREE.MeshBasicMaterial({
+        map: raw,
+        toneMapped: false,
+        transparent: true,
+        side: THREE.DoubleSide,
+      });
+      const m = new THREE.Mesh(geo, mat);
+      scene.add(m);
+      refs.current.obj = m;
+      refs.current.mat = mat as unknown as THREE.MeshStandardMaterial;
+      const c = cam.current;
+      c.yaw = 0;
+      c.pitch = 0;
+      c.dist = 2.42;
+      c.panX = 0;
+      c.panY = 0;
       dirty.current = true;
       return;
     }
@@ -317,37 +394,36 @@ export default function TexturePreview({ keys, mesh, light, tiles }: TexturePrev
       geo.setAttribute("uv1", geo.attributes.uv);
     }
 
-    const mat = new THREE.MeshStandardMaterial({
-      map,
-      normalMap,
-      roughnessMap,
-      aoMap,
-      roughness: roughnessMap !== null ? 1 : 0.75,
-      metalness: 0,
-      side: mesh === "plane" || mesh === "flat" ? THREE.DoubleSide : THREE.FrontSide,
-      transparent: false,
-    });
+    const side = mesh === "plane" ? THREE.DoubleSide : THREE.FrontSide;
+    // "Unlit" means SHOW THE ALBEDO, not "a PBR material with the lights off"
+    // — that is just black, which is what this used to render. A basic
+    // material is what unlit actually means.
+    const mat: THREE.Material =
+      light === "unlit"
+        ? new THREE.MeshBasicMaterial({ map, side, toneMapped: false })
+        : new THREE.MeshStandardMaterial({
+            map,
+            normalMap,
+            roughnessMap,
+            aoMap,
+            roughness: roughnessMap !== null ? 1 : 0.75,
+            metalness: 0,
+            side,
+          });
     const m = new THREE.Mesh(geo, mat);
     scene.add(m);
     refs.current.obj = m;
-    refs.current.mat = mat;
+    refs.current.mat = mat as THREE.MeshStandardMaterial;
 
+    // Flat is handled above and returns early — only the 3D meshes reach here.
     const c = cam.current;
-    if (mesh === "flat") {
-      // Flat is a 2D viewer: face-on, no rotation. Tilting it would be a
-      // gimmick, not a feature.
-      c.yaw = 0;
-      c.pitch = 0;
-      c.dist = 2.42;
-    } else {
-      c.yaw = 0.6;
-      c.pitch = 0.3;
-      c.dist = mesh === "cube" ? 4 : 3.2;
-    }
+    c.yaw = 0.6;
+    c.pitch = 0.3;
+    c.dist = mesh === "cube" ? 4 : 3.2;
     c.panX = 0;
     c.panY = 0;
     dirty.current = true;
-  }, [keys.baseColor, keys.normal, keys.roughness, keys.ao, mesh, tiles, ready]);
+  }, [keys.baseColor, keys.normal, keys.roughness, keys.ao, keys.height, mesh, light, tiles, channel, ready]);
 
   return <div ref={hostRef} className="h-full w-full" />;
 }
