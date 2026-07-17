@@ -24,7 +24,6 @@
 //! exactly what this design exists to avoid.
 
 use std::fs;
-use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -35,7 +34,7 @@ use lru::LruCache;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::thumbcache::ThumbCache;
+use crate::thumbcache::{Pixels, ThumbCache};
 use crate::types::{events, ThumbBatch, ThumbInfo};
 
 /// Thumbnail edge in px. 256 covers the largest grid cell (220) plus a little
@@ -220,21 +219,20 @@ fn to_ldr(img: DynamicImage) -> DynamicImage {
     }
 }
 
-/// Decode -> downscale -> PNG bytes -> the one-file cache. Returns the hex key
-/// and stats. The PNG never becomes a loose file; it lives in `thumbs.cache`.
+/// Decode -> downscale -> RGBA -> the in-memory cache. Returns the hex key and
+/// stats. NO PNG is produced: the grid uploads this RGBA straight to the GPU.
 fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> {
     let p = Path::new(path);
     let (size, mtime) = file_stamp(p);
     let h = hash_key("t", path, size, mtime);
     let key = hex_key(h);
 
-    // Cache hit: still need the dims/stats, so decode the stored 256px PNG
-    // (small, already downscaled) rather than touching the 4K original again.
-    if let Some(bytes) = cache.get(h) {
-        if let Ok(img) = image::load_from_memory(&bytes) {
-            return Ok((key, analyze(&img)));
+    // Cache hit: the RGBA and its dims are already here — recompute stats from
+    // it (cheap) rather than touching the 4K original again.
+    if let Some(px) = cache.get(h) {
+        if let Some(buf) = image::RgbaImage::from_raw(px.width, px.height, px.rgba) {
+            return Ok((key, analyze(&DynamicImage::ImageRgba8(buf))));
         }
-        // corrupt entry — fall through and rebuild it (put overwrites the key)
     }
 
     let img = image::open(p).map_err(|e| format!("decode {path}: {e}"))?;
@@ -249,18 +247,20 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
     } else {
         img
     };
-    // After the resize (cheaper on the smaller buffer) and before analyze(),
-    // so the stats see the same pixels the thumbnail shows.
+    // After the resize (cheaper) and before analyze(), so the stats see the
+    // same pixels the thumbnail shows.
     let thumb = to_ldr(thumb);
 
     let info = analyze(&thumb);
-    let mut buf = Cursor::new(Vec::new());
-    thumb
-        .write_to(&mut buf, image::ImageFormat::Png)
-        .map_err(|e| format!("encode {path}: {e}"))?;
-    cache
-        .put(h, &buf.into_inner())
-        .map_err(|e| format!("cache write {path}: {e}"))?;
+    let rgba = thumb.to_rgba8();
+    cache.put(
+        h,
+        Pixels {
+            width: rgba.width(),
+            height: rgba.height(),
+            rgba: rgba.into_raw(),
+        },
+    );
     Ok((key, info))
 }
 
@@ -434,25 +434,45 @@ pub fn model_thumb_lookup(app: AppHandle, items: Vec<(u32, String)>) -> Vec<(u32
         .collect()
 }
 
-/// Persist a webview-rendered model thumbnail. Returns its cache key, which
-/// the frontend turns into a `thumb://` URL.
+/// Persist a webview-rendered model thumbnail as RGBA. Returns its cache key,
+/// which the frontend turns into a `tex://` URL.
 ///
-/// Bytes over IPC is fine here and only here: a 256px PNG is ~10-20 KB, at
-/// most a couple per second, and the alternative (a second scheme, or a temp
-/// file dance) buys nothing at that volume.
+/// The frontend renders the model in three.js, reads the canvas back as RGBA
+/// (getImageData), and sends the raw pixels — same no-PNG path as textures.
+/// ~256 KB over IPC at a couple per second is noise.
 #[tauri::command]
-pub fn model_thumb_store(app: AppHandle, path: String, bytes: Vec<u8>) -> Result<String, String> {
+pub fn model_thumb_store(
+    app: AppHandle,
+    path: String,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+) -> Result<String, String> {
+    if rgba.len() != (width as usize) * (height as usize) * 4 {
+        return Err("rgba length does not match dimensions".into());
+    }
     let (size, mtime) = file_stamp(Path::new(&path));
     let h = hash_key("m", &path, size, mtime);
-    app.state::<ThumbCache>()
-        .put(h, &bytes)
-        .map_err(|e| format!("cache write thumb: {e}"))?;
+    app.state::<ThumbCache>().put(h, Pixels { width, height, rgba });
     Ok(hex_key(h))
 }
 
-/// Bytes for a cache key, for the URI-scheme handler. Keys are our own 16 hex
-/// chars; anything else is refused rather than trusted.
+/// PNG bytes for a cache key, for the `thumb://` handler — the few surfaces
+/// still on `<img>`/three.js. Keys are our own 16 hex chars; anything else is
+/// refused rather than trusted.
 pub fn thumb_bytes(app: &AppHandle, key: &str) -> Option<Vec<u8>> {
     let h = crate::thumbcache::parse_key(key)?;
-    app.state::<ThumbCache>().get(h)
+    app.state::<ThumbCache>().get_png(h)
+}
+
+/// Raw RGBA for the `tex://` handler — the WebGL grid. Wire format:
+/// `[u32 width LE][u32 height LE][width*height*4 bytes RGBA]`.
+pub fn tex_bytes(app: &AppHandle, key: &str) -> Option<Vec<u8>> {
+    let h = crate::thumbcache::parse_key(key)?;
+    let px = app.state::<ThumbCache>().get(h)?;
+    let mut out = Vec::with_capacity(8 + px.rgba.len());
+    out.extend_from_slice(&px.width.to_le_bytes());
+    out.extend_from_slice(&px.height.to_le_bytes());
+    out.extend_from_slice(&px.rgba);
+    Some(out)
 }

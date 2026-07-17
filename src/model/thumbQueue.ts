@@ -166,10 +166,24 @@ async function render(file: LibFileLike): Promise<string | null> {
     c.updateProjectionMatrix();
 
     r.render(s, c);
-    const blob = await new Promise<Blob | null>((res) => r.domElement.toBlob(res, "image/png"));
-    if (blob === null) return null;
-    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    return await invoke<string>("model_thumb_store", { path: file.path, bytes });
+    // Read the rendered pixels back as RGBA and store them raw — same no-PNG
+    // path as textures. readRenderTargetPixels isn't needed; the 2D context of
+    // a copy canvas gives us straight RGBA via getImageData.
+    const w = r.domElement.width;
+    const h = r.domElement.height;
+    const copy = document.createElement("canvas");
+    copy.width = w;
+    copy.height = h;
+    const ctx = copy.getContext("2d");
+    if (ctx === null) return null;
+    ctx.drawImage(r.domElement, 0, 0);
+    const rgba = ctx.getImageData(0, 0, w, h).data;
+    return await invoke<string>("model_thumb_store", {
+      path: file.path,
+      width: w,
+      height: h,
+      rgba: Array.from(rgba),
+    });
   } finally {
     // Dispose on EVERY model, not just unmount — 500 undisposed Synty scenes
     // is how you reach multi-GB.

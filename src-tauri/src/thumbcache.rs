@@ -1,49 +1,112 @@
 //! In-memory thumbnail cache — NOTHING is written to disk.
 //!
-//! Thumbnails live only in RAM for the session. Re-scrolling to a cell that was
-//! already decoded is instant (served from this map); across launches the cache
-//! starts empty and thumbnails re-decode as they come into view. That is the
-//! deliberate cost of leaving the user's hard drive untouched.
+//! Stores DECODED RGBA, not PNG. That is the point of the WebGL grid: the
+//! pixels reach the GPU without a PNG encode (Rust) + decode (browser) round
+//! trip. The grid fetches raw RGBA over the `tex://` scheme and uploads it
+//! straight into a texture atlas.
 //!
-//! Bounded by an LRU so a huge browse session cannot grow RAM without limit;
-//! an evicted thumbnail simply re-decodes if scrolled back to.
+//! Bounded by a BYTE budget (RGBA is ~17x larger than PNG), with LRU eviction;
+//! an evicted thumbnail re-decodes from its source if scrolled back to. Nothing
+//! persists across launches — that is the deliberate cost of leaving the user's
+//! hard drive untouched.
 
-use std::num::NonZeroUsize;
+use std::collections::HashMap;
+use std::io::Cursor;
 
-use lru::LruCache;
 use parking_lot::Mutex;
 
-/// Max thumbnails held in RAM. A 256px PNG is ~10-20 KB, so this caps the store
-/// at roughly 80-160 MB — comfortable for a desktop tool, and large enough that
-/// ordinary browsing never churns.
-const CAP: usize = 8192;
+/// RAM budget for decoded thumbnails. RGBA at 256px is ~256 KB each, so this
+/// holds ~1500 thumbnails — comfortably more than any on-screen working set,
+/// and enough that ordinary browsing rarely re-decodes.
+const BUDGET_BYTES: usize = 384 * 1024 * 1024;
+
+/// A decoded thumbnail: tightly-packed RGBA8, `width * height * 4` bytes.
+#[derive(Clone)]
+pub struct Pixels {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+impl Pixels {
+    fn bytes(&self) -> usize {
+        self.rgba.len() + 8
+    }
+}
 
 pub struct ThumbCache {
-    map: Mutex<LruCache<u64, Vec<u8>>>,
+    inner: Mutex<Inner>,
+}
+
+struct Inner {
+    /// key -> pixels. Insertion order in `order` drives LRU eviction.
+    map: HashMap<u64, Pixels>,
+    /// Keys oldest-first. `get` moves the key to the back (most-recent).
+    order: Vec<u64>,
+    used: usize,
 }
 
 impl ThumbCache {
     pub fn new() -> Self {
         Self {
-            map: Mutex::new(LruCache::new(NonZeroUsize::new(CAP).unwrap())),
+            inner: Mutex::new(Inner {
+                map: HashMap::new(),
+                order: Vec::new(),
+                used: 0,
+            }),
         }
     }
 
     pub fn contains(&self, key: u64) -> bool {
-        self.map.lock().contains(&key)
+        self.inner.lock().map.contains_key(&key)
     }
 
-    pub fn get(&self, key: u64) -> Option<Vec<u8>> {
-        // `get` promotes the entry to most-recently-used, so hot thumbnails
-        // survive eviction.
-        self.map.lock().get(&key).cloned()
+    pub fn get(&self, key: u64) -> Option<Pixels> {
+        let mut g = self.inner.lock();
+        if !g.map.contains_key(&key) {
+            return None;
+        }
+        // promote to most-recently-used
+        if let Some(pos) = g.order.iter().position(|k| *k == key) {
+            g.order.remove(pos);
+            g.order.push(key);
+        }
+        g.map.get(&key).cloned()
     }
 
-    /// Infallible — the signature keeps a `Result` only so call sites written
-    /// against the old file-backed store need no change.
-    pub fn put(&self, key: u64, bytes: &[u8]) -> std::io::Result<()> {
-        self.map.lock().put(key, bytes.to_vec());
-        Ok(())
+    pub fn put(&self, key: u64, pixels: Pixels) {
+        let mut g = self.inner.lock();
+        let add = pixels.bytes();
+        if let Some(old) = g.map.remove(&key) {
+            g.used -= old.bytes();
+            if let Some(pos) = g.order.iter().position(|k| *k == key) {
+                g.order.remove(pos);
+            }
+        }
+        // Evict oldest until the newcomer fits.
+        while g.used + add > BUDGET_BYTES && !g.order.is_empty() {
+            let victim = g.order.remove(0);
+            if let Some(p) = g.map.remove(&victim) {
+                g.used -= p.bytes();
+            }
+        }
+        g.used += add;
+        g.map.insert(key, pixels);
+        g.order.push(key);
+    }
+
+    /// Encode a cached thumbnail to PNG on demand, for the handful of surfaces
+    /// that still consume an `<img>`/three.js texture (fullscreen, inspector
+    /// preview, map swatches). The grid never calls this — it takes RGBA
+    /// directly. Rare enough that the encode is not worth caching.
+    pub fn get_png(&self, key: u64) -> Option<Vec<u8>> {
+        let p = self.get(key)?;
+        let buf = image::RgbaImage::from_raw(p.width, p.height, p.rgba)?;
+        let mut out = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(buf)
+            .write_to(&mut out, image::ImageFormat::Png)
+            .ok()?;
+        Some(out.into_inner())
     }
 }
 
@@ -53,8 +116,8 @@ impl Default for ThumbCache {
     }
 }
 
-/// Parse the 16-hex-char external key (as used in `thumb://<key>` and by the
-/// frontend's derived-key path) back into the u64 the store is keyed by.
+/// Parse the 16-hex-char external key (as used in `tex://<key>` / `thumb://<key>`
+/// and by the frontend's derived-key path) back into the u64 the store uses.
 pub fn parse_key(hex: &str) -> Option<u64> {
     if hex.len() != 16 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;

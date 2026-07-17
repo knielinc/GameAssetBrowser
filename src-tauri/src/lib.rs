@@ -127,6 +127,31 @@ pub fn run() {
                 }
             });
         })
+        // Raw RGBA for the WebGL grid — the no-PNG-round-trip path. The grid
+        // uploads these pixels straight into a GPU texture atlas; no encode
+        // (Rust) or decode (browser) happens. Wire format is [w][h][rgba].
+        // On Windows this resolves as http://tex.localhost/<key>.
+        .register_asynchronous_uri_scheme_protocol("tex", |ctx, req, responder| {
+            let key = req.uri().path().trim_start_matches('/').to_string();
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                let resp = match thumbs::tex_bytes(&app, &key) {
+                    Some(bytes) => tauri::http::Response::builder()
+                        .header("Content-Type", "application/octet-stream")
+                        .header("Cache-Control", "public, max-age=31536000, immutable")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes),
+                    None => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Vec::new()),
+                };
+                match resp {
+                    Ok(r) => responder.respond(r),
+                    Err(e) => eprintln!("[tex] response build failed: {e}"),
+                }
+            });
+        })
         // Models load in the webview (three.js) because Rust has no viable FBX
         // story and Synty ships FBX. That means the loader resolves sibling
         // textures and .bin chunks by RELATIVE URL, which is exactly what
