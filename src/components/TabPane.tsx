@@ -16,6 +16,8 @@ import TextureCell from "./grid/TextureCell";
 import MaterialCell from "./grid/MaterialCell";
 import ModelCell from "./grid/ModelCell";
 import ModelInspector from "./model/ModelInspector";
+import TextureInspector from "./texture/TextureInspector";
+import type { PreviewState } from "./texture/PreviewControls";
 import FullscreenPreview from "./FullscreenPreview";
 import { groupTextures, type TextureItem } from "../material/classify";
 
@@ -58,6 +60,17 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
 
   const [menu, setMenu] = useState<{ x: number; y: number; file: LibFile } | null>(null);
   const [showInspector, setShowInspector] = useState(true);
+  // Shared by the drawer and the fullscreen overlay, so switching to
+  // fullscreen keeps the mesh/lighting you were already looking at.
+  const [preview3d, setPreview3d] = useState<PreviewState>({
+    mesh: "sphere",
+    light: "studio",
+    tiles: 2,
+  });
+  const patchPreview = useCallback(
+    (p: Partial<PreviewState>) => setPreview3d((s) => ({ ...s, ...p })),
+    [],
+  );
   const onCellSelect = useCallback(
     (index: number) => {
       const file = visible[index];
@@ -184,6 +197,14 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
 
   const selectedFile = visible.find((f) => f.path === tab.selectedPath) ?? null;
 
+  // The texture inspector works on the grid ITEM (a material or a lone file),
+  // not the raw file — grouping is the whole point of the preview.
+  const selectedItem: TextureItem | null =
+    kind !== "texture"
+      ? null
+      : (grouped?.find((i) => i.key === tab.selectedPath) ??
+        (selectedFile !== null ? { kind: "file", file: selectedFile, key: selectedFile.path } : null));
+
   return (
     <>
       <Toolbar kind={kind} />
@@ -198,8 +219,24 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             onClose={() => setShowInspector(false)}
           />
         )}
+        {kind === "texture" && showInspector && preview === null && (
+          <TextureInspector
+            item={selectedItem}
+            preview={preview3d}
+            onPreviewChange={patchPreview}
+            onClose={() => setShowInspector(false)}
+          />
+        )}
       </div>
-      {preview !== null && <FullscreenPreview file={preview} onClose={() => setPreview(null)} />}
+      {preview !== null && (
+        <FullscreenPreview
+          file={preview}
+          item={preview.kind === "texture" ? selectedItem : null}
+          preview3d={preview3d}
+          onPreviewChange={patchPreview}
+          onClose={() => setPreview(null)}
+        />
+      )}
       <StatusBar kind={kind} visibleCount={visible.length} />
       {menu !== null && (
         <ContextMenu

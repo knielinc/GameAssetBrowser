@@ -1,11 +1,18 @@
 import { useEffect, type ReactElement } from "react";
 import { X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
-import { thumbUrl } from "../types";
+import type { TextureItem } from "../material/classify";
 import ModelViewport from "./model/ModelViewport";
+import TexturePreview from "./texture/TexturePreview";
+import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
+import { keysForFile, keysForMaterial } from "./texture/TextureInspector";
 
 export interface FullscreenPreviewProps {
   file: LibFile;
+  /** The grid item, so a material previews as a material and not one file. */
+  item: TextureItem | null;
+  preview3d: PreviewState;
+  onPreviewChange: (patch: Partial<PreviewState>) => void;
   onClose: () => void;
 }
 
@@ -19,9 +26,25 @@ export interface FullscreenPreviewProps {
  * screen size is a pointless decode. 256px upscaled is honest for a "does this
  * look right" glance; a true full-res view would need its own decode path.
  */
-export default function FullscreenPreview({ file, onClose }: FullscreenPreviewProps): ReactElement {
+export default function FullscreenPreview({
+  file,
+  item,
+  preview3d,
+  onPreviewChange,
+  onClose,
+}: FullscreenPreviewProps): ReactElement {
   useLibraryStore((s) => s.thumbsVersion);
-  const thumb = useLibraryStore.getState().thumbs.get(file.id);
+  const thumbs = useLibraryStore.getState().thumbs;
+  const thumb = thumbs.get(file.id);
+
+  const keys =
+    item === null
+      ? file.kind === "texture" && thumb !== undefined
+        ? { baseColor: thumb.key }
+        : {}
+      : item.kind === "material"
+        ? keysForMaterial(item.material, thumbs)
+        : keysForFile(item.file, item.channel, thumbs);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -50,21 +73,32 @@ export default function FullscreenPreview({ file, onClose }: FullscreenPreviewPr
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        {file.kind === "model" ? (
-          <div className="h-full w-full">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+        <div className="min-h-0 flex-1">
+          {file.kind === "model" ? (
             <ModelViewport path={file.path} />
+          ) : Object.keys(keys).length > 0 ? (
+            // Wrapped on a real mesh, same renderer as the drawer — a flat
+            // <img> here was the gap: you could not see the material, only
+            // one of its files.
+            <div className="h-full w-full overflow-hidden rounded-lg border border-border bg-[#07070b]">
+              <TexturePreview
+                keys={keys}
+                mesh={preview3d.mesh}
+                light={preview3d.light}
+                tiles={preview3d.tiles}
+              />
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-xs text-dim">
+              No preview available yet — the thumbnail is still decoding.
+            </div>
+          )}
+        </div>
+        {file.kind === "texture" && Object.keys(keys).length > 0 && (
+          <div className="shrink-0">
+            <PreviewControls value={preview3d} onChange={onPreviewChange} inline />
           </div>
-        ) : thumb !== undefined ? (
-          <img
-            src={thumbUrl(thumb.key)}
-            alt={file.name}
-            draggable={false}
-            className="alpha-checker max-h-full max-w-full rounded-lg object-contain"
-            style={{ imageRendering: "auto" }}
-          />
-        ) : (
-          <p className="text-xs text-dim">No preview available yet.</p>
         )}
       </div>
 
