@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { Image as ImageIcon } from "lucide-react";
-import { useLibraryStore, type LibFile } from "../../stores/libraryStore";
-import { thumbUrl } from "../../types";
+import type { LibFile } from "../../stores/libraryStore";
+import { useThumbSrc } from "../../hooks/useThumbSrc";
 import { humanSize } from "../FileRow";
 import AssetCell, { type Badge } from "./AssetCell";
 
@@ -11,15 +11,12 @@ export interface TextureCellProps {
 }
 
 export default function TextureCell({ file, selected }: TextureCellProps): ReactElement {
-  // Subscribe to the version counter, not the Map — the Map is mutated in
-  // place, so its identity never changes.
-  useLibraryStore((s) => s.thumbsVersion);
-  const thumb = useLibraryStore.getState().thumbs.get(file.id);
+  // Derived key → the image shows the instant WebView2 can read it off disk,
+  // no IPC round trip. `info` (badges) fills in when the stats request lands.
+  const { src, imgKey, info, onError, onLoad } = useThumbSrc(file);
 
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];
-  // info is null for webview-rendered model thumbs; textures always have it.
-  if (thumb?.info != null) {
-    const { info } = thumb;
+  if (info != null) {
     // Content-derived hints, clearly marked as inference. The name-based
     // classifier is authoritative; this is what we can see in the pixels.
     if (info.normalLike) {
@@ -33,19 +30,16 @@ export default function TextureCell({ file, selected }: TextureCellProps): React
   }
 
   return (
-    <AssetCell
-      name={file.name}
-      sub={humanSize(file.size)}
-      badges={badges}
-      selected={selected}
-      checker
-    >
-      {thumb !== undefined ? (
+    <AssetCell name={file.name} sub={humanSize(file.size)} badges={badges} selected={selected} checker>
+      {src !== null ? (
         <img
-          src={thumbUrl(thumb.key)}
+          key={imgKey}
+          src={src}
           alt=""
           loading="lazy"
           draggable={false}
+          onError={onError}
+          onLoad={onLoad}
           className="h-full w-full object-contain"
         />
       ) : (

@@ -86,6 +86,10 @@ fn cache_key(path: &str, size: u64, mtime: i64) -> String {
 /// `kind` namespaces the key so a model and a texture at the same path can
 /// never collide, and so bumping one pipeline's version cannot invalidate the
 /// other's cache.
+///
+/// MIRRORED in `src/thumbKey.ts` (the "t" case) so the frontend can compute a
+/// warm-cache thumb URL with no IPC. If CACHE_VERSION, THUMB_EDGE, the format
+/// string, or the hash changes here, change it there too.
 fn keyed(kind: &str, path: &str, size: u64, mtime: i64) -> String {
     let raw = format!("{kind}:{CACHE_VERSION}:{THUMB_EDGE}:{size}:{mtime}:{path}");
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

@@ -1,8 +1,7 @@
 import type { ReactElement } from "react";
 import clsx from "clsx";
 import { Image as ImageIcon } from "lucide-react";
-import { useLibraryStore } from "../../stores/libraryStore";
-import { thumbUrl } from "../../types";
+import { useThumbSrc } from "../../hooks/useThumbSrc";
 import { CHANNEL_CODE, CHANNEL_LABEL, STRIP_CHANNELS, type Channel } from "../../material/table";
 import type { Material } from "../../material/classify";
 
@@ -24,12 +23,9 @@ function packedOf(m: Material): Channel | undefined {
  * is missing before you click.
  */
 export default function MaterialCell({ material, selected }: MaterialCellProps): ReactElement {
-  useLibraryStore((s) => s.thumbsVersion);
-  const thumbs = useLibraryStore.getState().thumbs;
-
   // Face = base color if present, else whatever we have.
   const face = material.channels.get("baseColor") ?? material.members[0]!;
-  const thumb = thumbs.get(face.file.id);
+  const { src, imgKey, onError, onLoad } = useThumbSrc(face.file);
   const packed = packedOf(material);
   const lowConfidence = material.confidence < 0.8;
 
@@ -52,12 +48,15 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
         )}
       >
         <div className="alpha-checker relative aspect-square w-full overflow-hidden">
-          {thumb !== undefined ? (
+          {src !== null ? (
             <img
-              src={thumbUrl(thumb.key)}
+              key={imgKey}
+              src={src}
               alt=""
               loading="lazy"
               draggable={false}
+              onError={onError}
+              onLoad={onLoad}
               className="h-full w-full object-contain"
             />
           ) : (

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type MouseEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
 import { Copy, FolderOpen, Loader2 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -77,6 +77,12 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     (p: Partial<PreviewState>) => setPreview3d((s) => ({ ...s, ...p })),
     [],
   );
+  // Sprite mode is a property of one image, not a global mode. Turn it off
+  // whenever the selection changes, so a normal texture never opens cropped
+  // into a grid cell because the last one happened to be a sprite sheet.
+  useEffect(() => {
+    setPreview3d((s) => (s.spriteOn ? { ...s, spriteOn: false } : s));
+  }, [tab.selectedPath]);
   const onCellSelect = useCallback(
     (index: number) => {
       const file = visible[index];
