@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    asset_previewer_lib::run()
+    game_file_browser_lib::run()
 }

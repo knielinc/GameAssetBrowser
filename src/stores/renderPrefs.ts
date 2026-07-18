@@ -9,7 +9,7 @@ import { create } from "zustand";
  * Persisted to localStorage rather than settings.json: it's a pure frontend
  * render choice with no Rust side, so it stays off the mirrored IPC contract.
  */
-const KEY = "assetpreviewer.pixelArt";
+const KEY = "gamefilebrowser.pixelArt";
 
 function load(): boolean {
   try {

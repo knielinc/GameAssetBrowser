@@ -82,26 +82,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
-name = "asset-previewer"
-version = "0.1.0"
-dependencies = [
- "crossbeam-channel",
- "image",
- "lru",
- "parking_lot",
- "rayon",
- "rodio",
- "serde",
- "serde_json",
- "symphonia",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-store",
- "walkdir",
-]
-
-[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1111,6 +1091,26 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "game-file-browser"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "image",
+ "lru",
+ "parking_lot",
+ "rayon",
+ "rodio",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-store",
+ "walkdir",
 ]
 
 [[package]]

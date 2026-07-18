@@ -1,6 +1,6 @@
-# AssetPreviewer
+# Game File Browser
 
-A sleek dark-mode game-asset previewer for Windows — built for navigating big
+A sleek dark-mode game-file browser for Windows — built for navigating big
 asset packs (Synty, ambientCG/freestylized, Megascans, HDRIs) without opening an
 engine.
 
