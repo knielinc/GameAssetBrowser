@@ -118,6 +118,16 @@ export default function AssetGrid<T>({
     virtualizer.scrollToIndex(Math.floor(anchorRef.current / columns), { align: "start" });
   }, [columns, virtualizer]);
 
+  // Row height derives from the cell width, which changes on ANY container
+  // resize — including a sidebar/inspector drag that doesn't change the column
+  // count. The virtualizer caches row measurements, so without an explicit
+  // re-measure it keeps the OLD heights while the aspect-square cells grow into
+  // the new width and overlap the row below. measure() re-derives positions
+  // from the current estimateSize (the new rowHeight).
+  useLayoutEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
+
   // Register both nav contracts for the window-level keyboard handler:
   // scrollToIndex takes a FLAT item index (rows are an internal detail), and
   // gridNav supplies the ±columns step a 1-D list handler cannot know.
