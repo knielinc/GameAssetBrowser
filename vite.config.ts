@@ -9,6 +9,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
+  // The model-thumbnail worker (modelThumbWorker.ts) dynamically imports three's
+  // loaders, i.e. it code-splits. Vite's default worker format is `iife`, which
+  // can't code-split and fails the production build (dev is unaffected). ES
+  // module workers can — and WebView2 supports `{ type: "module" }` workers.
+  worker: {
+    format: "es",
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
