@@ -74,12 +74,12 @@ function AssetCellInner({
       >
         {gl ? null : children}
         {showInfo && corner !== undefined && (
-          <div className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-text">
+          <div className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-white">
             {corner}
           </div>
         )}
         {showInfo && topRight !== undefined && (
-          <div className="pointer-events-none absolute right-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-text">
+          <div className="pointer-events-none absolute right-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-white">
             {topRight}
           </div>
         )}
@@ -96,7 +96,7 @@ function AssetCellInner({
                 className={clsx(
                   "rounded-full px-2 py-0.5 text-[9px] font-semibold tabular-nums",
                   i === badges.length - 1 && badges.length > 1 && "ml-auto",
-                  b.warn ? "bg-kind-model text-[#1a1208]" : "bg-[#0c0d12e6] text-text",
+                  b.warn ? "bg-kind-model text-[#1a1208]" : "bg-[#0c0d12e6] text-white",
                 )}
               >
                 {b.text}
