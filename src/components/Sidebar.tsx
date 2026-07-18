@@ -32,11 +32,6 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
       style={{ width }}
       className="flex shrink-0 flex-col border-r border-border bg-panel"
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <img src="/GAB.png" alt="" draggable={false} className="h-5 w-5 rounded-[4px] object-contain" />
-        <span className="text-[13px] font-semibold tracking-tight">Game Asset Browser</span>
-      </div>
-
       <div className="flex items-center justify-between px-4 pb-1 pt-3">
         <span className="text-[10px] font-medium uppercase tracking-widest text-dim">
           Folders

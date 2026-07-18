@@ -5,11 +5,12 @@ import { Minus, Square, Copy, Maximize2, Minimize2, X } from "lucide-react";
 /**
  * Custom window chrome for the frameless window (Rust sets decorations:false).
  *
- * Left is a drag region (`data-tauri-drag-region`) — click-drag moves the
- * window, double-click toggles maximize, both handled natively by the webview.
- * Right are the controls: minimize, maximize/restore, fullscreen, close. The
- * app's own branding lives in the sidebar header, so this bar stays a thin,
- * text-light strip.
+ * Left is the app branding (icon + name) followed by a drag region
+ * (`data-tauri-drag-region`) — click-drag moves the window, double-click
+ * toggles maximize, both handled natively by the webview. The branding block is
+ * itself a drag region so the whole bar minus the buttons is grabbable; its
+ * icon/text are pointer-events-none so clicks fall through to the drag handler.
+ * Right are the controls: minimize, maximize/restore, fullscreen, close.
  *
  * Needs core:window allow-minimize / toggle-maximize / is-maximized /
  * start-dragging / close (+ the existing set/is-fullscreen) in
@@ -72,7 +73,21 @@ export default function TitleBar(): ReactElement {
 
   return (
     <div className="flex h-8 shrink-0 select-none items-center border-b border-border bg-panel">
-      {/* Empty drag strip — fills the width so the whole bar (minus buttons) is
+      {/* App branding, moved here from the sidebar. Draggable like the rest of
+          the bar; the icon/text below are pointer-events-none so the drag
+          handler still receives the pointer. */}
+      <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-2 pl-3 pr-2">
+        <img
+          src="/GAB.png"
+          alt=""
+          draggable={false}
+          className="pointer-events-none h-[18px] w-[18px] rounded-[4px] object-contain"
+        />
+        <span className="pointer-events-none text-[12px] font-semibold tracking-tight">
+          Game Asset Browser
+        </span>
+      </div>
+      {/* Empty drag strip — fills the rest so the whole bar (minus buttons) is
           grabbable. */}
       <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
       <div className="flex h-full shrink-0">
