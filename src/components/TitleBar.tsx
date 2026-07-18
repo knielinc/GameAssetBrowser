@@ -102,11 +102,23 @@ export default function TitleBar(): ReactElement {
       {/* App branding. Draggable; icon/text are pointer-events-none so the drag
           handler still receives the pointer. */}
       <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-2 pl-3 pr-1">
-        <img
-          src="/GAB.png"
-          alt=""
-          draggable={false}
-          className="pointer-events-none h-[18px] w-[18px] rounded-[4px] object-contain"
+        {/* The mark is drawn as a mask filled with the accent, so it takes on
+            each theme's colour. Swap the mask URL to a dedicated B/W silhouette
+            if the full logo's alpha doesn't read as a clean shape. */}
+        <div
+          aria-hidden
+          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            maskImage: "url(/GAB.png)",
+            maskSize: "contain",
+            maskRepeat: "no-repeat",
+            maskPosition: "center",
+            WebkitMaskImage: "url(/GAB.png)",
+            WebkitMaskSize: "contain",
+            WebkitMaskRepeat: "no-repeat",
+            WebkitMaskPosition: "center",
+          }}
         />
         <span className="pointer-events-none text-[12px] font-semibold tracking-tight">
           Game Asset Browser
