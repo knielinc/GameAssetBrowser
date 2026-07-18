@@ -457,24 +457,39 @@ pub fn model_thumb_lookup(app: AppHandle, items: Vec<(u32, String)>) -> Vec<(u32
 /// Persist a webview-rendered model thumbnail as RGBA. Returns its cache key,
 /// which the frontend turns into a `tex://` URL.
 ///
-/// The frontend renders the model in three.js, reads the canvas back as RGBA
-/// (getImageData), and sends the raw pixels — same no-PNG path as textures.
-/// ~256 KB over IPC at a couple per second is noise.
+/// The frontend renders the model in three.js, reads the canvas back as RGBA,
+/// and sends it as ONE raw octet-stream body — NOT a JSON object with an `rgba`
+/// number array. Tauri JSON-encodes a nested `Uint8Array` into a ~262k-element
+/// array (~1 MB of text) per thumbnail on the webview's main thread; packing
+/// everything into the raw body skips that entirely. Wire format (little-endian):
+/// `[u32 width][u32 height][u32 path_len][path utf8][width*height*4 RGBA]`.
 #[tauri::command]
-pub fn model_thumb_store(
-    app: AppHandle,
-    path: String,
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
-) -> Result<String, String> {
+pub fn model_thumb_store(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let body = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.as_slice(),
+        tauri::ipc::InvokeBody::Json(_) => {
+            return Err("model_thumb_store expects a raw body".into())
+        }
+    };
+    if body.len() < 12 {
+        return Err("model_thumb_store: truncated header".into());
+    }
+    let width = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
+    let height = u32::from_le_bytes([body[4], body[5], body[6], body[7]]);
+    let path_len = u32::from_le_bytes([body[8], body[9], body[10], body[11]]) as usize;
+    let rest = &body[12..];
+    if rest.len() < path_len {
+        return Err("model_thumb_store: truncated path".into());
+    }
+    let (path_bytes, rgba) = rest.split_at(path_len);
+    let path = std::str::from_utf8(path_bytes).map_err(|_| "model_thumb_store: bad path utf8")?;
     if rgba.len() != (width as usize) * (height as usize) * 4 {
         return Err("rgba length does not match dimensions".into());
     }
-    let (size, mtime) = file_stamp(Path::new(&path));
-    let h = hash_key("m", &path, size, mtime);
+    let (size, mtime) = file_stamp(Path::new(path));
+    let h = hash_key("m", path, size, mtime);
     let key = hex_key(h);
-    // RAM only — hand the raw pixels straight to the in-memory cache and write
+    // RAM only — copy the raw pixels straight into the in-memory cache and write
     // NOTHING to disk. A model thumbnail is rendered, not decoded; its "source"
     // size is just the render size (the status bar shows resolution for textures
     // only). Keeping thumbnails off disk is deliberate: the user's drive stays
@@ -486,7 +501,7 @@ pub fn model_thumb_store(
             height,
             src_w: width,
             src_h: height,
-            rgba,
+            rgba: rgba.to_vec(),
         },
     );
     Ok(key)

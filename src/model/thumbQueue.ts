@@ -92,63 +92,88 @@ export function onModelThumb(fn: Listener): () => void {
 // between "the app froze" and "it's working through the folder".
 type ProgressListener = (remaining: number) => void;
 const progressListeners = new Set<ProgressListener>();
-let activeJob = false;
+/** Jobs currently rendering across the whole worker pool (0..POOL_SIZE). */
+let activeCount = 0;
 export function onModelThumbProgress(fn: ProgressListener): () => void {
   progressListeners.add(fn);
   fn(remaining()); // hand the newcomer the current count immediately
   return () => progressListeners.delete(fn);
 }
 function remaining(): number {
-  return queue.length + (activeJob ? 1 : 0);
+  return queue.length + activeCount;
 }
 function emitProgress(): void {
   const n = remaining();
   for (const fn of progressListeners) fn(n);
 }
 
-// ── Off-main rendering ────────────────────────────────────────────────────
-// The parse + render happen in a Web Worker on an OffscreenCanvas so the grid
-// doesn't jank. The worker returns raw pixels; storing them (Tauri invoke) and
-// resolving the manual atlas (the store) stay here on the main thread. Any
-// worker failure falls back to renderMain — a thumbnail must never go blank.
+// ── Off-main rendering (worker POOL) ────────────────────────────────────────
+// Parse + render run in Web Workers on OffscreenCanvases so the grid never
+// janks — and there is a POOL of them. Each Worker is a real OS thread, so N
+// workers parse+render N models genuinely in parallel; the FBX/glTF parse
+// (100-400 ms of single-threaded JS) is the bottleneck, and threads are exactly
+// what divides it. Storing the pixels (Tauri invoke) and resolving the atlas
+// stay on the main thread. Any worker miss falls back to renderMain — a
+// thumbnail must never go blank.
 
 interface WorkerResult {
   w: number;
   h: number;
   buf: ArrayBuffer;
 }
-let worker: Worker | null = null;
-let workerBroken = false;
-let msgSeq = 0;
-let pending: { id: number; resolve: (r: WorkerResult | null) => void; timer: number } | null = null;
 
-function ensureWorker(): Worker | null {
-  if (workerBroken) return null;
-  if (worker !== null) return worker;
+/** One render thread per core is ideal for parse-bound work, but each worker
+ *  holds its own WebGL context (a ~16 budget shared with the viewport and the
+ *  texture grid), so cap at 4 — comfortably short of the limit, and past ~4 the
+ *  gain tapers as workers contend on the single GPU. */
+const POOL_SIZE = Math.max(1, Math.min(4, (navigator.hardwareConcurrency ?? 4) - 1));
+
+interface Slot {
+  worker: Worker;
+  /** Monotonic id of the job on this slot; a reply with a stale id is ignored. */
+  seq: number;
+  resolve: ((r: WorkerResult | null) => void) | null;
+  timer: number | undefined;
+  /** Retired after a crash or a wedged parse — its jobs go to the main thread. */
+  dead: boolean;
+}
+
+let pool: Slot[] | null = null;
+let poolBroken = false;
+
+function makeSlot(): Slot {
+  const worker = new Worker(new URL("./modelThumbWorker.ts", import.meta.url), { type: "module" });
+  const slot: Slot = { worker, seq: 0, resolve: null, timer: undefined, dead: false };
+  const settle = (r: WorkerResult | null): void => {
+    if (slot.resolve === null) return;
+    if (slot.timer !== undefined) clearTimeout(slot.timer);
+    const res = slot.resolve;
+    slot.resolve = null;
+    slot.timer = undefined;
+    res(r);
+  };
+  worker.onmessage = (e: MessageEvent) => {
+    const m = e.data as { type: string; id: number; w?: number; h?: number; buf?: ArrayBuffer };
+    if (m.id !== slot.seq) return; // a late reply after this slot's timeout
+    settle(m.type === "done" && m.buf !== undefined ? { w: m.w!, h: m.h!, buf: m.buf } : null);
+  };
+  worker.onerror = () => {
+    // This worker died (bad chunk, no OffscreenCanvas/WebGL). Retire it; its
+    // in-flight job and everything after render on the main thread instead.
+    slot.dead = true;
+    settle(null);
+  };
+  return slot;
+}
+
+function getPool(): Slot[] | null {
+  if (poolBroken) return null;
+  if (pool !== null) return pool;
   try {
-    worker = new Worker(new URL("./modelThumbWorker.ts", import.meta.url), { type: "module" });
-    worker.onmessage = (e: MessageEvent) => {
-      const m = e.data as { type: string; id: number; w?: number; h?: number; buf?: ArrayBuffer };
-      if (pending === null || pending.id !== m.id) return;
-      clearTimeout(pending.timer);
-      const p = pending;
-      pending = null;
-      if (m.type === "done" && m.buf !== undefined) p.resolve({ w: m.w!, h: m.h!, buf: m.buf });
-      else p.resolve(null); // worker-reported error → fall back to main thread
-    };
-    worker.onerror = () => {
-      // The worker itself died (bad chunk, no OffscreenCanvas/WebGL). Give up on
-      // it entirely and let every job render on the main thread instead.
-      workerBroken = true;
-      if (pending !== null) {
-        clearTimeout(pending.timer);
-        pending.resolve(null);
-        pending = null;
-      }
-    };
-    return worker;
+    pool = Array.from({ length: POOL_SIZE }, makeSlot);
+    return pool;
   } catch {
-    workerBroken = true;
+    poolBroken = true; // no Worker/OffscreenCanvas — everything falls to main
     return null;
   }
 }
@@ -159,21 +184,24 @@ function resolveAtlas(modelPath: string): { url: string; flipY: boolean } | null
   return m === undefined ? null : { url: modelUrl(m.path), flipY: m.flipY };
 }
 
-/** Render `file` in the worker; resolves null (→ main-thread fallback) if the
- *  worker is unavailable, errors, or hangs. */
-function renderViaWorker(file: LibFileLike): Promise<WorkerResult | null> {
-  const wk = ensureWorker();
-  if (wk === null) return Promise.resolve(null);
-  const id = ++msgSeq;
+/** Render `file` on `slot`; resolves null (→ main-thread fallback) if the slot
+ *  is dead, errors, or hangs. A timeout also retires the slot: the worker is
+ *  wedged on that parse, so reusing it would overlap two renders in one GL
+ *  context. */
+function renderInSlot(slot: Slot, file: LibFileLike): Promise<WorkerResult | null> {
+  if (slot.dead) return Promise.resolve(null);
+  const id = ++slot.seq;
   return new Promise<WorkerResult | null>((resolve) => {
-    const timer = self.setTimeout(() => {
-      if (pending?.id === id) {
-        pending = null;
-        resolve(null); // a wedged parse must not stall the whole queue
+    slot.resolve = resolve;
+    slot.timer = self.setTimeout(() => {
+      if (slot.seq === id && slot.resolve !== null) {
+        slot.dead = true;
+        const res = slot.resolve;
+        slot.resolve = null;
+        res(null);
       }
     }, 20000);
-    pending = { id, resolve, timer };
-    wk.postMessage({ id, path: file.path, atlas: resolveAtlas(file.path) });
+    slot.worker.postMessage({ id, path: file.path, atlas: resolveAtlas(file.path) });
   });
 }
 
@@ -198,7 +226,7 @@ export function resetModelThumbs(): void {
   generation++;
   queue.length = 0;
   done.clear();
-  activeJob = false;
+  activeCount = 0;
   emitProgress();
 }
 
@@ -206,50 +234,98 @@ async function drain(): Promise<void> {
   draining = true;
   try {
     for (;;) {
-      // FIFO: the queue only ever holds the current visible window
-      // (requestModelThumbs clears it on each range change), so taking from the
-      // front fills previews in top-left → down, the order the eye scans — not
-      // bottom-up.
-      const job = queue.shift();
-      if (job === undefined) {
-        emitProgress(); // drained to empty → count is 0
-        return;
-      }
-      if (job.gen !== generation) continue; // stale before it started
-      if (done.has(job.file.path)) continue;
-      done.add(job.file.path);
-      activeJob = true;
-      emitProgress();
-
-      try {
-        // Worker first (off-main). On any worker miss, render on this thread so
-        // the thumbnail still appears — never a regression, only a speedup.
-        const r = await renderViaWorker(job.file);
-        let key: string | null;
-        if (r !== null) {
-          key = await invoke<string>("model_thumb_store", {
-            path: job.file.path,
-            width: r.w,
-            height: r.h,
-            rgba: Array.from(new Uint8Array(r.buf)),
-          });
-        } else {
-          key = await renderMain(job.file);
-        }
-        if (key !== null) for (const fn of listeners) fn(job.file.id, key);
-      } catch (err) {
-        // A model we cannot load keeps its icon. Expected for .blend and
-        // FBX 6100; not worth a user-facing error per cell.
-        console.debug("[model-thumb]", job.file.name, err);
-      }
-      activeJob = false;
-      emitProgress();
-      // Yield so a 400 ms parse chain never starves input.
-      await new Promise((r) => setTimeout(r, 0));
+      const slots = getPool();
+      // One pump per worker slot, all sharing the queue, so the visible window
+      // renders on every thread at once. No pool (no Worker/OffscreenCanvas) →
+      // a single main-thread pump.
+      if (slots === null) await pump(null);
+      else await Promise.all(slots.map((slot) => pump(slot)));
+      // A request that landed as the pumps were finishing left work behind —
+      // go round again rather than stall until the next scroll.
+      if (queue.length === 0) break;
     }
   } finally {
     draining = false;
+    emitProgress();
   }
+}
+
+/**
+ * Pull jobs off the shared queue until it is empty, rendering each on `slot`
+ * (or the main thread when `slot` is null/dead). Many pumps run concurrently —
+ * one per worker — which is what parallelizes the window.
+ *
+ * FIFO (`shift`): the queue only ever holds the current visible window
+ * (requestModelThumbs clears it on each range change), so front-first fills
+ * previews top-left → down, the order the eye scans.
+ */
+async function pump(slot: Slot | null): Promise<void> {
+  for (;;) {
+    const job = queue.shift();
+    if (job === undefined) return;
+    if (job.gen !== generation) continue; // stale before it started
+    if (done.has(job.file.path)) continue;
+    done.add(job.file.path);
+    activeCount++;
+    emitProgress();
+
+    try {
+      // Worker first (off-main). On any miss, render on this thread so the
+      // thumbnail still appears — never a regression, only a speedup.
+      const r = slot !== null && !slot.dead ? await renderInSlot(slot, job.file) : null;
+      const key =
+        r !== null
+          ? await storePixels(job.file.path, r.w, r.h, new Uint8Array(r.buf))
+          : await renderMainExclusive(job.file);
+      if (key !== null) for (const fn of listeners) fn(job.file.id, key);
+    } catch (err) {
+      // A model we cannot load keeps its icon. Expected for .blend and
+      // FBX 6100; not worth a user-facing error per cell.
+      console.debug("[model-thumb]", job.file.name, err);
+    } finally {
+      activeCount--;
+      emitProgress();
+    }
+    // Yield so a burst of completions never starves input handling.
+    await new Promise((res) => setTimeout(res, 0));
+  }
+}
+
+/**
+ * Hand raw RGBA to the Rust RAM cache as ONE raw octet-stream body.
+ *
+ * The whole payload must be a single ArrayBuffer/typed array for Tauri to send
+ * it as raw bytes — a nested `Uint8Array` in a `{...}` args object is JSON'd
+ * back into a ~262k-element number array (~1 MB of text) on the main thread per
+ * thumbnail, which is the serialization cost we're eliminating. So pack it:
+ * `[u32 width][u32 height][u32 pathLen][path utf8][rgba]` (little-endian), which
+ * `model_thumb_store` unpacks on the Rust side.
+ */
+function storePixels(path: string, width: number, height: number, rgba: Uint8Array): Promise<string> {
+  const pathBytes = new TextEncoder().encode(path);
+  const out = new Uint8Array(12 + pathBytes.length + rgba.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, width, true);
+  view.setUint32(4, height, true);
+  view.setUint32(8, pathBytes.length, true);
+  out.set(pathBytes, 12);
+  out.set(rgba, 12 + pathBytes.length);
+  return invoke<string>("model_thumb_store", out);
+}
+
+// The main-thread renderer is a SINGLE shared scene/context, so its jobs must
+// never overlap — with a worker pool several pumps can hit the fallback at once
+// (many unsupported models, or the whole pool dying). Chain them so only one
+// runs at a time; the workers stay fully parallel, only this fallback is
+// serialized.
+let mainChain: Promise<unknown> = Promise.resolve();
+function renderMainExclusive(file: LibFileLike): Promise<string | null> {
+  const result = mainChain.then(() => renderMain(file));
+  mainChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 /** Main-thread render — the fallback when the worker can't handle a model. */
@@ -299,12 +375,7 @@ async function renderMain(file: LibFileLike): Promise<string | null> {
     if (ctx === null) return null;
     ctx.drawImage(r.domElement, 0, 0);
     const rgba = ctx.getImageData(0, 0, w, h).data;
-    return await invoke<string>("model_thumb_store", {
-      path: file.path,
-      width: w,
-      height: h,
-      rgba: Array.from(rgba),
-    });
+    return await storePixels(file.path, w, h, new Uint8Array(rgba.buffer));
   } finally {
     // Dispose on EVERY model, not just unmount — 500 undisposed Synty scenes
     // is how you reach multi-GB.
