@@ -59,9 +59,11 @@ flat in vec2 vRadius;
 uniform sampler2DArray uAtlas;
 out vec4 outColor;
 
-const vec3 LETTERBOX = vec3(0.153, 0.165, 0.208);   // matches bg-raised
-const vec3 CHECK_A  = vec3(0.153, 0.165, 0.208);
-const vec3 CHECK_B  = vec3(0.118, 0.129, 0.165);
+// Letterbox + alpha-checker colours, driven by the active theme (see
+// ThumbGLOverlay); default to the dark palette until set.
+uniform vec3 uLetterbox;
+uniform vec3 uCheckA;
+uniform vec3 uCheckB;
 const float HALF_TEXEL = 0.5 / 256.0;   // atlas EDGE; keep in sync with thumbAtlas
 
 void main() {
@@ -69,16 +71,16 @@ void main() {
   // Where are we inside the image sub-rect? Outside → letterbox margin.
   vec2 img = (vLocal - vInsetXY) / vInsetWH;
   if (img.x < 0.0 || img.x > 1.0 || img.y < 0.0 || img.y > 1.0) {
-    color = LETTERBOX;
+    color = uLetterbox;
   } else {
     // The image occupies the top-left w×h of a 256² cell; the rest is a stale
     // previous tenant. Clamp half a texel inside so LINEAR never samples across
     // the image's right/bottom edge into that stale content (the "overdraw").
     vec2 uv = clamp(img * vUvSize, vec2(HALF_TEXEL), vUvSize - vec2(HALF_TEXEL));
     vec4 tex = texture(uAtlas, vec3(uv, vLayer));
-    // Alpha checker so cutouts (foliage, decals) read against the dark panel.
+    // Alpha checker so cutouts (foliage, decals) read against the panel.
     vec2 c = floor(gl_FragCoord.xy / 8.0);
-    vec3 checker = mod(c.x + c.y, 2.0) < 1.0 ? CHECK_A : CHECK_B;
+    vec3 checker = mod(c.x + c.y, 2.0) < 1.0 ? uCheckA : uCheckB;
     color = mix(checker, tex.rgb, tex.a);
   }
 
@@ -131,6 +133,12 @@ export class ThumbGL {
   private vao: WebGLVertexArrayObject;
   private instBuf: WebGLBuffer;
   private uAtlas: WebGLUniformLocation | null;
+  private uLetterbox: WebGLUniformLocation | null;
+  private uCheckA: WebGLUniformLocation | null;
+  private uCheckB: WebGLUniformLocation | null;
+  private letterbox: [number, number, number] = [0.153, 0.165, 0.208];
+  private checkA: [number, number, number] = [0.153, 0.165, 0.208];
+  private checkB: [number, number, number] = [0.118, 0.129, 0.165];
   private inst = new Float32Array(0);
   private inFlight = new Set<string>();
   /** Keys that 404'd, so we don't hammer tex:// — cleared when a decode lands. */
@@ -145,6 +153,9 @@ export class ThumbGL {
     this.atlas = new ThumbAtlas(gl);
     this.prog = link(gl, VERT, FRAG);
     this.uAtlas = gl.getUniformLocation(this.prog, "uAtlas");
+    this.uLetterbox = gl.getUniformLocation(this.prog, "uLetterbox");
+    this.uCheckA = gl.getUniformLocation(this.prog, "uCheckA");
+    this.uCheckB = gl.getUniformLocation(this.prog, "uCheckB");
 
     const quad = new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]);
     const vao = gl.createVertexArray();
@@ -191,6 +202,17 @@ export class ThumbGL {
   /** Crisp pixel-art (NEAREST) vs smooth (LINEAR) sampling for the whole grid. */
   setPixelArt(on: boolean): void {
     this.atlas.setFilter(on);
+  }
+
+  /** Theme the letterbox + alpha-checker colours (each [r,g,b] in 0..1). */
+  setColors(
+    letterbox: [number, number, number],
+    checkA: [number, number, number],
+    checkB: [number, number, number],
+  ): void {
+    this.letterbox = letterbox;
+    this.checkA = checkA;
+    this.checkB = checkB;
   }
 
   /** Let a 404'd key be retried — call when a fresh decode may have landed. */
@@ -284,6 +306,9 @@ export class ThumbGL {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlas.texture);
     gl.uniform1i(this.uAtlas, 0);
+    gl.uniform3f(this.uLetterbox, this.letterbox[0], this.letterbox[1], this.letterbox[2]);
+    gl.uniform3f(this.uCheckA, this.checkA[0], this.checkA[1], this.checkA[2]);
+    gl.uniform3f(this.uCheckB, this.checkB[0], this.checkB[1], this.checkB[2]);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
     gl.bindVertexArray(null);
   }

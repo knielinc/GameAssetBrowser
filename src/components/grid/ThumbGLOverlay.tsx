@@ -1,6 +1,24 @@
 import { useEffect, useRef, type ReactElement, type RefObject } from "react";
 import { useRenderPrefs } from "../../stores/renderPrefs";
+import { useThemeStore } from "../../stores/theme";
 import { ThumbGL, type DrawCell } from "./thumbGL";
+
+/** Read a `#rrggbb` CSS var as [r,g,b] in 0..1 for a GL uniform. */
+function cssRgb(name: string, fallback: [number, number, number]): [number, number, number] {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(v);
+  if (m === null) return fallback;
+  const n = parseInt(m[1]!, 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/** Letterbox = raised, checker = raised/panel — matches the CSS alpha-checker,
+ *  so the thumbnail stage follows the active theme. */
+function applyThemeColors(gl: ThumbGL): void {
+  const raised = cssRgb("--color-raised", [0.153, 0.165, 0.208]);
+  const panel = cssRgb("--color-panel", [0.118, 0.129, 0.165]);
+  gl.setColors(raised, raised, panel);
+}
 
 export interface ThumbGLOverlayProps {
   /** The scrolling grid container to draw behind. */
@@ -28,6 +46,7 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
   const glRef = useRef<ThumbGL | null>(null);
   const scheduleRef = useRef<(() => void) | null>(null);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
+  const themeId = useThemeStore((s) => s.themeId);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -42,6 +61,7 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
     }
     glRef.current = gl;
     gl.setPixelArt(useRenderPrefs.getState().pixelArt); // honour the current setting on mount
+    applyThemeColors(gl); // honour the current theme on mount
     gl.canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none";
     host.appendChild(gl.canvas);
 
@@ -102,6 +122,14 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
     glRef.current?.setPixelArt(pixelArt);
     scheduleRef.current?.();
   }, [pixelArt]);
+
+  // Theme change: re-read the letterbox/checker colours and repaint.
+  useEffect(() => {
+    const gl = glRef.current;
+    if (gl === null) return;
+    applyThemeColors(gl);
+    scheduleRef.current?.();
+  }, [themeId]);
 
   return <div ref={hostRef} className="pointer-events-none absolute inset-0 z-0" />;
 }
