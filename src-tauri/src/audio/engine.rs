@@ -10,10 +10,11 @@
 
 use std::fs::File;
 use std::io::BufReader;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use tauri::{AppHandle, Emitter};
 
 use super::PlayerCmd;
@@ -52,6 +53,7 @@ fn run(app: AppHandle, rx: Receiver<PlayerCmd>) {
         loop_enabled: false,
         last_pos: Duration::ZERO,
         stalled_ticks: 0,
+        seek_base: Duration::ZERO,
     };
 
     // Open the output device eagerly so a missing device is reported at
@@ -71,12 +73,23 @@ fn run(app: AppHandle, rx: Receiver<PlayerCmd>) {
     loop {
         let timeout = next_tick.saturating_duration_since(Instant::now());
         match rx.recv_timeout(timeout) {
-            Ok(cmd) => engine.handle_cmd(cmd),
+            // A third-party decoder can panic on a malformed file (e.g.
+            // symphonia's OGG demuxer) on the output thread, poisoning the
+            // sink's mutex; the next sink access here would then panic and kill
+            // the engine for the rest of the session. Contain it: catch, reset
+            // the audio state, and keep serving commands.
+            Ok(cmd) => {
+                if catch_unwind(AssertUnwindSafe(|| engine.handle_cmd(cmd))).is_err() {
+                    engine.recover_from_panic();
+                }
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
         if Instant::now() >= next_tick {
-            engine.tick();
+            if catch_unwind(AssertUnwindSafe(|| engine.tick())).is_err() {
+                engine.recover_from_panic();
+            }
             next_tick = Instant::now() + TICK;
         }
     }
@@ -99,6 +112,9 @@ struct Engine {
     /// ticks it failed to advance while supposedly playing.
     last_pos: Duration,
     stalled_ticks: u32,
+    /// Offset added to the sink clock after a decode-forward seek: the fresh
+    /// sink restarts at 0, but the true position is `seek_base + get_pos`.
+    seek_base: Duration,
 }
 
 impl Engine {
@@ -182,7 +198,7 @@ impl Engine {
         }
 
         if let Some(path) = &self.path {
-            emit_position(&self.app, path, pos.as_secs_f64(), true);
+            emit_position(&self.app, path, (self.seek_base + pos).as_secs_f64(), true);
         }
     }
 
@@ -191,6 +207,7 @@ impl Engine {
         self.sink = None;
         self.last_pos = Duration::ZERO;
         self.stalled_ticks = 0;
+        self.seek_base = Duration::ZERO;
 
         let handle = match self.ensure_stream() {
             Ok(h) => h,
@@ -266,7 +283,7 @@ impl Engine {
         sink.pause();
         emit_state(&self.app, self.path.clone(), "paused", None);
         if let Some(path) = &self.path {
-            emit_position(&self.app, path, sink.get_pos().as_secs_f64(), false);
+            emit_position(&self.app, path, (self.seek_base + sink.get_pos()).as_secs_f64(), false);
         }
     }
 
@@ -276,29 +293,99 @@ impl Engine {
         }
     }
 
-    fn seek(&self, seconds: f64) {
-        // `Sink::try_seek` blocks until the output stream's periodic access
-        // services it — on a dead stream that is forever. The tick watchdog
-        // drops the sink once the stream stalls, so a sink being present here
-        // means the stream advanced within the last ~STALL_TICKS ticks.
-        let Some(sink) = &self.sink else { return };
-        if !seconds.is_finite() {
+    fn seek(&mut self, seconds: f64) {
+        if !seconds.is_finite() || self.sink.is_none() {
             return;
         }
         let target = Duration::from_secs_f64(seconds.clamp(0.0, MAX_SEEK_SECONDS));
-        // Coarse or failed seeks (some mp3/vorbis files) are logged, never fatal.
-        if let Err(e) = sink.try_seek(target) {
-            eprintln!("[audio] seek to {seconds:.2}s failed: {e}");
-            return;
+        let paused = self.sink.as_ref().map(|s| s.is_paused()).unwrap_or(false);
+        // rodio's in-place `try_seek` is unreliable across our formats — the OGG
+        // demuxer panics, and WAV restarts from 0 — so seek UNIFORMLY by
+        // reloading the decoder and decoding forward to the target. Cheap for
+        // WAV (a raw sample skip); a compressed far seek costs time roughly
+        // proportional to the distance. `seek_base` (set in reload_at) offsets
+        // reported positions since the fresh sink's clock restarts at 0.
+        if let Some(path) = self.path.clone() {
+            self.reload_at(path, target, paused);
         }
-        if let Some(path) = &self.path {
-            emit_position(
-                &self.app,
-                path,
-                sink.get_pos().as_secs_f64(),
-                !sink.is_paused(),
-            );
+    }
+
+    /// Seek by reloading the decoder and decoding forward to `target`
+    /// (`skip_duration`) on a fresh sink — used for OGG, whose in-place format
+    /// seek panics in symphonia 0.5. The new sink's clock restarts at 0, so
+    /// `seek_base` carries the `target` offset for reported positions. Note:
+    /// decode-forward means a far seek costs time proportional to `target`.
+    fn reload_at(&mut self, path: String, target: Duration, paused: bool) {
+        self.sink = None;
+
+        let handle = match self.ensure_stream() {
+            Ok(h) => h,
+            Err(msg) => {
+                emit_state(&self.app, Some(path), "error", Some(msg));
+                return;
+            }
+        };
+        let file = match File::open(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                emit_state(&self.app, Some(path), "error", Some(format!("Could not open file: {e}")));
+                return;
+            }
+        };
+        let source = match Decoder::new(BufReader::new(file)) {
+            Ok(s) => s,
+            Err(e) => {
+                let msg = format!("Unsupported or corrupt audio file: {e}");
+                emit_state(&self.app, Some(path), "error", Some(msg));
+                return;
+            }
+        };
+        let sink = match Sink::try_new(&handle) {
+            Ok(s) => s,
+            Err(e) => {
+                emit_state(&self.app, Some(path), "error", Some(format!("Audio output error: {e}")));
+                return;
+            }
+        };
+
+        sink.set_volume(self.volume);
+        if paused {
+            sink.pause();
         }
+        sink.append(source.skip_duration(target));
+        self.seek_base = target;
+        self.last_pos = Duration::ZERO;
+        self.stalled_ticks = 0;
+        self.sink = Some(sink);
+
+        let state = if paused { "paused" } else { "playing" };
+        emit_state(&self.app, Some(path.clone()), state, None);
+        emit_position(&self.app, &path, target.as_secs_f64(), !paused);
+    }
+
+    /// A sink/stream operation panicked — almost always a third-party decoder
+    /// (symphonia on a malformed OGG, etc.) panicking on the output thread and
+    /// poisoning the sink's mutex. LEAK the poisoned sink and stream rather than
+    /// dropping them: their `Drop` impls re-lock that mutex and would panic
+    /// again (a panic while unwinding aborts the whole process). Reset state and
+    /// surface an error; the next load reopens a fresh default device.
+    fn recover_from_panic(&mut self) {
+        if let Some(sink) = self.sink.take() {
+            std::mem::forget(sink);
+        }
+        if let Some(stream) = self.stream.take() {
+            std::mem::forget(stream);
+        }
+        self.last_pos = Duration::ZERO;
+        self.stalled_ticks = 0;
+        self.seek_base = Duration::ZERO;
+        let path = self.path.take();
+        emit_state(
+            &self.app,
+            path,
+            "error",
+            Some("Playback failed: this audio file could not be decoded.".into()),
+        );
     }
 
     fn set_volume(&mut self, volume: f32) {
