@@ -24,7 +24,7 @@
 //! exactly what this design exists to avoid.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
@@ -34,8 +34,22 @@ use lru::LruCache;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::portable::DataHome;
 use crate::thumbcache::{Pixels, ThumbCache};
 use crate::types::{events, ThumbBatch, ThumbInfo};
+
+/// On-disk directory for rendered MODEL thumbnails, created lazily.
+///
+/// Models are the one thing worth persisting: a texture thumbnail is a
+/// millisecond decode, but a model thumbnail is a full FBX/glTF parse + render
+/// in the webview (100-400 ms each). RAM-only meant re-rendering every model on
+/// every launch — the reason a big library felt slow. Textures stay RAM-only
+/// (the user's explicit call); only models land here, as small PNGs.
+fn model_cache_dir(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.try_state::<DataHome>()?.dir().join("model-thumbs");
+    fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
 
 /// Thumbnail edge in px. 256 covers the largest grid cell (220) plus a little
 /// headroom for hi-dpi without storing a second size.
@@ -435,12 +449,34 @@ fn flush(app: &AppHandle, pending: &Arc<Mutex<Vec<(u32, ThumbInfo, String)>>>) {
 #[tauri::command]
 pub fn model_thumb_lookup(app: AppHandle, items: Vec<(u32, String)>) -> Vec<(u32, String)> {
     let cache = app.state::<ThumbCache>();
+    let dir = model_cache_dir(&app);
     items
         .into_iter()
         .filter_map(|(id, path)| {
             let (size, mtime) = file_stamp(Path::new(&path));
             let h = hash_key("m", &path, size, mtime);
-            cache.contains(h).then(|| (id, hex_key(h)))
+            let key = hex_key(h);
+            if cache.contains(h) {
+                return Some((id, key));
+            }
+            // Disk hit: decode the cached PNG straight into the RAM cache so the
+            // tex:// handler serves it exactly like a freshly rendered one, and
+            // the (expensive) render is skipped entirely.
+            let png = dir.as_ref()?.join(format!("{key}.png"));
+            let img = image::open(&png).ok()?; // miss → None → the caller renders it
+            let rgba = img.to_rgba8();
+            let (w, ih) = (rgba.width(), rgba.height());
+            cache.put(
+                h,
+                Pixels {
+                    width: w,
+                    height: ih,
+                    src_w: w,
+                    src_h: ih,
+                    rgba: rgba.into_raw(),
+                },
+            );
+            Some((id, key))
         })
         .collect()
 }
@@ -464,8 +500,16 @@ pub fn model_thumb_store(
     }
     let (size, mtime) = file_stamp(Path::new(&path));
     let h = hash_key("m", &path, size, mtime);
-    // A model thumbnail is rendered, not decoded — its "source" size is just the
-    // render size. The status bar shows resolution for textures only.
+    let key = hex_key(h);
+    // Build the image once, persist it to disk (so a relaunch skips the render),
+    // then hand the raw pixels to the RAM cache. A model thumbnail is rendered,
+    // not decoded — its "source" size is just the render size; the status bar
+    // shows resolution for textures only.
+    let img = image::RgbaImage::from_raw(width, height, rgba).ok_or("bad rgba buffer")?;
+    if let Some(dir) = model_cache_dir(&app) {
+        // Best-effort: a failed write just means this model re-renders next time.
+        let _ = img.save(dir.join(format!("{key}.png")));
+    }
     app.state::<ThumbCache>().put(
         h,
         Pixels {
@@ -473,10 +517,10 @@ pub fn model_thumb_store(
             height,
             src_w: width,
             src_h: height,
-            rgba,
+            rgba: img.into_raw(),
         },
     );
-    Ok(hex_key(h))
+    Ok(key)
 }
 
 /// PNG bytes for a cache key, for the `thumb://` handler — the few surfaces
