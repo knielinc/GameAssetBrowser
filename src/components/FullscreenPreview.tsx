@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import type { TextureItem } from "../material/classify";
 import ModelViewport from "./model/ModelViewport";
+import ModelLightControls from "./model/ModelLightControls";
 import TexturePreview, { type MeshMode } from "./texture/TexturePreview";
 import Sprite2DView from "./texture/Sprite2DView";
 import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
@@ -141,6 +142,16 @@ export default function FullscreenPreview({
               inline
               hasHeight={keys.height !== undefined}
             />
+          </div>
+        )}
+        {/* Same lighting rig as the docked inspector — the choice is global, so
+            switching it here is reflected everywhere. */}
+        {file.kind === "model" && (
+          <div className="flex shrink-0 items-center justify-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-dim">
+              Lighting
+            </span>
+            <ModelLightControls className="w-[280px]" />
           </div>
         )}
       </div>

@@ -1,12 +1,11 @@
 import { useCallback, useState, type ReactElement } from "react";
-import clsx from "clsx";
 import { X } from "lucide-react";
 import { basename } from "../../stores/libraryStore";
-import { useRenderPrefs, MODEL_LIGHTS } from "../../stores/renderPrefs";
 import { humanSize } from "../FileRow";
 import type { ModelStats } from "../../model/loadModel";
 import type { RescueResult } from "../../model/rescueTextures";
 import ModelViewport from "./ModelViewport";
+import ModelLightControls from "./ModelLightControls";
 import AtlasPicker from "./AtlasPicker";
 
 export interface ModelInspectorProps {
@@ -27,8 +26,6 @@ export default function ModelInspector({ path, size, onClose, width }: ModelInsp
   const onStats = useCallback((s: ModelStats | null) => setStats(s), []);
   const [rescue, setRescue] = useState<RescueResult | null>(null);
   const onRescue = useCallback((r: RescueResult | null) => setRescue(r), []);
-  const modelLight = useRenderPrefs((s) => s.modelLight);
-  const setModelLight = useRenderPrefs((s) => s.setModelLight);
 
   return (
     <aside style={{ width }} className="flex shrink-0 flex-col border-l border-border bg-panel">
@@ -49,23 +46,7 @@ export default function ModelInspector({ path, size, onClose, width }: ModelInsp
         {path !== null && (
           <section className="flex flex-col gap-1.5">
             <h4 className="text-[10px] font-semibold uppercase tracking-widest text-dim">Lighting</h4>
-            <div className="flex gap-[3px]">
-              {MODEL_LIGHTS.map((l) => (
-                <button
-                  key={l.id}
-                  type="button"
-                  className={clsx(
-                    "h-[23px] flex-1 rounded-md border px-1.5 text-[10px] transition-colors duration-[120ms]",
-                    modelLight === l.id
-                      ? "border-accent/45 bg-accent/12 text-accent"
-                      : "border-border text-dim hover:bg-raised hover:text-text",
-                  )}
-                  onClick={() => setModelLight(l.id)}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
+            <ModelLightControls />
           </section>
         )}
 
