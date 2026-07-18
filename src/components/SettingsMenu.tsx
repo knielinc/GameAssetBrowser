@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
 import { Check, Settings } from "lucide-react";
-import { MAX_FONT, MIN_FONT, THEMES, useThemeStore } from "../stores/theme";
+import { DEFAULT_FONT, MAX_FONT, MIN_FONT, THEMES, useThemeStore } from "../stores/theme";
 
 /**
  * The header settings menu: theme palette + base UI size. Both are global,
@@ -50,9 +50,14 @@ export default function SettingsMenu(): ReactElement {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[calc(100%+4px)] z-50 w-64 rounded-xl bg-raised p-3 shadow-e2">
+        <div
+          // Counter the document `zoom` so the menu stays a fixed size while you
+          // drag the base-size slider (otherwise it scales under your cursor).
+          style={{ zoom: DEFAULT_FONT / baseFont }}
+          className="absolute right-0 top-[calc(100%+4px)] z-50 w-64 rounded-xl bg-raised p-3 shadow-e2"
+        >
           <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-faint">Theme</div>
-          <div className="flex items-center justify-between gap-1.5">
+          <div className="grid grid-cols-5 gap-1.5">
             {THEMES.map((t) => {
               const on = t.id === themeId;
               return (
@@ -61,9 +66,7 @@ export default function SettingsMenu(): ReactElement {
                   type="button"
                   title={t.name}
                   onClick={() => setTheme(t.id)}
-                  className={clsx(
-                    "relative flex h-10 flex-1 items-center justify-center rounded-lg transition-transform duration-[120ms] hover:-translate-y-0.5",
-                  )}
+                  className="relative flex h-9 items-center justify-center rounded-lg transition-transform duration-[120ms] hover:-translate-y-0.5"
                   style={{ background: t.swatch[0], boxShadow: on ? `0 0 0 2px var(--color-accent)` : "var(--shadow-e1)" }}
                 >
                   <span className="h-3.5 w-3.5 rounded-full" style={{ background: t.swatch[1] }} />
