@@ -102,11 +102,11 @@ export const THEMES: Theme[] = [
 ];
 
 const KEY_THEME = "gameassetbrowser.theme";
-const KEY_FONT = "gameassetbrowser.baseFont";
-/** The size the layout was authored at — zoom = base / this. */
-export const DEFAULT_FONT = 14;
-export const MIN_FONT = 11;
-export const MAX_FONT = 20;
+const KEY_SCALE = "gameassetbrowser.uiScale";
+/** UI scale is a percentage; 100% renders the 16px base. */
+export const DEFAULT_SCALE = 100;
+export const MIN_SCALE = 50;
+export const MAX_SCALE = 200;
 
 function applyTheme(id: string): void {
   const theme = THEMES.find((t) => t.id === id) ?? THEMES[0]!;
@@ -115,10 +115,10 @@ function applyTheme(id: string): void {
   root.style.colorScheme = theme.light === true ? "light" : "dark";
 }
 
-function applyFont(px: number): void {
+function applyScale(pct: number): void {
   // `zoom` scales the whole document uniformly (px and all), so the entire UI
-  // grows off the chosen base size — the em-scaling the px-based layout can't do.
-  document.documentElement.style.setProperty("zoom", String(px / DEFAULT_FONT));
+  // grows off the chosen size — 100% is the 16px base.
+  document.documentElement.style.setProperty("zoom", String(pct / 100));
 }
 
 function loadTheme(): string {
@@ -131,26 +131,27 @@ function loadTheme(): string {
   return THEMES[0]!.id;
 }
 
-function loadFont(): number {
+function loadScale(): number {
   try {
-    const v = Number(localStorage.getItem(KEY_FONT));
-    if (Number.isFinite(v) && v >= MIN_FONT && v <= MAX_FONT) return v;
+    const v = Number(localStorage.getItem(KEY_SCALE));
+    if (Number.isFinite(v) && v >= MIN_SCALE && v <= MAX_SCALE) return v;
   } catch {
     /* storage disabled */
   }
-  return DEFAULT_FONT;
+  return DEFAULT_SCALE;
 }
 
 export interface ThemeStore {
   themeId: string;
-  baseFont: number;
+  /** UI scale as a percentage (50–200); 100% = 16px base. */
+  uiScale: number;
   setTheme: (id: string) => void;
-  setBaseFont: (px: number) => void;
+  setUiScale: (pct: number) => void;
 }
 
 export const useThemeStore = create<ThemeStore>((set) => ({
   themeId: loadTheme(),
-  baseFont: loadFont(),
+  uiScale: loadScale(),
   setTheme: (id) => {
     try {
       localStorage.setItem(KEY_THEME, id);
@@ -160,18 +161,18 @@ export const useThemeStore = create<ThemeStore>((set) => ({
     applyTheme(id);
     set({ themeId: id });
   },
-  setBaseFont: (px) => {
-    const clamped = Math.min(MAX_FONT, Math.max(MIN_FONT, Math.round(px)));
+  setUiScale: (pct) => {
+    const clamped = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(pct)));
     try {
-      localStorage.setItem(KEY_FONT, String(clamped));
+      localStorage.setItem(KEY_SCALE, String(clamped));
     } catch {
       /* storage disabled */
     }
-    applyFont(clamped);
-    set({ baseFont: clamped });
+    applyScale(clamped);
+    set({ uiScale: clamped });
   },
 }));
 
 // Apply the persisted choices at import (before first paint).
 applyTheme(loadTheme());
-applyFont(loadFont());
+applyScale(loadScale());
