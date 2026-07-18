@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { invoke } from "@tauri-apps/api/core";
-import { loadModel } from "./loadModel";
+import { loadModel, modelUrl } from "./loadModel";
 import { disposeModel } from "./dispose";
 import { rescueTextures } from "./rescueTextures";
+import { atlasFor } from "../stores/atlasStore";
 /** Minimal shape this module needs — avoids importing the store, which would
  *  drag `three` into whatever imports the store. */
 export interface LibFileLike {
@@ -85,6 +86,77 @@ export function onModelThumb(fn: Listener): () => void {
   return () => listeners.delete(fn);
 }
 
+// ── Off-main rendering ────────────────────────────────────────────────────
+// The parse + render happen in a Web Worker on an OffscreenCanvas so the grid
+// doesn't jank. The worker returns raw pixels; storing them (Tauri invoke) and
+// resolving the manual atlas (the store) stay here on the main thread. Any
+// worker failure falls back to renderMain — a thumbnail must never go blank.
+
+interface WorkerResult {
+  w: number;
+  h: number;
+  buf: ArrayBuffer;
+}
+let worker: Worker | null = null;
+let workerBroken = false;
+let msgSeq = 0;
+let pending: { id: number; resolve: (r: WorkerResult | null) => void; timer: number } | null = null;
+
+function ensureWorker(): Worker | null {
+  if (workerBroken) return null;
+  if (worker !== null) return worker;
+  try {
+    worker = new Worker(new URL("./modelThumbWorker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = (e: MessageEvent) => {
+      const m = e.data as { type: string; id: number; w?: number; h?: number; buf?: ArrayBuffer };
+      if (pending === null || pending.id !== m.id) return;
+      clearTimeout(pending.timer);
+      const p = pending;
+      pending = null;
+      if (m.type === "done" && m.buf !== undefined) p.resolve({ w: m.w!, h: m.h!, buf: m.buf });
+      else p.resolve(null); // worker-reported error → fall back to main thread
+    };
+    worker.onerror = () => {
+      // The worker itself died (bad chunk, no OffscreenCanvas/WebGL). Give up on
+      // it entirely and let every job render on the main thread instead.
+      workerBroken = true;
+      if (pending !== null) {
+        clearTimeout(pending.timer);
+        pending.resolve(null);
+        pending = null;
+      }
+    };
+    return worker;
+  } catch {
+    workerBroken = true;
+    return null;
+  }
+}
+
+/** The user's chosen atlas for this model's pack, resolved to a model:// URL. */
+function resolveAtlas(modelPath: string): { url: string; flipY: boolean } | null {
+  const m = atlasFor(modelPath);
+  return m === undefined ? null : { url: modelUrl(m.path), flipY: m.flipY };
+}
+
+/** Render `file` in the worker; resolves null (→ main-thread fallback) if the
+ *  worker is unavailable, errors, or hangs. */
+function renderViaWorker(file: LibFileLike): Promise<WorkerResult | null> {
+  const wk = ensureWorker();
+  if (wk === null) return Promise.resolve(null);
+  const id = ++msgSeq;
+  return new Promise<WorkerResult | null>((resolve) => {
+    const timer = self.setTimeout(() => {
+      if (pending?.id === id) {
+        pending = null;
+        resolve(null); // a wedged parse must not stall the whole queue
+      }
+    }, 20000);
+    pending = { id, resolve, timer };
+    wk.postMessage({ id, path: file.path, atlas: resolveAtlas(file.path) });
+  });
+}
+
 /**
  * Queue thumbnails for the currently visible models, superseding any earlier
  * request. LIFO drain: during a fast scroll the cells under the cursor win and
@@ -117,7 +189,20 @@ async function drain(): Promise<void> {
       done.add(job.file.path);
 
       try {
-        const key = await render(job.file);
+        // Worker first (off-main). On any worker miss, render on this thread so
+        // the thumbnail still appears — never a regression, only a speedup.
+        const r = await renderViaWorker(job.file);
+        let key: string | null;
+        if (r !== null) {
+          key = await invoke<string>("model_thumb_store", {
+            path: job.file.path,
+            width: r.w,
+            height: r.h,
+            rgba: Array.from(new Uint8Array(r.buf)),
+          });
+        } else {
+          key = await renderMain(job.file);
+        }
         if (key !== null) for (const fn of listeners) fn(job.file.id, key);
       } catch (err) {
         // A model we cannot load keeps its icon. Expected for .blend and
@@ -132,7 +217,8 @@ async function drain(): Promise<void> {
   }
 }
 
-async function render(file: LibFileLike): Promise<string | null> {
+/** Main-thread render — the fallback when the worker can't handle a model. */
+async function renderMain(file: LibFileLike): Promise<string | null> {
   const ctx = ensure();
   if (ctx === null) return null;
   const { r, s, c } = ctx;
