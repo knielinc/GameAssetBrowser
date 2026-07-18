@@ -274,6 +274,13 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             width={inspector.width}
           />
         )}
+        {/* While the fullscreen preview is up the inspector unmounts (one WebGL
+            context, not two). Reserve its width with a spacer so the grid keeps
+            the same column count — otherwise it reflows open then reflows back
+            on Escape, snapping the scroll to a fresh row-aligned offset. */}
+        {kind !== "audio" && inspectorOpen && preview !== null && (
+          <div aria-hidden className="shrink-0" style={{ width: inspector.width }} />
+        )}
       </div>
       {preview !== null && (
         <FullscreenPreview

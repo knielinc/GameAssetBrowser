@@ -1,8 +1,9 @@
 import { useMemo, type ReactElement } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Layers, LayoutGrid, List, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Blend, Grid2x2, Layers, LayoutGrid, List, Search, X } from "lucide-react";
 import { EXTENSIONS, SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { useLibraryStore } from "../stores/libraryStore";
+import { useRenderPrefs } from "../stores/renderPrefs";
 import { usePresentExts } from "../hooks/useVisibleFiles";
 import { MAX_CELL, MIN_CELL } from "../stores/settings";
 
@@ -32,6 +33,8 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const setSort = useLibraryStore((s) => s.setSort);
   const toggleSortDir = useLibraryStore((s) => s.toggleSortDir);
   const patchTab = useLibraryStore((s) => s.patchTab);
+  const pixelArt = useRenderPrefs((s) => s.pixelArt);
+  const togglePixelArt = useRenderPrefs((s) => s.toggle);
 
   const { query, extFilter, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
   // Audio has no grid implementation — never render a control that does nothing.
@@ -111,6 +114,27 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         {kind === "texture" && viewMode === "grid" && (
           <button
             type="button"
+            title={
+              pixelArt
+                ? "Pixel — nearest-neighbour scaling (crisp). Click for smooth. Applies to every thumbnail and preview."
+                : "Smooth — bilinear scaling. Click for pixel. Applies to every thumbnail and preview."
+            }
+            className={clsx(
+              "flex h-[26px] items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors duration-[120ms]",
+              pixelArt
+                ? "border-accent/45 bg-accent/12 text-accent"
+                : "border-border text-dim hover:bg-raised hover:text-text",
+            )}
+            onClick={togglePixelArt}
+          >
+            {pixelArt ? <Grid2x2 size={12} /> : <Blend size={12} />}
+            {pixelArt ? "Pixel" : "Smooth"}
+          </button>
+        )}
+
+        {kind === "texture" && viewMode === "grid" && (
+          <button
+            type="button"
             title="Collapse loose files that form one PBR material into a single cell"
             className={clsx(
               "flex h-[26px] items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors duration-[120ms]",
@@ -129,6 +153,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           <input
             type="range"
             aria-label="Cell size"
+            title={`Thumbnail size — ${cellSize}px`}
             min={MIN_CELL}
             max={MAX_CELL}
             step={4}
@@ -142,6 +167,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         <select
           value={sortField}
           aria-label="Sort by"
+          title={`Sort by — ${SORT_LABELS[sortField]}`}
           className="sort-select"
           onChange={(e) => setSort(kind, e.currentTarget.value as SortField)}
         >

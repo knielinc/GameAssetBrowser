@@ -60,12 +60,16 @@ export default function AssetGrid<T>({
 
   // The WebGL overlay measures the DOM each frame, so it only needs a nudge
   // when the slots move for a reason other than scroll/resize: a new item set
-  // (filter, group toggle) or a decode landing (a 404'd fetch can now succeed).
+  // (filter, group toggle), a decode landing (a 404'd fetch can now succeed),
+  // or a cell-size change. That last one reflows the grid to new columns/row
+  // heights WITHOUT resizing the container, so the overlay's ResizeObserver
+  // never fires — the cells grow but the painted thumbnails stay at the old
+  // rects until we bump the revision here.
   const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
   const [glRevision, setGlRevision] = useState(0);
   useEffect(() => {
     if (glThumbs === true) setGlRevision((r) => r + 1);
-  }, [items, thumbsVersion, glThumbs]);
+  }, [items, thumbsVersion, glThumbs, cellSize]);
 
   // Column count comes from the live container width, so the grid reflows when
   // the sidebar or inspector is dragged.
