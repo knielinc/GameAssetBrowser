@@ -294,20 +294,22 @@ impl Engine {
     }
 
     fn seek(&mut self, seconds: f64) {
-        if !seconds.is_finite() || self.sink.is_none() {
+        if !seconds.is_finite() {
             return;
         }
+        let Some(path) = self.path.clone() else { return };
         let target = Duration::from_secs_f64(seconds.clamp(0.0, MAX_SEEK_SECONDS));
-        let paused = self.sink.as_ref().map(|s| s.is_paused()).unwrap_or(false);
+        // No sink (e.g. the track ended, or a scrub after end) → land PAUSED at
+        // the target, ready to resume from the cursor on play. Otherwise keep
+        // the current pause state.
+        let paused = self.sink.as_ref().map(|s| s.is_paused()).unwrap_or(true);
         // rodio's in-place `try_seek` is unreliable across our formats — the OGG
         // demuxer panics, and WAV restarts from 0 — so seek UNIFORMLY by
         // reloading the decoder and decoding forward to the target. Cheap for
         // WAV (a raw sample skip); a compressed far seek costs time roughly
         // proportional to the distance. `seek_base` (set in reload_at) offsets
         // reported positions since the fresh sink's clock restarts at 0.
-        if let Some(path) = self.path.clone() {
-            self.reload_at(path, target, paused);
-        }
+        self.reload_at(path, target, paused);
     }
 
     /// Seek by reloading the decoder and decoding forward to `target`

@@ -109,9 +109,16 @@ export function initIpcEvents(): void {
         positionRef.playing = true;
         break;
       case "paused":
-      case "ended":
         usePlayerStore.setState({ playing: false });
         positionRef.playing = false;
+        break;
+      case "ended":
+        // Finished: rewind the cursor to the start and pause, so the next play
+        // resumes cleanly from 0.
+        usePlayerStore.setState({ playing: false });
+        positionRef.playing = false;
+        positionRef.seconds = 0;
+        usePositionStore.setState({ seconds: 0 });
         break;
       case "stopped":
         usePlayerStore.setState({ playing: false });
