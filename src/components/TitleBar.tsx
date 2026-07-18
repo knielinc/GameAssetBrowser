@@ -5,6 +5,7 @@ import { AudioLines, Box, Copy, Image, Maximize2, Minimize2, Minus, Square, X } 
 import { folderMatcher, useLibraryStore } from "../stores/libraryStore";
 import { ASSET_KINDS, type AssetKind } from "../types";
 import { switchTab } from "../stores/tabs";
+import SettingsMenu from "./SettingsMenu";
 
 /**
  * Custom window chrome for the frameless window (Rust sets decorations:false).
@@ -147,6 +148,8 @@ export default function TitleBar(): ReactElement {
       {/* Drag strip — fills the rest so the whole bar minus the controls is
           grabbable. */}
       <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
+
+      <SettingsMenu />
 
       <div className="flex h-full shrink-0">
         <ControlButton title="Minimize" onClick={() => void win.minimize().catch(log("minimize"))}>
