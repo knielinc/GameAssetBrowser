@@ -57,9 +57,9 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   // whose `_A` is undecidable on names alone resolves once we can see that
   // the pixels are grayscale.
   const grouped: TextureItem[] | null = useMemo(() => {
-    if (kind !== "texture" || !tab.groupMaterials || tab.viewMode !== "grid") return null;
+    if (kind !== "texture" || !tab.groupMaterials) return null;
     return groupTextures(visible, thumbInfos());
-  }, [kind, tab.groupMaterials, tab.viewMode, visible, thumbsVersion]);
+  }, [kind, tab.groupMaterials, visible, thumbsVersion]);
 
   const [menu, setMenu] = useState<{ x: number; y: number; file: LibFile } | null>(null);
   // Inspector show/hide is shared with the TabBar toggle; its width is a
@@ -182,7 +182,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
       </div>
     );
-  } else if (grouped !== null) {
+  } else if (grouped !== null && tab.viewMode === "grid") {
     // Grouped textures: thumbnail requests still key off the FLAT file list,
     // so the range the grid reports (over materials) can't drive them. Ask for
     // every visible material's face texture instead — the count is bounded by
@@ -227,7 +227,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
       />
     );
   } else {
-    content = <FileList kind={kind} files={visible} />;
+    content = <FileList kind={kind} files={visible} items={grouped ?? undefined} />;
   }
 
   const selectedFile = visible.find((f) => f.path === tab.selectedPath) ?? null;

@@ -14,8 +14,9 @@ import { showInExplorer } from "../ipc/commands";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
+import type { TextureItem } from "../material/classify";
 import ContextMenu from "./ContextMenu";
-import FileRow, { rowGrid } from "./FileRow";
+import FileRow, { MaterialRow, rowGrid } from "./FileRow";
 
 const ROW_HEIGHT = 28;
 
@@ -43,6 +44,9 @@ function headersFor(kind: AssetKind): HeaderSpec[] {
 export interface FileListProps {
   kind: AssetKind;
   files: LibFile[];
+  /** When set (texture list + grouping on), rows are grouped materials + loose
+   *  files instead of the flat file list; selection keys off each item's key. */
+  items?: TextureItem[];
 }
 
 /** An open row context menu: where it sits and which file it targets. */
@@ -52,12 +56,15 @@ interface RowMenu {
   file: LibFile;
 }
 
-export default function FileList({ kind, files }: FileListProps): ReactElement {
+export default function FileList({ kind, files, items }: FileListProps): ReactElement {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const filesRef = useRef(files);
   filesRef.current = files;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const kindRef = useRef(kind);
   kindRef.current = kind;
+  const rowCount = items ? items.length : files.length;
 
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const { selectedPath, sortField, sortDir } = tab;
@@ -70,7 +77,7 @@ export default function FileList({ kind, files }: FileListProps): ReactElement {
   const headers = headersFor(kind);
 
   const virtualizer = useVirtualizer({
-    count: files.length,
+    count: rowCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
@@ -97,6 +104,13 @@ export default function FileList({ kind, files }: FileListProps): ReactElement {
   // Stable click handler so memo'd rows never re-render from a callback churn.
   // Only audio loads into the player; other kinds just move the selection.
   const onSelect = useCallback((index: number) => {
+    const its = itemsRef.current;
+    if (its !== undefined) {
+      // Grouped: a material has no single path, so select by the item's key.
+      const it = its[index];
+      if (it !== undefined) useLibraryStore.getState().select(kindRef.current, index, it.key);
+      return;
+    }
     const file = filesRef.current[index];
     if (!file) return;
     if (kindRef.current === "audio") {
@@ -113,6 +127,15 @@ export default function FileList({ kind, files }: FileListProps): ReactElement {
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const onRowContextMenu = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
+    const its = itemsRef.current;
+    if (its !== undefined) {
+      const it = its[index];
+      if (it === undefined) return;
+      useLibraryStore.getState().select(kindRef.current, index, it.key);
+      const file = it.kind === "material" ? it.material.members[0]!.file : it.file;
+      setMenu({ x: e.clientX, y: e.clientY, file });
+      return;
+    }
     const file = filesRef.current[index];
     if (!file) return;
     useLibraryStore.getState().select(kindRef.current, index, file.path);
@@ -143,7 +166,7 @@ export default function FileList({ kind, files }: FileListProps): ReactElement {
         </div>
       </div>
 
-      {files.length === 0 ? (
+      {rowCount === 0 ? (
         <div className="flex flex-1 items-center justify-center text-xs text-dim">
           {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
         </div>
@@ -156,31 +179,55 @@ export default function FileList({ kind, files }: FileListProps): ReactElement {
               position: "relative",
             }}
           >
-            {virtualizer.getVirtualItems().map((item) => {
-              const file = files[item.index];
-              if (!file) return null;
+            {virtualizer.getVirtualItems().map((row) => {
+              const it = items?.[row.index];
+              const file = it === undefined ? files[row.index] : undefined;
+              if (it === undefined && file === undefined) return null;
               return (
                 <div
-                  key={item.key}
+                  key={row.key}
                   className="absolute left-0 top-0 w-full"
-                  style={{
-                    height: `${item.size}px`,
-                    transform: `translateY(${item.start}px)`,
-                  }}
+                  style={{ height: `${row.size}px`, transform: `translateY(${row.start}px)` }}
                 >
-                  <FileRow
-                    index={item.index}
-                    name={file.name}
-                    ext={file.ext}
-                    size={file.size}
-                    modified={file.modified}
-                    durationSeconds={durations.get(file.id)}
-                    showDuration={kind === "audio"}
-                    selected={file.path === selectedPath}
-                    playing={kind === "audio" && playing && file.path === currentPath}
-                    onSelect={onSelect}
-                    onContextMenu={onRowContextMenu}
-                  />
+                  {it !== undefined ? (
+                    it.kind === "material" ? (
+                      <MaterialRow
+                        index={row.index}
+                        material={it.material}
+                        selected={it.key === selectedPath}
+                        onSelect={onSelect}
+                        onContextMenu={onRowContextMenu}
+                      />
+                    ) : (
+                      <FileRow
+                        index={row.index}
+                        name={it.file.name}
+                        ext={it.file.ext}
+                        size={it.file.size}
+                        modified={it.file.modified}
+                        durationSeconds={undefined}
+                        showDuration={false}
+                        selected={it.file.path === selectedPath}
+                        playing={false}
+                        onSelect={onSelect}
+                        onContextMenu={onRowContextMenu}
+                      />
+                    )
+                  ) : (
+                    <FileRow
+                      index={row.index}
+                      name={file!.name}
+                      ext={file!.ext}
+                      size={file!.size}
+                      modified={file!.modified}
+                      durationSeconds={durations.get(file!.id)}
+                      showDuration={kind === "audio"}
+                      selected={file!.path === selectedPath}
+                      playing={kind === "audio" && playing && file!.path === currentPath}
+                      onSelect={onSelect}
+                      onContextMenu={onRowContextMenu}
+                    />
+                  )}
                 </div>
               );
             })}

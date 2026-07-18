@@ -1,6 +1,9 @@
 import { memo, type CSSProperties, type MouseEvent, type ReactElement } from "react";
 import clsx from "clsx";
+import { Layers } from "lucide-react";
 import { formatTime } from "./player/TimeDisplay";
+import { CHANNEL_CODE } from "../material/table";
+import type { Material } from "../material/classify";
 
 /**
  * Shared grid template so the header and rows always line up. The Length
@@ -139,3 +142,61 @@ function FileRowInner({
 /** Memo'd: everything except the callbacks is a primitive, and both callbacks are stable. */
 const FileRow = memo(FileRowInner);
 export default FileRow;
+
+export interface MaterialRowProps {
+  index: number;
+  material: Material;
+  selected: boolean;
+  onSelect: (index: number) => void;
+  onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+}
+
+/** A grouped material as a single list row: the name column carries a layers
+ *  glyph + the channel codes, and the "type" slot shows the member count. Size
+ *  and modified aggregate over the members. Shares rowGrid so it lines up with
+ *  the file rows and the header. */
+function MaterialRowInner({
+  index,
+  material,
+  selected,
+  onSelect,
+  onContextMenu,
+}: MaterialRowProps): ReactElement {
+  let size = 0;
+  let modified = 0;
+  for (const m of material.members) {
+    size += m.file.size;
+    if (m.file.modified > modified) modified = m.file.modified;
+  }
+  const codes = [...material.channels.keys()].map((c) => CHANNEL_CODE[c]).join(" · ");
+  return (
+    <div
+      className={clsx("file-row", rowGrid(false), selected && "row-selected")}
+      onClick={() => onSelect(index)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(index, e);
+      }}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <Layers size={13} className="shrink-0 text-accent" />
+        <span className="truncate" title={`${material.display}\n${material.dir}`}>
+          {material.display}
+        </span>
+        <span className="shrink-0 truncate font-mono text-[9px] text-faint">{codes}</span>
+      </div>
+
+      <span
+        className="justify-self-start rounded px-1.5 py-px text-[10px] font-medium tabular-nums"
+        style={{ color: "var(--color-accent-fg)", background: "var(--color-accent-fill)" }}
+      >
+        ×{material.members.length}
+      </span>
+
+      <span className="text-right text-[11px] tabular-nums text-dim">{humanSize(size)}</span>
+      <span className="text-right text-[11px] tabular-nums text-dim">{formatDate(modified)}</span>
+    </div>
+  );
+}
+
+export const MaterialRow = memo(MaterialRowInner);

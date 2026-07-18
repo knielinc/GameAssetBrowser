@@ -209,10 +209,10 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           </button>
         )}
 
-        {kind === "texture" && viewMode === "grid" && (
+        {kind === "texture" && (
           <button
             type="button"
-            title="Collapse loose files that form one PBR material into a single cell"
+            title="Collapse loose files that form one PBR material into a single row/cell"
             className={clsx(
               "flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
               groupMaterials
