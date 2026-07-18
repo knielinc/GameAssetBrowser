@@ -1,22 +1,51 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #0a0a0f;
-  --color-panel: #111118;
-  --color-raised: #181822;
-  --color-border: #23232e;
-  --color-text: #e6e6ef;
-  --color-dim: #8a8a9a;
-  --color-accent: #7c5cff;
-  --color-accent-hover: #8f73ff;
+  /* Tonal ladder — each surface a step lighter and faintly cooler. Depth is
+     carried by tone + soft shadow, NOT a 1px line around every box (the tell
+     that reads as machine-made). bg → panel → raised → overlay. */
+  --color-bg: #0d0e13;
+  --color-header: #16181f; /* the top bar — a touch darker than the panel chrome */
+  --color-panel: #1e212a;
+  --color-raised: #272a35;
+  --color-overlay: #313641;
+  --color-border: #2a2e39; /* legacy surfaces not yet migrated off borders */
+  --color-text: #edeff4;
+  --color-dim: #a2a8b8;
+  --color-faint: #6b7284;
+  --color-accent: #8aa6ff;
+  --color-accent-hover: #a2b8ff;
+  /* Active controls keep LIGHT text on a DARKER fill: a deep blue that's
+     clearly bluer than the grey panel (so the button reads) with a bright
+     light-blue foreground (so the label reads). */
+  --color-accent-fill: #2c3b6a;
+  --color-accent-fg: #cdd8ff;
   --color-danger: #ff5c7a;
 
   /* Per-kind hues. Tab icons and badge tints ONLY — selection, focus, and
-     active states stay accent violet on every tab. Three competing accents
-     read as a toy; one accent reads as deliberate. */
-  --color-kind-audio: #7c5cff;
-  --color-kind-texture: #3ddc97;
+     active states stay one accent on every tab. Model amber doubles as the
+     "needs attention" warn tint, so keep it warm. */
+  --color-kind-audio: #45c58a;
+  --color-kind-texture: #66c6dc;
   --color-kind-model: #ffb454;
+
+  /* PBR channel palette — functional colour on the material channel strip.
+     Normal is periwinkle (like an actual tangent-space normal map), so a
+     material's makeup reads at a glance. Playful, and it earns its place. */
+  --color-ch-bc: #e7b15c;
+  --color-ch-n: #7e8cf6;
+  --color-ch-r: #93a6bc;
+  --color-ch-m: #66c6dc;
+  --color-ch-ao: #d0a06e;
+  --color-ch-h: #56c79a;
+
+  /* Soft, diffuse depth — the separator that replaces borders. */
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.3), 0 3px 10px rgb(0 0 0 / 0.22);
+  --shadow-e2: 0 4px 14px rgb(0 0 0 / 0.34), 0 14px 34px rgb(0 0 0 / 0.3);
+  --shadow-sel: 0 0 0 2px var(--color-accent), 0 4px 14px rgb(0 0 0 / 0.34);
+
+  /* Spring easing for the playful micro-motion (hover lift, selection). */
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.5, 1);
 
   --font-sans:
     "Inter", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -39,8 +68,8 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 14px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   user-select: none;
   cursor: default;
@@ -169,12 +198,11 @@ html.sidebar-resizing * {
   background-size: 16px 16px;
 }
 
-/* Extension filter chips. */
+/* Extension filter chips — a tonal well on the toolbar, no outline. */
 .chip {
-  padding: 2px 9px;
+  padding: 3px 10px;
   border-radius: 9999px;
-  border: 1px solid var(--color-border);
-  background: transparent;
+  background: var(--color-bg);
   color: var(--color-dim);
   font-size: 11px;
   line-height: 1.5;
@@ -182,20 +210,21 @@ html.sidebar-resizing * {
   transition:
     color 120ms ease,
     background-color 120ms ease,
-    border-color 120ms ease;
+    transform 120ms var(--ease-spring);
 }
 .chip:hover {
   color: var(--color-text);
-  background: var(--color-raised);
+  background: var(--color-overlay);
+  transform: translateY(-1px);
 }
 .chip-active {
   color: var(--color-accent);
-  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  font-weight: 600;
 }
 .chip-active:hover {
   color: var(--color-accent-hover);
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
 
 /* Ghost icon buttons (sidebar remove, rescan, transport toggles). */
@@ -276,20 +305,35 @@ html.sidebar-resizing * {
   color: var(--color-dim);
 }
 
-/* Sort dropdown in the toolbar. */
+/* Sort dropdown in the toolbar — tonal pill, focus ring not a border. The
+   native arrow is hidden (a positioned chevron replaces it); `color-scheme`
+   forces the OS popup dark, and the options are themed so the list matches. */
 .sort-select {
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-raised);
+  height: 30px;
+  padding: 0 28px 0 12px;
+  border-radius: 9999px;
+  border: 0;
+  background: var(--color-bg);
   color: var(--color-text);
   font-size: 12px;
   outline: none;
-  transition: border-color 120ms ease;
+  appearance: none;
+  -webkit-appearance: none;
+  color-scheme: dark;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    box-shadow 150ms ease;
+}
+.sort-select:hover {
+  background: var(--color-overlay);
 }
 .sort-select:focus {
-  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 32%, transparent);
+}
+.sort-select option {
+  background: var(--color-panel);
+  color: var(--color-text);
 }
 
 /* Volume slider: accent fill driven by the --fill custom property. */
@@ -301,7 +345,7 @@ input[type="range"].volume {
   background: linear-gradient(
     to right,
     var(--color-accent) var(--fill, 50%),
-    var(--color-raised) var(--fill, 50%)
+    var(--color-bg) var(--fill, 50%)
   );
   outline: none;
 }

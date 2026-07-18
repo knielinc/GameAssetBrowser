@@ -324,7 +324,7 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
   }, [path, onStats, onRescue, atlasChoice]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-lg border border-border bg-[#0c0c12]">
+    <div className="relative h-full w-full overflow-hidden rounded-xl bg-[#0c0c12] shadow-e1">
       <div ref={hostRef} className="h-full w-full" />
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40">

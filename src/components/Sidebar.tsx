@@ -30,7 +30,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
     // Width is set inline with NO transition, so dragging tracks 1:1.
     <aside
       style={{ width }}
-      className="flex shrink-0 flex-col border-r border-border bg-panel"
+      className="flex shrink-0 flex-col bg-panel"
     >
       <div className="flex items-center justify-between px-4 pb-1 pt-3">
         <span className="text-[10px] font-medium uppercase tracking-widest text-dim">
@@ -48,7 +48,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
       {/* One bordered footer: folder actions on top, settings import/export
           below, with uniform padding and a single divider so the two rows read
           as one group instead of two stacked strips. */}
-      <div className="flex shrink-0 flex-col gap-2 border-t border-border p-3">
+      <div className="flex shrink-0 flex-col gap-2 p-3 shadow-[inset_0_1px_0_var(--color-bg)]">
         <div className="flex gap-2">
           <button type="button" className="btn-primary flex-1" onClick={() => void addFolders()}>
             <FolderPlus size={14} />
@@ -58,7 +58,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
             type="button"
             title="Rescan folders"
             disabled={scanning || rootCount === 0}
-            className="icon-btn h-[30px] w-[30px] border border-border"
+            className="icon-btn h-[30px] w-[30px] bg-bg"
             onClick={() => void rescanRoots()}
           >
             <RefreshCw size={13} className={clsx(scanning && "animate-spin")} />
@@ -71,7 +71,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
           <button
             type="button"
             title="Load settings from a file you choose"
-            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-md border border-border text-[11px] text-dim transition-colors duration-[120ms] hover:bg-raised hover:text-text"
+            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
             onClick={onImport}
           >
             <Upload size={12} />
@@ -80,7 +80,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
           <button
             type="button"
             title="Save the current settings to a file you choose"
-            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-md border border-border text-[11px] text-dim transition-colors duration-[120ms] hover:bg-raised hover:text-text"
+            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
             onClick={onExport}
           >
             <Download size={12} />

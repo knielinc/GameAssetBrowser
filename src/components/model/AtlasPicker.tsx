@@ -90,8 +90,8 @@ export default function AtlasPicker({ modelPath, candidates, applied }: AtlasPic
                 type="button"
                 title={basename(c)}
                 className={clsx(
-                  "alpha-checker aspect-square overflow-hidden rounded border transition-colors duration-[120ms]",
-                  on ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : "border-border hover:border-accent/50",
+                  "alpha-checker aspect-square overflow-hidden rounded-lg transition-[box-shadow] duration-[120ms]",
+                  on ? "shadow-sel" : "shadow-e1 hover:shadow-e2",
                 )}
                 onClick={() => choose(c)}
               >
@@ -109,7 +109,7 @@ export default function AtlasPicker({ modelPath, candidates, applied }: AtlasPic
 
       <button
         type="button"
-        className="flex h-[26px] items-center justify-center gap-1.5 rounded-md border border-border text-[11px] text-dim transition-colors duration-[120ms] hover:bg-raised hover:text-text"
+        className="flex h-[26px] items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
         onClick={() => void browse()}
       >
         <FolderOpen size={12} />
@@ -121,10 +121,10 @@ export default function AtlasPicker({ modelPath, candidates, applied }: AtlasPic
           type="button"
           title="Palette/ramp atlases are asymmetric, so a wrong flip lands on different COLOURS, not a mirrored image. If the colours look scrambled, try this."
           className={clsx(
-            "h-[23px] rounded-md border text-[10px] transition-colors duration-[120ms]",
+            "h-[23px] rounded-full text-[10px] transition-colors duration-[120ms]",
             flipY
-              ? "border-accent/45 bg-accent/12 text-accent"
-              : "border-border text-dim hover:bg-raised hover:text-text",
+              ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+              : "bg-bg text-dim hover:bg-overlay hover:text-text",
           )}
           onClick={toggleFlip}
         >

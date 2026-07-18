@@ -28,8 +28,8 @@ export default function ModelInspector({ path, size, onClose, width }: ModelInsp
   const onRescue = useCallback((r: RescueResult | null) => setRescue(r), []);
 
   return (
-    <aside style={{ width }} className="flex shrink-0 flex-col border-l border-border bg-panel">
-      <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-border px-2.5">
+    <aside style={{ width }} className="flex shrink-0 flex-col bg-panel">
+      <div className="flex h-[34px] shrink-0 items-center justify-between px-2.5">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-dim">Inspector</span>
         <button type="button" className="icon-btn" title="Close" onClick={onClose}>
           <X size={13} />
@@ -97,7 +97,7 @@ export default function ModelInspector({ path, size, onClose, width }: ModelInsp
                   </dl>
                   {/* FBX unit scale is usually cm, so models arrive 100x wrong.
                       Naming the number is the cheapest useful check there is. */}
-                  <p className="rounded-md border border-kind-texture/25 bg-kind-texture/8 p-2 text-[10.5px] leading-snug text-dim">
+                  <p className="rounded-xl bg-kind-texture/10 p-2.5 text-[10.5px] leading-snug text-dim">
                     Grid squares are 1 unit. FBX exports are usually authored in
                     cm, so a model arriving 100× off is the most common import
                     surprise — compare against the grid before trusting it.

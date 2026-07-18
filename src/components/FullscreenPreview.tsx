@@ -56,6 +56,13 @@ export default function FullscreenPreview({
     setMeshOverride("flat");
   }, [file.id]);
   const mesh: MeshMode = file.kind === "texture" ? meshOverride : preview3d.mesh;
+  // An equirectangular (2:1) image is almost certainly an environment map, so
+  // leaving 2D opens it on the env viewer rather than the flat plane.
+  const info = thumb?.info;
+  const default3d: MeshMode | undefined =
+    info != null && info.sourceHeight > 0 && Math.abs(info.sourceWidth / info.sourceHeight - 2) < 0.15
+      ? "env"
+      : undefined;
   const onControlsChange = (patch: Partial<PreviewState>): void => {
     if (patch.mesh !== undefined) setMeshOverride(patch.mesh);
     const rest: Partial<PreviewState> = { ...patch };
@@ -82,7 +89,7 @@ export default function FullscreenPreview({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg/97 backdrop-blur-sm">
-      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border px-4">
+      <div className="flex h-11 shrink-0 items-center gap-3 px-4">
         <span className="truncate text-[13px] font-medium" title={file.path}>
           {file.name}
         </span>
@@ -98,7 +105,7 @@ export default function FullscreenPreview({
           {file.kind === "model" ? (
             <ModelViewport path={file.path} />
           ) : use2D ? (
-            <div className="relative h-full w-full overflow-hidden rounded-lg border border-border bg-[#07070b]">
+            <div className="relative h-full w-full overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
               <Sprite2DView
                 path={file.path}
                 ext={file.ext}
@@ -118,7 +125,7 @@ export default function FullscreenPreview({
             // Wrapped on a real mesh, same renderer as the drawer — a flat
             // <img> here was the gap: you could not see the material, only
             // one of its files.
-            <div className="h-full w-full overflow-hidden rounded-lg border border-border bg-[#07070b]">
+            <div className="h-full w-full overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
               <TexturePreview
                 keys={keys}
                 mesh={mesh}
@@ -141,6 +148,7 @@ export default function FullscreenPreview({
               onChange={onControlsChange}
               inline
               hasHeight={keys.height !== undefined}
+              default3d={default3d}
             />
           </div>
         )}
@@ -157,7 +165,7 @@ export default function FullscreenPreview({
       </div>
 
       {file.kind === "texture" && thumb?.info != null && (
-        <div className="flex h-8 shrink-0 items-center gap-4 border-t border-border px-4 text-[11px] text-dim">
+        <div className="flex h-8 shrink-0 items-center gap-4 px-4 text-[11px] text-dim">
           <span className="tabular-nums">
             thumbnail {thumb.info.width}×{thumb.info.height}
           </span>

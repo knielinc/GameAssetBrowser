@@ -72,7 +72,7 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps):
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-44 rounded-md border border-border bg-panel py-1 shadow-lg shadow-black/50"
+      className="fixed z-50 min-w-44 rounded-xl bg-raised py-1.5 shadow-e2"
       style={{ left: pos.x, top: pos.y }}
     >
       {items.map((item) => (

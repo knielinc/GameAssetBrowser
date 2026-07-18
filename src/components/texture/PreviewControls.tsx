@@ -40,10 +40,15 @@ export interface PreviewControlsProps {
   /** Whether this material actually has a height map — the Relief control is
    *  hidden without one, since it would do nothing. */
   hasHeight?: boolean;
+  /** The mesh to open on when leaving 2D. The parent sets "env" for an
+   *  equirectangular map; otherwise it falls back to the flat plane. */
+  default3d?: MeshMode;
 }
 
-/** The 3D mesh reached for when leaving 2D — plane is the least surprising. */
-const DEFAULT_3D: MeshMode = "sphere";
+/** The 3D mesh reached for when leaving 2D — a flat plane is the least
+ *  surprising for a texture; an equirectangular env map opens on the sphere
+ *  instead (the parent detects the 2:1 aspect and passes `default3d`). */
+const DEFAULT_3D: MeshMode = "plane";
 
 function Stepper({
   label,
@@ -57,7 +62,7 @@ function Stepper({
   onChange: (v: number) => void;
 }): ReactElement {
   return (
-    <div className="flex items-center justify-between rounded-md border border-border px-2 py-1">
+    <div className="flex items-center justify-between rounded-full bg-bg px-2.5 py-1">
       <span className="text-[10px] text-dim">{label}</span>
       <div className="flex items-center gap-1.5">
         <button
@@ -81,7 +86,7 @@ function Stepper({
 }
 
 function Row({ children }: { children: ReactElement[] }): ReactElement {
-  return <div className="flex gap-[3px]">{children}</div>;
+  return <div className="flex gap-0.5 rounded-full bg-bg p-0.5">{children}</div>;
 }
 
 function Seg({
@@ -100,10 +105,10 @@ function Seg({
       type="button"
       title={title}
       className={clsx(
-        "h-[23px] flex-1 rounded-md border px-1.5 text-[10px] transition-colors duration-[120ms]",
+        "h-[23px] flex-1 rounded-full px-2 text-[10px] transition-colors duration-[120ms]",
         on
-          ? "border-accent/45 bg-accent/12 text-accent"
-          : "border-border text-dim hover:bg-raised hover:text-text",
+          ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+          : "text-dim hover:bg-overlay hover:text-text",
       )}
       onClick={onClick}
     >
@@ -125,6 +130,7 @@ export default function PreviewControls({
   onChange,
   inline,
   hasHeight,
+  default3d,
 }: PreviewControlsProps): ReactElement {
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
   const togglePixelArt = useRenderPrefs((s) => s.toggle);
@@ -152,14 +158,14 @@ export default function PreviewControls({
         </Seg>
         <Seg
           on={!is2D}
-          onClick={() => { if (is2D) onChange({ mesh: DEFAULT_3D }); }}
+          onClick={() => { if (is2D) onChange({ mesh: default3d ?? DEFAULT_3D }); }}
           title="Wrap the texture on a 3D mesh"
         >
           3D
         </Seg>
       </Row>
       {!is2D && (
-        <div className="mt-0.5 flex flex-col gap-1 border-l border-border pl-2">
+        <div className="mt-0.5 flex flex-col gap-1 pl-2">
           <Label>Mesh</Label>
           <Row>
             {meshes3D.map((m) => (
@@ -181,10 +187,10 @@ export default function PreviewControls({
         <button
           type="button"
           className={clsx(
-            "h-[23px] rounded-md border px-2 text-[10px] transition-colors duration-[120ms]",
+            "h-[23px] rounded-full px-3 text-[10px] transition-colors duration-[120ms]",
             pixelArt
-              ? "border-accent/45 bg-accent/12 text-accent"
-              : "border-border text-dim hover:bg-raised hover:text-text",
+              ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+              : "bg-bg text-dim hover:bg-overlay hover:text-text",
           )}
           onClick={togglePixelArt}
           title="Nearest-neighbour scaling — applies to every thumbnail and preview at once"
@@ -206,7 +212,7 @@ export default function PreviewControls({
             100%
           </Seg>
         </Row>
-        <div className="flex items-center justify-between rounded-md border border-border px-2 py-1">
+        <div className="flex items-center justify-between rounded-full bg-bg px-2.5 py-1">
           <button
             type="button"
             className="text-dim transition-colors duration-[120ms] hover:text-text"
@@ -250,10 +256,10 @@ export default function PreviewControls({
         <button
           type="button"
           className={clsx(
-            "h-[23px] rounded-md border text-[10px] transition-colors duration-[120ms]",
+            "h-[23px] rounded-full text-[10px] transition-colors duration-[120ms]",
             value.spriteOn
-              ? "border-accent/45 bg-accent/12 text-accent"
-              : "border-border text-dim hover:bg-raised hover:text-text",
+              ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+              : "bg-bg text-dim hover:bg-overlay hover:text-text",
           )}
           onClick={() => onChange({ spriteOn: !value.spriteOn })}
           title="Slice the image into a grid and play it as an animation"
@@ -268,10 +274,10 @@ export default function PreviewControls({
             <button
               type="button"
               className={clsx(
-                "h-[23px] rounded-md border text-[10px] transition-colors duration-[120ms]",
+                "h-[23px] rounded-full text-[10px] transition-colors duration-[120ms]",
                 value.spritePlaying
-                  ? "border-accent/45 bg-accent/12 text-accent"
-                  : "border-border text-dim hover:bg-raised hover:text-text",
+                  ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+                  : "bg-bg text-dim hover:bg-overlay hover:text-text",
               )}
               onClick={() => onChange({ spritePlaying: !value.spritePlaying })}
             >

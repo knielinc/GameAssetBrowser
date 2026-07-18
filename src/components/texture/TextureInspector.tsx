@@ -140,8 +140,8 @@ export default function TextureInspector({
   const use2D = preview.mesh === "flat" && file2d !== null;
 
   return (
-    <aside style={{ width }} className="flex shrink-0 flex-col border-l border-border bg-panel">
-      <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-border px-2.5">
+    <aside style={{ width }} className="flex shrink-0 flex-col bg-panel">
+      <div className="flex h-[34px] shrink-0 items-center justify-between px-2.5">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-dim">Inspector</span>
         <button type="button" className="icon-btn" title="Close" onClick={onClose}>
           <X size={13} />
@@ -149,7 +149,7 @@ export default function TextureInspector({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-        <div className="aspect-square w-full shrink-0 overflow-hidden rounded-lg border border-border bg-[#07070b]">
+        <div className="aspect-square w-full shrink-0 overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
           {item === null ? (
             <div className="flex h-full items-center justify-center text-[11px] text-dim">
               Select a texture
@@ -208,10 +208,10 @@ export default function TextureInspector({
                     // normal or height map is only ever visible through its
                     // effect on the composed surface.
                     className={clsx(
-                      "flex cursor-default items-center gap-2 rounded-md border px-1.5 py-1 text-[11px] transition-colors duration-[120ms]",
+                      "flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] transition-colors duration-[120ms]",
                       preview.mesh === "flat" && channelOf(m.channel) === preview.channel
-                        ? "border-accent/35 bg-accent/10"
-                        : "border-transparent hover:bg-raised",
+                        ? "bg-accent/12"
+                        : "hover:bg-overlay",
                     )}
                     title={`${m.file.name}\nClick to view this map flat`}
                     onClick={() =>
