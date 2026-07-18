@@ -20,15 +20,19 @@ const AZ = 0.61; // ~35°
 const EL = 0.44; // ~25°
 
 /**
- * Model thumbnails: ONE offscreen renderer, one model at a time, result cached
- * to disk. Grid cells are plain <img>, so the grid holds zero WebGL contexts
- * and the ~16-context cap never enters the picture — by construction, not by
- * budgeting.
+ * Model thumbnails render in a POOL of Web Workers (see modelThumbWorker) —
+ * parse + render + pixel readback all happen off the main thread, in parallel
+ * across cores, and only finished RGBA bytes come back for the main thread to
+ * hand to the Rust RAM cache. The parse (a Synty FBX is ~100-400 ms of
+ * single-threaded JS) is the bottleneck, and N threads are what divide it. Grid
+ * cells are plain <img>, so the grid itself holds zero WebGL contexts.
  *
- * Concurrency is 1 on purpose. The bottleneck is single-threaded JS parse
- * (a Synty FBX is ~100-400 ms), so >1 buys nothing and only widens the jank
- * window. Eager generation is not an option at any concurrency: 500 models
- * would block the UI for a minute or more. Lazy is the only design.
+ * Generation is lazy — only the current visible window is queued
+ * (requestModelThumbs rebuilds it on every range change) — so the parse cost is
+ * paid a screen at a time, front-to-back, never all-at-once for 500 models.
+ *
+ * `ensure`/`renderMain` below are the MAIN-THREAD fallback used when a worker is
+ * unavailable or misbehaves, so a thumbnail never goes blank.
  */
 
 let renderer: THREE.WebGLRenderer | null = null;
@@ -133,38 +137,34 @@ const POOL_SIZE = Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) -
 
 interface Slot {
   worker: Worker;
-  /** Monotonic id of the job on this slot; a reply with a stale id is ignored. */
-  seq: number;
-  resolve: ((r: WorkerResult | null) => void) | null;
-  timer: number | undefined;
   /** Retired after a crash or a wedged parse — its jobs go to the main thread. */
   dead: boolean;
 }
+
+/** Every in-flight job keyed by a globally-unique id. A worker's reply is
+ *  matched here by id rather than through per-slot mutable state, so there is no
+ *  way for a reply to resolve the wrong job. */
+const pending = new Map<number, { resolve: (r: WorkerResult | null) => void; timer: number }>();
+let jobSeq = 0;
 
 let pool: Slot[] | null = null;
 let poolBroken = false;
 
 function makeSlot(): Slot {
   const worker = new Worker(new URL("./modelThumbWorker.ts", import.meta.url), { type: "module" });
-  const slot: Slot = { worker, seq: 0, resolve: null, timer: undefined, dead: false };
-  const settle = (r: WorkerResult | null): void => {
-    if (slot.resolve === null) return;
-    if (slot.timer !== undefined) clearTimeout(slot.timer);
-    const res = slot.resolve;
-    slot.resolve = null;
-    slot.timer = undefined;
-    res(r);
-  };
+  const slot: Slot = { worker, dead: false };
   worker.onmessage = (e: MessageEvent) => {
     const m = e.data as { type: string; id: number; w?: number; h?: number; buf?: ArrayBuffer };
-    if (m.id !== slot.seq) return; // a late reply after this slot's timeout
-    settle(m.type === "done" && m.buf !== undefined ? { w: m.w!, h: m.h!, buf: m.buf } : null);
+    const p = pending.get(m.id);
+    if (p === undefined) return; // already settled (timed out) or stale
+    pending.delete(m.id);
+    clearTimeout(p.timer);
+    p.resolve(m.type === "done" && m.buf !== undefined ? { w: m.w!, h: m.h!, buf: m.buf } : null);
   };
   worker.onerror = () => {
-    // This worker died (bad chunk, no OffscreenCanvas/WebGL). Retire it; its
-    // in-flight job and everything after render on the main thread instead.
+    // This worker died (bad chunk, no OffscreenCanvas/WebGL). Retire it so its
+    // future jobs render on the main thread instead.
     slot.dead = true;
-    settle(null);
   };
   return slot;
 }
@@ -190,20 +190,21 @@ function resolveAtlas(modelPath: string): { url: string; flipY: boolean } | null
 /** Render `file` on `slot`; resolves null (→ main-thread fallback) if the slot
  *  is dead, errors, or hangs. A timeout also retires the slot: the worker is
  *  wedged on that parse, so reusing it would overlap two renders in one GL
- *  context. */
+ *  context. 12 s is generous — a working worker replies in parse-time (well
+ *  under 1 s for typical models); the timeout only fires for a genuinely stuck
+ *  parse or a machine where the async readback doesn't work, and then the model
+ *  still renders on the main-thread fallback. */
 function renderInSlot(slot: Slot, file: LibFileLike): Promise<WorkerResult | null> {
   if (slot.dead) return Promise.resolve(null);
-  const id = ++slot.seq;
+  const id = ++jobSeq;
   return new Promise<WorkerResult | null>((resolve) => {
-    slot.resolve = resolve;
-    slot.timer = self.setTimeout(() => {
-      if (slot.seq === id && slot.resolve !== null) {
-        slot.dead = true;
-        const res = slot.resolve;
-        slot.resolve = null;
-        res(null);
+    const timer = self.setTimeout(() => {
+      if (pending.delete(id)) {
+        slot.dead = true; // wedged: never reuse it (would overlap two renders)
+        resolve(null);
       }
-    }, 20000);
+    }, 12000);
+    pending.set(id, { resolve, timer });
     slot.worker.postMessage({ id, path: file.path, atlas: resolveAtlas(file.path) });
   });
 }
@@ -290,8 +291,24 @@ async function pump(slot: Slot | null): Promise<void> {
       emitProgress();
     }
     // Yield so a burst of completions never starves input handling.
-    await new Promise((res) => setTimeout(res, 0));
+    await macrotaskYield();
   }
+}
+
+// A MessageChannel macrotask yield. Unlike setTimeout(0) it is NOT throttled to
+// ~1 s when the window is backgrounded/occluded (Chromium timer throttling), so
+// a fill that starts while the app is in the background runs at full speed
+// instead of crawling. A fresh channel per call keeps concurrent pumps' yields
+// from resolving each other.
+function macrotaskYield(): Promise<void> {
+  return new Promise((res) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      ch.port1.close();
+      res();
+    };
+    ch.port2.postMessage(0);
+  });
 }
 
 /**

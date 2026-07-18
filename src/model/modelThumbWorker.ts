@@ -1,23 +1,27 @@
 /// <reference lib="webworker" />
 /**
- * Model-thumbnail renderer, off the main thread.
+ * Model-thumbnail renderer, fully off the main thread.
  *
- * The expensive part of a model thumbnail is the loader parse (a Synty FBX is
- * 100-400 ms of single-threaded JS) plus the GPU render. Doing it on the main
- * thread janks the grid. Here it runs in a Web Worker on an OffscreenCanvas, so
- * scrolling stays smooth while thumbnails fill in.
+ * A pool of these renders models in parallel: parse + render + pixel readback
+ * all happen here, and only the finished RGBA bytes cross back to the main
+ * thread (which just hands them to the Rust RAM cache). The FBX/glTF parse is
+ * 100-400 ms of single-threaded JS — the real bottleneck — and N worker threads
+ * divide it across cores.
  *
- * Two things a worker forces (there is no DOM):
- *  - three's ImageLoader uses `Image`, which doesn't exist here — so all image
- *    loading is rerouted through fetch + createImageBitmap.
- *  - a GL context cannot UNPACK_FLIP_Y an ImageBitmap, so a texture's flipY is
- *    baked into the bitmap instead (glTF wants false, FBX/OBJ want true).
+ * THE READBACK MUST BE ASYNC. A worker OffscreenCanvas's SYNCHRONOUS pixel pull
+ * (gl.readPixels, drawImage→getImageData, transferToImageBitmap) HANGS FOREVER
+ * in the release WebView2 GPU process — the worker blocks on the GPU while the
+ * GPU process needs the worker to service a message, a self-deadlock. So we
+ * render into a WebGLRenderTarget and read it with
+ * `readRenderTargetPixelsAsync`, which copies into a PBO and polls a fenceSync
+ * with setTimeout between checks — pumping the worker message loop, so no
+ * deadlock. Confirmed working (~6 ms/read) in release WebView2 150.
  *
- * The worker cannot call Tauri `invoke`, so it only produces pixels; the main
- * thread stores them. It also cannot read the atlas store, so the caller passes
- * the resolved manual atlas in with each job. Any failure here is reported so
- * the caller can fall back to a main-thread render — this must never regress a
- * thumbnail to blank.
+ * Two other worker constraints (no DOM):
+ *  - three's ImageLoader uses `Image`, absent here — reroute to fetch +
+ *    createImageBitmap.
+ *  - a GL context can't UNPACK_FLIP_Y an ImageBitmap, so a texture's flipY is
+ *    baked into the bitmap (glTF wants false, FBX/OBJ want true).
  */
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -62,22 +66,33 @@ interface RenderMsg {
 let renderer: THREE.WebGLRenderer | null = null;
 let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
-let readback: OffscreenCanvas | null = null;
+let target: THREE.WebGLRenderTarget | null = null;
 
-function ensure(): { r: THREE.WebGLRenderer; s: THREE.Scene; c: THREE.PerspectiveCamera } | null {
-  if (renderer !== null && scene !== null && camera !== null) {
-    return { r: renderer, s: scene, c: camera };
+function ensure(): {
+  r: THREE.WebGLRenderer;
+  s: THREE.Scene;
+  c: THREE.PerspectiveCamera;
+  rt: THREE.WebGLRenderTarget;
+} | null {
+  if (renderer !== null && scene !== null && camera !== null && target !== null) {
+    return { r: renderer, s: scene, c: camera, rt: target };
   }
   const canvas = new OffscreenCanvas(EDGE, EDGE);
   let r: THREE.WebGLRenderer;
   try {
-    r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+    r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   } catch {
     return null; // no WebGL in this worker — caller falls back to main thread
   }
   r.setSize(EDGE, EDGE, false);
   r.toneMapping = THREE.ACESFilmicToneMapping;
   r.outputColorSpace = THREE.SRGBColorSpace;
+
+  // Render into an sRGB target so the read-back bytes match the main-thread
+  // canvas path (tone mapping + sRGB encoding). Plain (non-MSAA) target — the
+  // async readback is proven on a plain target; MSAA needs a resolve step.
+  const rt = new THREE.WebGLRenderTarget(EDGE, EDGE);
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
 
   const s = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(r);
@@ -91,8 +106,8 @@ function ensure(): { r: THREE.WebGLRenderer; s: THREE.Scene; c: THREE.Perspectiv
   renderer = r;
   scene = s;
   camera = c;
-  readback = new OffscreenCanvas(EDGE, EDGE);
-  return { r, s, c };
+  target = rt;
+  return { r, s, c, rt };
 }
 
 /** Every texture map three might set, so flip normalization catches them all. */
@@ -172,8 +187,7 @@ function neutralize(root: THREE.Object3D): void {
 /**
  * Worker-local texture rescue: fill broken base-color slots with the caller's
  * chosen atlas. The atlas orientation is handled here directly (pre-flip the
- * bitmap when the user asked for flipY) since we load it ourselves. No hints /
- * candidates — those are a main-thread picker concern, irrelevant to rendering.
+ * bitmap when the user asked for flipY) since we load it ourselves.
  */
 async function applyAtlas(root: THREE.Object3D, atlas: AtlasChoice): Promise<void> {
   const broken: THREE.MeshStandardMaterial[] = [];
@@ -206,7 +220,7 @@ async function applyAtlas(root: THREE.Object3D, atlas: AtlasChoice): Promise<voi
 async function renderOne(msg: RenderMsg): Promise<{ w: number; h: number; buf: ArrayBuffer }> {
   const ctx = ensure();
   if (ctx === null) throw new Error("no-webgl");
-  const { r, s, c } = ctx;
+  const { r, s, c, rt } = ctx;
 
   const { root } = await loadModel(msg.path);
   await normalizeFlip(root);
@@ -217,9 +231,6 @@ async function renderOne(msg: RenderMsg): Promise<{ w: number; h: number; buf: A
       /* untextured is still a usable thumbnail */
     }
   }
-  // Anything still lacking a working base-color map (untextured FBX/OBJ, or an
-  // atlas that failed to load) becomes neutral grey rather than sampling an
-  // empty map as black.
   neutralize(root);
   s.add(root);
   try {
@@ -239,24 +250,22 @@ async function renderOne(msg: RenderMsg): Promise<{ w: number; h: number; buf: A
     c.far = dist * 100;
     c.updateProjectionMatrix();
 
+    // Render into the target, then read it back ASYNCHRONOUSLY (the sync paths
+    // hang in a worker — see the file header).
+    r.setRenderTarget(rt);
     r.render(s, c);
-    // Read the rendered pixels back as RGBA via a 2D OffscreenCanvas — same
-    // shape as the main-thread path, worker-safe.
-    const w = r.domElement.width;
-    const h = r.domElement.height;
-    const rb = readback!;
-    if (rb.width !== w || rb.height !== h) {
-      rb.width = w;
-      rb.height = h;
+    const raw = new Uint8Array(EDGE * EDGE * 4);
+    await r.readRenderTargetPixelsAsync(rt, 0, 0, EDGE, EDGE, raw);
+    r.setRenderTarget(null);
+
+    // readRenderTargetPixels returns rows bottom-to-top; the store (and the grid
+    // <img>) expect top-down, so flip vertically.
+    const out = new Uint8Array(EDGE * EDGE * 4);
+    const stride = EDGE * 4;
+    for (let y = 0; y < EDGE; y++) {
+      out.set(raw.subarray(y * stride, y * stride + stride), (EDGE - 1 - y) * stride);
     }
-    const g = rb.getContext("2d");
-    if (g === null) throw new Error("no-2d");
-    g.clearRect(0, 0, w, h);
-    g.drawImage(r.domElement, 0, 0);
-    const data = g.getImageData(0, 0, w, h).data;
-    // Transfer the buffer to the main thread (zero-copy).
-    const out = new Uint8Array(data).buffer;
-    return { w, h, buf: out };
+    return { w: EDGE, h: EDGE, buf: out.buffer };
   } finally {
     s.remove(root);
     disposeModel(root);
