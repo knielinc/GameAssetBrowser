@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { FolderPlus } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import TitleBar from "./components/TitleBar";
-import TabBar from "./components/TabBar";
+import Toolbar from "./components/Toolbar";
 import TabPane from "./components/TabPane";
 import PlayerBar from "./components/player/PlayerBar";
 import { useSidebarWidth } from "./hooks/useSidebarWidth";
@@ -23,6 +23,9 @@ export default function App(): ReactElement {
   return (
     <div className="flex h-full flex-col bg-bg text-text">
       <TitleBar />
+      {/* The filtering/options header spans the FULL width, above the sidebar
+          and content both — so its toggles flank the whole workspace. */}
+      {hasRoots && <Toolbar kind={activeTab} />}
       <div className="flex min-h-0 flex-1">
         {leftOpen && (
           <>
@@ -38,7 +41,6 @@ export default function App(): ReactElement {
           </>
         )}
         <main className="flex min-w-0 flex-1 flex-col">
-          <TabBar />
           {hasRoots ? (
             // key: remounting per tab resets the query debounce, scroll offset,
             // and nav refs together. See TabPane's note.

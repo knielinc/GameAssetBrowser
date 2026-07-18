@@ -1,5 +1,6 @@
 import { memo, type ReactElement, type ReactNode } from "react";
 import clsx from "clsx";
+import { useRenderPrefs } from "../../stores/renderPrefs";
 
 export interface Badge {
   text: string;
@@ -26,6 +27,8 @@ export interface AssetCellProps {
    *  dimensions. Rendered as chrome (like badges), so it shows in GL cells too
    *  where `children` are dropped. */
   corner?: ReactNode;
+  /** Pill pinned to the thumb's top-right — e.g. the file size. */
+  topRight?: ReactNode;
 }
 
 function AssetCellInner({
@@ -37,20 +40,27 @@ function AssetCellInner({
   checker,
   thumbKey,
   corner,
+  topRight,
 }: AssetCellProps): ReactElement {
   const gl = thumbKey !== undefined;
+  // The size/dimension/format pills are opt-out per the global setting.
+  const showInfo = useRenderPrefs((s) => s.showCellInfo);
   return (
     <div
       className={clsx(
-        "group relative overflow-hidden rounded-lg border transition-colors duration-[120ms]",
+        // Separation by tone + soft shadow, never a 1px outline. Elevation on
+        // hover is shadow-only — no transform — because the WebGL grid paints
+        // the thumb hole at its measured rect and only repaints on
+        // scroll/resize; a translate here would slide the frame off its paint.
+        "group relative overflow-hidden rounded-lg transition-[box-shadow] duration-200 ease-spring",
         // GL cells keep the frame transparent so the canvas behind shows
         // through the thumb hole; the meta strip below carries its own bg.
         gl ? "bg-transparent" : "bg-panel",
         selected
           ? gl
-            ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
-            : "border-accent bg-accent/8 shadow-[0_0_0_1px_var(--color-accent)]"
-          : "border-border hover:border-accent/40",
+            ? "shadow-sel"
+            : "bg-accent/8 shadow-sel"
+          : "shadow-e1 group-hover:shadow-e2",
       )}
     >
       <div
@@ -63,12 +73,17 @@ function AssetCellInner({
         )}
       >
         {gl ? null : children}
-        {corner !== undefined && (
-          <div className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-[#0a0a0fd9] px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-text">
+        {showInfo && corner !== undefined && (
+          <div className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-text">
             {corner}
           </div>
         )}
-        {badges !== undefined && badges.length > 0 && (
+        {showInfo && topRight !== undefined && (
+          <div className="pointer-events-none absolute right-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-text">
+            {topRight}
+          </div>
+        )}
+        {showInfo && badges !== undefined && badges.length > 0 && (
           <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5 flex items-center gap-1">
             {badges.map((b, i) => (
               <span
@@ -79,9 +94,9 @@ function AssetCellInner({
                 // layers visibly lag behind the content while scrolling. A
                 // solid tint reads the same and composites for free.
                 className={clsx(
-                  "rounded px-1.5 py-0.5 text-[9px] font-semibold tabular-nums",
+                  "rounded-full px-2 py-0.5 text-[9px] font-semibold tabular-nums",
                   i === badges.length - 1 && badges.length > 1 && "ml-auto",
-                  b.warn ? "bg-kind-model text-[#1a1208]" : "bg-[#0a0a0fd9] text-text",
+                  b.warn ? "bg-kind-model text-[#1a1208]" : "bg-[#0c0d12e6] text-text",
                 )}
               >
                 {b.text}
@@ -95,7 +110,7 @@ function AssetCellInner({
         <div className="truncate text-[11.5px]" title={name}>
           {name}
         </div>
-        <div className="truncate text-[10px] tabular-nums text-dim">{sub}</div>
+        {sub !== undefined && <div className="truncate text-[10px] tabular-nums text-dim">{sub}</div>}
       </div>
     </div>
   );

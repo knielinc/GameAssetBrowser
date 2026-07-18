@@ -10,7 +10,6 @@ import { useModelThumbs } from "../hooks/useModelThumbs";
 import { thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { showInExplorer } from "../ipc/commands";
 import type { AssetKind } from "../types";
-import Toolbar from "./Toolbar";
 import FileList from "./FileList";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
@@ -243,9 +242,14 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
 
   return (
     <>
-      <Toolbar kind={kind} />
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">{content}</div>
+        {/* Status bar lives INSIDE the content column so it stops at the
+            inspector, not across it — the inspector runs the full height beside
+            it. Its own left/right separators delineate it from both panels. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {content}
+          <StatusBar kind={kind} visibleCount={visible.length} />
+        </div>
         {/* Hidden while the fullscreen preview is up: both host a WebGL
             context, and there is no reason to pay for two. Drag the handle to
             resize, just like the left sidebar; double-click resets the width. */}
@@ -291,7 +295,6 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
           onClose={() => setPreview(null)}
         />
       )}
-      <StatusBar kind={kind} visibleCount={visible.length} />
       {menu !== null && (
         <ContextMenu
           x={menu.x}

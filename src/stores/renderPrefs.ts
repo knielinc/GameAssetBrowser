@@ -11,6 +11,7 @@ import { create } from "zustand";
  */
 const KEY = "gameassetbrowser.pixelArt";
 const LIGHT_KEY = "gameassetbrowser.modelLight";
+const INFO_KEY = "gameassetbrowser.showCellInfo";
 
 /** Lighting rigs for the 3D model viewport. Studio is the balanced default
  *  (and what thumbnails are baked with, for agreement between the two). */
@@ -30,6 +31,15 @@ function load(): boolean {
   }
 }
 
+/** Defaults ON — the pills are useful; hiding them is the opt-in. */
+function loadInfo(): boolean {
+  try {
+    return localStorage.getItem(INFO_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
 function loadLight(): ModelLight {
   try {
     const v = localStorage.getItem(LIGHT_KEY);
@@ -45,6 +55,10 @@ export interface RenderPrefs {
   pixelArt: boolean;
   setPixelArt: (v: boolean) => void;
   toggle: () => void;
+  /** Show the info pills (size, format, dimensions, badges) on grid cells. */
+  showCellInfo: boolean;
+  setShowCellInfo: (v: boolean) => void;
+  toggleCellInfo: () => void;
   /** Which light rig the 3D model viewport uses. */
   modelLight: ModelLight;
   setModelLight: (v: ModelLight) => void;
@@ -61,6 +75,16 @@ export const useRenderPrefs = create<RenderPrefs>((set, get) => ({
     set({ pixelArt: v });
   },
   toggle: () => get().setPixelArt(!get().pixelArt),
+  showCellInfo: loadInfo(),
+  setShowCellInfo: (v) => {
+    try {
+      localStorage.setItem(INFO_KEY, v ? "1" : "0");
+    } catch {
+      /* storage disabled — in-memory only */
+    }
+    set({ showCellInfo: v });
+  },
+  toggleCellInfo: () => get().setShowCellInfo(!get().showCellInfo),
   modelLight: loadLight(),
   setModelLight: (v) => {
     try {

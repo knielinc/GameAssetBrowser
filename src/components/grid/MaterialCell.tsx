@@ -18,6 +18,21 @@ function packedOf(m: Material): Channel | undefined {
 }
 
 /**
+ * Per-channel colour for the strip. Each PBR channel reads in its own hue —
+ * normal is periwinkle, like a real tangent-space normal map — so a material's
+ * makeup registers at a glance. Full literal class strings so Tailwind's
+ * scanner emits them.
+ */
+const CH_CLS: Partial<Record<Channel, string>> = {
+  baseColor: "bg-ch-bc/15 text-ch-bc",
+  normal: "bg-ch-n/15 text-ch-n",
+  roughness: "bg-ch-r/15 text-ch-r",
+  metallic: "bg-ch-m/15 text-ch-m",
+  ao: "bg-ch-ao/15 text-ch-ao",
+  height: "bg-ch-h/15 text-ch-h",
+};
+
+/**
  * One cell per material. Three signals separate it from a lone texture: the
  * stacked frame edge, the ×N badge, and the channel strip replacing the
  * metadata line. The strip is the useful one — `BC N R —` tells you the AO map
@@ -28,6 +43,7 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
   const face = material.channels.get("baseColor") ?? material.members[0]!;
   const { src, imgKey, onError, onLoad } = useThumbSrc(face.file);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
+  const showCellInfo = useRenderPrefs((s) => s.showCellInfo);
   const packed = packedOf(material);
   const lowConfidence = material.confidence < 0.8;
 
@@ -36,17 +52,16 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
     // anything that grows the box overlaps the row below. The stacked cards
     // are absolutely positioned and transform-offset, so they render outside
     // the box without contributing to layout — the 12px grid gap absorbs them.
-    <div className="relative">
-      {/* Stacked cards behind the frame — the "this is a set" signal. */}
-      <div className="pointer-events-none absolute inset-0 translate-x-[5px] translate-y-[-5px] rounded-lg border border-border bg-panel opacity-55" />
-      <div className="pointer-events-none absolute inset-0 translate-x-[2.5px] translate-y-[-2.5px] rounded-lg border border-border bg-panel" />
+    <div className="group relative">
+      {/* Stacked cards behind the frame — the "this is a set" signal, now read
+          as tonal cards with their own soft shadow rather than outlines. */}
+      <div className="pointer-events-none absolute inset-0 translate-x-[5px] translate-y-[-5px] rounded-lg bg-panel opacity-45 shadow-e1" />
+      <div className="pointer-events-none absolute inset-0 translate-x-[2.5px] translate-y-[-2.5px] rounded-lg bg-panel shadow-e1" />
 
       <div
         className={clsx(
-          "relative overflow-hidden rounded-lg border bg-panel transition-colors duration-[120ms]",
-          selected
-            ? "border-accent bg-accent/8 shadow-[0_0_0_1px_var(--color-accent)]"
-            : "border-border hover:border-accent/40",
+          "relative overflow-hidden rounded-lg bg-panel transition-[box-shadow] duration-200 ease-spring",
+          selected ? "bg-accent/8 shadow-sel" : "shadow-e1 group-hover:shadow-e2",
         )}
       >
         <div className="alpha-checker relative aspect-square w-full overflow-hidden">
@@ -67,19 +82,21 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
               <ImageIcon size={22} className="text-kind-texture opacity-30" />
             </div>
           )}
-          <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5 flex items-center gap-1">
-            {lowConfidence && (
-              <span
-                title={`Resolved by content — ${Math.round(material.confidence * 100)}% confidence`}
-                className="rounded bg-kind-model px-1.5 py-0.5 text-[9px] font-semibold text-[#1a1208]"
-              >
-                ?
+          {showCellInfo && (
+            <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5 flex items-center gap-1">
+              {lowConfidence && (
+                <span
+                  title={`Resolved by content — ${Math.round(material.confidence * 100)}% confidence`}
+                  className="rounded-full bg-kind-model px-2 py-0.5 text-[9px] font-semibold text-[#1a1208]"
+                >
+                  ?
+                </span>
+              )}
+              <span className="ml-auto rounded-full bg-accent/85 px-2 py-0.5 text-[9px] font-semibold tabular-nums text-white">
+                ×{material.members.length}
               </span>
-            )}
-            <span className="ml-auto rounded bg-accent/80 px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-white">
-              ×{material.members.length}
-            </span>
-          </div>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-1 px-2 pb-2 pt-1.5">
@@ -94,10 +111,8 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
                   key={ch}
                   title={CHANNEL_LABEL[ch] + (has ? "" : " — missing")}
                   className={clsx(
-                    "rounded border px-1 py-px font-mono text-[8.5px] font-bold leading-tight",
-                    has
-                      ? "border-accent/45 bg-accent/12 text-accent"
-                      : "border-border text-dim opacity-45",
+                    "rounded-md px-1 py-px font-mono text-[8.5px] font-bold leading-tight",
+                    has ? (CH_CLS[ch] ?? "bg-accent/15 text-accent") : "bg-bg text-faint opacity-70",
                   )}
                 >
                   {CHANNEL_CODE[ch]}
@@ -107,7 +122,7 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
             {packed !== undefined && (
               <span
                 title={`${CHANNEL_LABEL[packed]} — three channels in RGB`}
-                className="rounded border border-kind-texture/45 bg-kind-texture/12 px-1 py-px font-mono text-[8.5px] font-bold leading-tight text-kind-texture"
+                className="rounded-md bg-kind-texture/15 px-1 py-px font-mono text-[8.5px] font-bold leading-tight text-kind-texture"
               >
                 {CHANNEL_CODE[packed]}
               </span>

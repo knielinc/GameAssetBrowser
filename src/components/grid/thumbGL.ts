@@ -28,12 +28,14 @@ layout(location=1) in vec4 aCell;
 layout(location=2) in vec4 aInset;
 layout(location=3) in vec2 aUvSize;   // image extent within its atlas layer
 layout(location=4) in float aLayer;
+layout(location=5) in vec2 aRadius;   // corner radius as a fraction of the cell
 
 out vec2 vLocal;      // cell-local coord, (0,0) = TOP-left in screen space
 out vec2 vInsetXY;
 out vec2 vInsetWH;
 out vec2 vUvSize;
 flat out float vLayer;
+flat out vec2 vRadius;
 
 void main() {
   gl_Position = vec4(aCell.xy + aCorner * aCell.zw, 0.0, 1.0);
@@ -42,6 +44,7 @@ void main() {
   vInsetWH = aInset.zw;
   vUvSize = aUvSize;
   vLayer = aLayer;
+  vRadius = aRadius;
 }`;
 
 const FRAG = /* glsl */ `#version 300 es
@@ -52,30 +55,45 @@ in vec2 vInsetXY;
 in vec2 vInsetWH;
 in vec2 vUvSize;
 flat in float vLayer;
+flat in vec2 vRadius;
 uniform sampler2DArray uAtlas;
 out vec4 outColor;
 
-const vec3 LETTERBOX = vec3(0.086, 0.086, 0.105);   // matches bg-raised
-const vec3 CHECK_A  = vec3(0.150, 0.150, 0.180);
-const vec3 CHECK_B  = vec3(0.095, 0.095, 0.120);
+const vec3 LETTERBOX = vec3(0.153, 0.165, 0.208);   // matches bg-raised
+const vec3 CHECK_A  = vec3(0.153, 0.165, 0.208);
+const vec3 CHECK_B  = vec3(0.118, 0.129, 0.165);
 const float HALF_TEXEL = 0.5 / 256.0;   // atlas EDGE; keep in sync with thumbAtlas
 
 void main() {
+  vec3 color;
   // Where are we inside the image sub-rect? Outside → letterbox margin.
   vec2 img = (vLocal - vInsetXY) / vInsetWH;
   if (img.x < 0.0 || img.x > 1.0 || img.y < 0.0 || img.y > 1.0) {
-    outColor = vec4(LETTERBOX, 1.0);
-    return;
+    color = LETTERBOX;
+  } else {
+    // The image occupies the top-left w×h of a 256² cell; the rest is a stale
+    // previous tenant. Clamp half a texel inside so LINEAR never samples across
+    // the image's right/bottom edge into that stale content (the "overdraw").
+    vec2 uv = clamp(img * vUvSize, vec2(HALF_TEXEL), vUvSize - vec2(HALF_TEXEL));
+    vec4 tex = texture(uAtlas, vec3(uv, vLayer));
+    // Alpha checker so cutouts (foliage, decals) read against the dark panel.
+    vec2 c = floor(gl_FragCoord.xy / 8.0);
+    vec3 checker = mod(c.x + c.y, 2.0) < 1.0 ? CHECK_A : CHECK_B;
+    color = mix(checker, tex.rgb, tex.a);
   }
-  // The image occupies the top-left w×h of a 256² cell; the rest is a stale
-  // previous tenant. Clamp half a texel inside so LINEAR never samples across
-  // the image's right/bottom edge into that stale content (the "overdraw").
-  vec2 uv = clamp(img * vUvSize, vec2(HALF_TEXEL), vUvSize - vec2(HALF_TEXEL));
-  vec4 tex = texture(uAtlas, vec3(uv, vLayer));
-  // Alpha checker so cutouts (foliage, decals) read against the dark panel.
-  vec2 c = floor(gl_FragCoord.xy / 8.0);
-  vec3 checker = mod(c.x + c.y, 2.0) < 1.0 ? CHECK_A : CHECK_B;
-  outColor = vec4(mix(checker, tex.rgb, tex.a), 1.0);
+
+  // Round the TOP corners so a GL cell matches the DOM frame's rounded-xl — the
+  // bottom edge meets the meta strip (its own rounded DOM clip) and stays
+  // square. Fade alpha to 0 past the rounded edge so the darker grid shows in
+  // the corner. fwidth gives a 1px antialiased edge.
+  float alpha = 1.0;
+  vec2 q = abs(vLocal - vec2(0.5)) - (vec2(0.5) - vRadius);
+  if (q.x > 0.0 && q.y > 0.0 && vLocal.y < 0.5) {
+    float dist = length(q / vRadius);
+    float aa = max(fwidth(dist), 1e-4);
+    alpha = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, dist);
+  }
+  outColor = vec4(color, alpha);
 }`;
 
 let webgl2: boolean | null = null;
@@ -101,7 +119,9 @@ export interface DrawCell {
   slot: AtlasSlot;
 }
 
-const FLOATS = 11; // aCell(4) + aInset(4) + aUvSize(2) + aLayer(1)
+const FLOATS = 13; // aCell(4) + aInset(4) + aUvSize(2) + aLayer(1) + aRadius(2)
+/** Corner radius in CSS px — matches the cells' Tailwind `rounded-lg`. */
+const CORNER_PX = 8;
 
 export class ThumbGL {
   readonly canvas: HTMLCanvasElement;
@@ -155,6 +175,9 @@ export class ThumbGL {
     gl.enableVertexAttribArray(4);
     gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 10 * 4);
     gl.vertexAttribDivisor(4, 1);
+    gl.enableVertexAttribArray(5);
+    gl.vertexAttribPointer(5, 2, gl.FLOAT, false, stride, 11 * 4);
+    gl.vertexAttribDivisor(5, 1);
     gl.bindVertexArray(null);
 
     gl.clearColor(0, 0, 0, 0);
@@ -248,6 +271,9 @@ export class ThumbGL {
       data[o + 8] = s.uw;
       data[o + 9] = s.uh;
       data[o + 10] = s.layer;
+      // Corner radius as a fraction of the (square) cell, for the shader mask.
+      data[o + 11] = CORNER_PX / c.w;
+      data[o + 12] = CORNER_PX / c.h;
       n++;
     }
 

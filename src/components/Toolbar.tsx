@@ -1,11 +1,56 @@
-import { useMemo, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Blend, Grid2x2, Layers, LayoutGrid, List, Search, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Blend,
+  Check,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Grid2x2,
+  Layers,
+  LayoutGrid,
+  List,
+  PanelLeft,
+  PanelRight,
+  Search,
+  X,
+} from "lucide-react";
 import { EXTENSIONS, SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { useLibraryStore } from "../stores/libraryStore";
 import { useRenderPrefs } from "../stores/renderPrefs";
+import { usePanelPrefs } from "../stores/panelPrefs";
 import { usePresentExts } from "../hooks/useVisibleFiles";
 import { MAX_CELL, MIN_CELL } from "../stores/settings";
+
+/** A folder/inspector panel toggle, sitting next to the panel it opens. */
+function PanelToggle({
+  on,
+  onClick,
+  icon: Icon,
+  title,
+}: {
+  on: boolean;
+  onClick: () => void;
+  icon: typeof PanelLeft;
+  title: string;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={on}
+      className={clsx(
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms]",
+        on ? "bg-accent-fill text-accent-fg" : "text-dim hover:bg-overlay hover:text-text",
+      )}
+      onClick={onClick}
+    >
+      <Icon size={14} />
+    </button>
+  );
+}
 
 const SORT_LABELS: Record<SortField, string> = {
   name: "Name",
@@ -35,6 +80,32 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const patchTab = useLibraryStore((s) => s.patchTab);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
   const togglePixelArt = useRenderPrefs((s) => s.toggle);
+  const leftOpen = usePanelPrefs((s) => s.left);
+  const rightOpen = usePanelPrefs((s) => s.right);
+  const toggleLeft = usePanelPrefs((s) => s.toggleLeft);
+  const toggleRight = usePanelPrefs((s) => s.toggleRight);
+  const showCellInfo = useRenderPrefs((s) => s.showCellInfo);
+  const toggleCellInfo = useRenderPrefs((s) => s.toggleCellInfo);
+
+  // A custom sort dropdown — the native <select> popup can't be rounded or
+  // themed in WebView2, so it never matched the rest of the app.
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!sortOpen) return;
+    const onDown = (e: MouseEvent): void => {
+      if (sortRef.current !== null && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setSortOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [sortOpen]);
 
   const { query, extFilter, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
   // Audio has no grid implementation — never render a control that does nothing.
@@ -50,7 +121,13 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   }, [present, extFilter, kind]);
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
+    <div className="flex h-12 shrink-0 items-center gap-3 border-y border-bg bg-panel px-3">
+      <PanelToggle
+        on={leftOpen}
+        onClick={toggleLeft}
+        icon={PanelLeft}
+        title={leftOpen ? "Hide folders panel" : "Show folders panel"}
+      />
       <div className="relative w-56 min-w-[8rem] shrink">
         <Search
           size={13}
@@ -61,7 +138,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           value={query}
           spellCheck={false}
           placeholder={PLACEHOLDER[kind]}
-          className="h-7 w-full rounded-md border border-border bg-raised pl-8 pr-7 text-xs text-text outline-none transition-colors duration-[120ms] placeholder:text-dim focus:border-accent"
+          className="h-8 w-full rounded-full border-0 bg-bg pl-8 pr-7 text-xs text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-overlay focus:ring-2 focus:ring-accent/35"
           onChange={(e) => setQuery(kind, e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") setQuery(kind, "");
@@ -111,7 +188,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        {kind === "texture" && viewMode === "grid" && (
+        {kind === "texture" && (
           <button
             type="button"
             title={
@@ -120,10 +197,10 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
                 : "Smooth — bilinear scaling. Click for pixel. Applies to every thumbnail and preview."
             }
             className={clsx(
-              "flex h-[26px] items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors duration-[120ms]",
+              "flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
               pixelArt
-                ? "border-accent/45 bg-accent/12 text-accent"
-                : "border-border text-dim hover:bg-raised hover:text-text",
+                ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+                : "bg-bg text-dim hover:-translate-y-px hover:bg-overlay hover:text-text",
             )}
             onClick={togglePixelArt}
           >
@@ -137,10 +214,10 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
             type="button"
             title="Collapse loose files that form one PBR material into a single cell"
             className={clsx(
-              "flex h-[26px] items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors duration-[120ms]",
+              "flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
               groupMaterials
-                ? "border-accent/45 bg-accent/12 text-accent"
-                : "border-border text-dim hover:bg-raised hover:text-text",
+                ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+                : "bg-bg text-dim hover:-translate-y-px hover:bg-overlay hover:text-text",
             )}
             onClick={() => patchTab(kind, { groupMaterials: !groupMaterials })}
           >
@@ -150,33 +227,82 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         )}
 
         {canGrid && viewMode === "grid" && (
-          <input
-            type="range"
-            aria-label="Cell size"
-            title={`Thumbnail size — ${cellSize}px`}
-            min={MIN_CELL}
-            max={MAX_CELL}
-            step={4}
-            value={cellSize}
-            className="volume w-20"
-            style={{ ["--fill" as string]: `${((cellSize - MIN_CELL) / (MAX_CELL - MIN_CELL)) * 100}%` }}
-            onChange={(e) => patchTab(kind, { cellSize: Number(e.currentTarget.value) })}
-          />
+          <button
+            type="button"
+            title={showCellInfo ? "Hide info pills on cells" : "Show info pills on cells"}
+            className={clsx(
+              "flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
+              showCellInfo
+                ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
+                : "bg-bg text-dim hover:-translate-y-px hover:bg-overlay hover:text-text",
+            )}
+            onClick={toggleCellInfo}
+          >
+            {showCellInfo ? <Eye size={12} /> : <EyeOff size={12} />}
+            Info
+          </button>
         )}
 
-        <select
-          value={sortField}
-          aria-label="Sort by"
-          title={`Sort by — ${SORT_LABELS[sortField]}`}
-          className="sort-select"
-          onChange={(e) => setSort(kind, e.currentTarget.value as SortField)}
-        >
-          {SORT_FIELDS_BY_KIND[kind].map((f) => (
-            <option key={f} value={f}>
-              {SORT_LABELS[f]}
-            </option>
-          ))}
-        </select>
+        {canGrid && viewMode === "grid" && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-faint">Cell size</span>
+            <input
+              type="range"
+              aria-label="Cell size"
+              title={`Thumbnail size — ${cellSize}px`}
+              min={MIN_CELL}
+              max={MAX_CELL}
+              step={4}
+              value={cellSize}
+              className="volume w-20"
+              style={{ ["--fill" as string]: `${((cellSize - MIN_CELL) / (MAX_CELL - MIN_CELL)) * 100}%` }}
+              onChange={(e) => patchTab(kind, { cellSize: Number(e.currentTarget.value) })}
+            />
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-faint">Sort by</span>
+          <div ref={sortRef} className="relative">
+            <button
+              type="button"
+              aria-label="Sort by"
+              aria-expanded={sortOpen}
+              title={`Sort by — ${SORT_LABELS[sortField]}`}
+              className="flex h-[30px] items-center gap-2 rounded-full bg-bg pl-3 pr-2 text-[12px] text-text transition-colors duration-[120ms] hover:bg-overlay"
+              onClick={() => setSortOpen((o) => !o)}
+            >
+              {SORT_LABELS[sortField]}
+              <ChevronDown
+                size={12}
+                className={clsx("text-faint transition-transform duration-[120ms]", sortOpen && "rotate-180")}
+              />
+            </button>
+            {sortOpen && (
+              <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[136px] rounded-xl bg-raised p-1 shadow-e2">
+                {SORT_FIELDS_BY_KIND[kind].map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className={clsx(
+                      "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
+                      f === sortField
+                        ? "bg-accent-fill text-accent-fg"
+                        : "text-dim hover:bg-overlay hover:text-text",
+                    )}
+                    onClick={() => {
+                      setSort(kind, f);
+                      setSortOpen(false);
+                    }}
+                  >
+                    {SORT_LABELS[f]}
+                    {f === sortField && <Check size={13} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
         <button
           type="button"
           className="icon-btn"
@@ -187,7 +313,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         </button>
 
         {canGrid && (
-          <div className="ml-1 flex overflow-hidden rounded-md border border-border">
+          <div className="ml-1 flex items-center gap-0.5 rounded-full bg-bg p-0.5">
             {(["grid", "list"] as const).map((mode) => {
               const Icon = mode === "grid" ? LayoutGrid : List;
               return (
@@ -196,10 +322,10 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
                   type="button"
                   title={mode === "grid" ? "Grid" : "List"}
                   className={clsx(
-                    "flex h-[26px] w-7 items-center justify-center transition-colors duration-[120ms]",
+                    "flex h-7 w-8 items-center justify-center rounded-full transition-[background-color,color] duration-[120ms]",
                     viewMode === mode
-                      ? "bg-accent/12 text-accent"
-                      : "text-dim hover:bg-raised hover:text-text",
+                      ? "bg-raised text-accent shadow-e1"
+                      : "text-faint hover:text-text",
                   )}
                   onClick={() => patchTab(kind, { viewMode: mode })}
                 >
@@ -210,6 +336,14 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           </div>
         )}
       </div>
+      {canGrid && (
+        <PanelToggle
+          on={rightOpen}
+          onClick={toggleRight}
+          icon={PanelRight}
+          title={rightOpen ? "Hide inspector" : "Show inspector"}
+        />
+      )}
     </div>
   );
 }

@@ -49,7 +49,7 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
   const scopeCount = useScopeCount(kind);
 
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border bg-panel px-3 text-[11px] text-dim">
+    <div className="flex h-7 shrink-0 items-center gap-3 border-x border-bg bg-panel px-3 text-[11px] text-dim">
       <span className="tabular-nums">
         {visibleCount.toLocaleString()} / {scopeCount.toLocaleString()} {NOUN[kind]}
       </span>
