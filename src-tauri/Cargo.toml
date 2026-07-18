@@ -103,3 +103,6 @@ image = { version = "0.25", default-features = false, features = [
     "gif",
     "webp",
 ] }
+# libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
+# animated WebP (launcher assets, etc.); libwebp reads them.
+webp = "0.3"

@@ -222,6 +222,33 @@ fn to_ldr(img: DynamicImage) -> DynamicImage {
     }
 }
 
+/// Decode an image, retrying WebP through libwebp. The pure-Rust `image` WebP
+/// decoder rejects some extended/animated WebP ("Invalid Chunk header") that
+/// libwebp decodes fine; other formats go straight through `image`.
+fn decode_image(p: &Path) -> Result<DynamicImage, String> {
+    match image::open(p) {
+        Ok(img) => Ok(img),
+        Err(e) => {
+            let is_webp = p
+                .extension()
+                .map(|x| x.eq_ignore_ascii_case("webp"))
+                .unwrap_or(false);
+            if is_webp {
+                if let Ok(bytes) = std::fs::read(p) {
+                    if let Some(w) = webp::Decoder::new(&bytes).decode() {
+                        if let Some(buf) =
+                            image::RgbaImage::from_raw(w.width(), w.height(), w.to_vec())
+                        {
+                            return Ok(DynamicImage::ImageRgba8(buf));
+                        }
+                    }
+                }
+            }
+            Err(e.to_string())
+        }
+    }
+}
+
 /// Decode -> downscale -> RGBA -> the in-memory cache. Returns the hex key and
 /// stats. NO PNG is produced: the grid uploads this RGBA straight to the GPU.
 fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> {
@@ -242,7 +269,7 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
         }
     }
 
-    let img = image::open(p).map_err(|e| format!("decode {path}: {e}"))?;
+    let img = decode_image(p).map_err(|e| format!("decode {path}: {e}"))?;
     let (w, ih) = img.dimensions();
     if w == 0 || ih == 0 {
         return Err(format!("{path}: zero-sized image"));
