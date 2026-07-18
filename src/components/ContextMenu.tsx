@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
+import { useThemeStore } from "../stores/theme";
 
 export interface ContextMenuItem {
   label: string;
@@ -28,6 +29,11 @@ const EDGE_MARGIN = 4;
 export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps): ReactElement {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ x, y });
+  // The document is zoomed by the UI scale, so a `fixed` element's CSS offsets
+  // render at offset * zoom. The clamp works in real px (clientX, innerWidth,
+  // getBoundingClientRect are all visual), so only the final placement divides
+  // by the zoom to land the menu back at the pointer.
+  const z = useThemeStore((s) => s.uiScale) / 100;
 
   // Measure and clamp before paint so the menu never overflows the
   // right/bottom viewport edges, even near the window borders.
@@ -73,7 +79,7 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps):
     <div
       ref={menuRef}
       className="fixed z-50 min-w-44 rounded-xl bg-raised py-1.5 shadow-e2"
-      style={{ left: pos.x, top: pos.y }}
+      style={{ left: pos.x / z, top: pos.y / z }}
     >
       {items.map((item) => (
         <button
