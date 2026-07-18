@@ -109,6 +109,12 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
     let mut batch: Vec<FileEntry> = Vec::with_capacity(BATCH_SIZE);
     // (id, path) list handed to the duration-probe worker after the walk.
     let mut meta_queue: Vec<(u32, String)> = Vec::new();
+    // Paths already emitted, so a file reachable from two OVERLAPPING roots
+    // (e.g. `Documents` and `Documents\git\3d-test`) is listed once. Without
+    // this it appears twice, and since selection is keyed by path, clicking one
+    // copy highlights both. Normalized (lowercase + backslashes) — the same
+    // file is byte-identical across roots, so no canonicalize syscall needed.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for root in &roots {
         // filter_entry prunes whole subtrees (build dirs, VCS metadata) before
@@ -134,6 +140,10 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             let Some((ext, kind)) = classify(entry.path()) else {
                 continue;
             };
+            let path = entry.path().to_string_lossy().into_owned();
+            if !seen.insert(path.to_lowercase().replace('/', "\\")) {
+                continue; // already emitted via an overlapping root
+            }
             // walkdir already has this metadata on Windows — no extra stat.
             let (size, modified) = match entry.metadata() {
                 Ok(md) => (md.len(), unix_seconds(&md)),
@@ -146,7 +156,6 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             let id = next_id;
             next_id += 1;
             total += 1;
-            let path = entry.path().to_string_lossy().into_owned();
             // AUDIO ONLY. probe_durations hands every queued path to symphonia;
             // queueing textures/models would make it try to decode `.png` and
             // `.fbx` — thousands of them in a Synty pack — burning CPU and

@@ -8,6 +8,7 @@ import PlayerBar from "./components/player/PlayerBar";
 import { useSidebarWidth } from "./hooks/useSidebarWidth";
 import { useWindowFullscreen } from "./hooks/useWindowFullscreen";
 import { addFolders, useLibraryStore } from "./stores/libraryStore";
+import { usePanelPrefs } from "./stores/panelPrefs";
 
 export default function App(): ReactElement {
   const { width: sidebarWidth, isDragging, handleProps } = useSidebarWidth();
@@ -16,19 +17,24 @@ export default function App(): ReactElement {
   useWindowFullscreen();
   const hasRoots = useLibraryStore((s) => s.roots.length > 0);
   const activeTab = useLibraryStore((s) => s.activeTab);
+  const leftOpen = usePanelPrefs((s) => s.left);
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
       <div className="flex min-h-0 flex-1">
-        <Sidebar width={sidebarWidth} />
-        {/* Non-focusable separator: mouse-only resizer, so no tabIndex and
-            no widget keyboard contract — just structural semantics. */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          className={clsx("sidebar-resizer", isDragging && "sidebar-resizer-active")}
-          {...handleProps}
-        />
+        {leftOpen && (
+          <>
+            <Sidebar width={sidebarWidth} />
+            {/* Non-focusable separator: mouse-only resizer, so no tabIndex and
+                no widget keyboard contract — just structural semantics. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              className={clsx("sidebar-resizer", isDragging && "sidebar-resizer-active")}
+              {...handleProps}
+            />
+          </>
+        )}
         <main className="flex min-w-0 flex-1 flex-col">
           <TabBar />
           {hasRoots ? (

@@ -25,12 +25,16 @@ const BUDGET_BYTES: usize = 384 * 1024 * 1024;
 pub struct Pixels {
     pub width: u32,
     pub height: u32,
+    /// Source image dimensions before downscale — kept so a cache hit can still
+    /// report the real resolution without re-touching the original file.
+    pub src_w: u32,
+    pub src_h: u32,
     pub rgba: Vec<u8>,
 }
 
 impl Pixels {
     fn bytes(&self) -> usize {
-        self.rgba.len() + 8
+        self.rgba.len() + 16
     }
 }
 

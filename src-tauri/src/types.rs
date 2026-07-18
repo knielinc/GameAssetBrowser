@@ -54,6 +54,10 @@ pub struct ThumbInfo {
     /// Thumbnail dimensions, not the source's.
     pub width: u32,
     pub height: u32,
+    /// The source image's real pixel dimensions, before downscale — what the
+    /// status bar shows as the resolution.
+    pub source_width: u32,
+    pub source_height: u32,
     /// Mean ≈ (0.5, 0.5, 1.0) — tangent-space normal map.
     pub normal_like: bool,
     /// Near-zero chroma — roughness/height/AO/metallic are single-channel.

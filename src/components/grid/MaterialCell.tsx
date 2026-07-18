@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import clsx from "clsx";
 import { Image as ImageIcon } from "lucide-react";
 import { useThumbSrc } from "../../hooks/useThumbSrc";
+import { useRenderPrefs } from "../../stores/renderPrefs";
 import { CHANNEL_CODE, CHANNEL_LABEL, STRIP_CHANNELS, type Channel } from "../../material/table";
 import type { Material } from "../../material/classify";
 
@@ -26,6 +27,7 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
   // Face = base color if present, else whatever we have.
   const face = material.channels.get("baseColor") ?? material.members[0]!;
   const { src, imgKey, onError, onLoad } = useThumbSrc(face.file);
+  const pixelArt = useRenderPrefs((s) => s.pixelArt);
   const packed = packedOf(material);
   const lowConfidence = material.confidence < 0.8;
 
@@ -58,6 +60,7 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
               onError={onError}
               onLoad={onLoad}
               className="h-full w-full object-contain"
+              style={{ imageRendering: pixelArt ? "pixelated" : "auto" }}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">

@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { Box, FileQuestion } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../../stores/libraryStore";
+import { useRenderPrefs } from "../../stores/renderPrefs";
 import { thumbUrl } from "../../types";
 import { humanSize } from "../FileRow";
 import AssetCell, { type Badge } from "./AssetCell";
@@ -17,6 +18,7 @@ export const UNPREVIEWABLE = new Set(["blend", "3ds"]);
 export default function ModelCell({ file, selected }: ModelCellProps): ReactElement {
   useLibraryStore((s) => s.thumbsVersion);
   const thumb = useLibraryStore.getState().thumbs.get(file.id);
+  const pixelArt = useRenderPrefs((s) => s.pixelArt);
 
   const unsupported = UNPREVIEWABLE.has(file.ext);
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];
@@ -36,6 +38,7 @@ export default function ModelCell({ file, selected }: ModelCellProps): ReactElem
             loading="lazy"
             draggable={false}
             className="h-full w-full object-contain"
+            style={{ imageRendering: pixelArt ? "pixelated" : "auto" }}
           />
         ) : unsupported ? (
           <FileQuestion size={22} className="text-dim opacity-50" />

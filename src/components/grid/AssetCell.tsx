@@ -18,6 +18,10 @@ export interface AssetCellProps {
   /** Alpha checkerboard behind the thumb — cutout foliage on a dark panel
    *  reads as broken without it. */
   checker?: boolean;
+  /** When set, the thumb area is a transparent hole tagged for the WebGL grid
+   *  (ThumbGLOverlay), which paints the letterbox, checker and image behind it.
+   *  `children` are ignored — the canvas is the thumbnail. */
+  thumbKey?: string;
 }
 
 function AssetCellInner({
@@ -27,22 +31,33 @@ function AssetCellInner({
   selected,
   children,
   checker,
+  thumbKey,
 }: AssetCellProps): ReactElement {
+  const gl = thumbKey !== undefined;
   return (
     <div
       className={clsx(
-        "group relative overflow-hidden rounded-lg border bg-panel transition-colors duration-[120ms]",
-        // Grids want an outline; lists want a leading edge. Same accent, and
-        // deliberately a different affordance from .row-selected.
+        "group relative overflow-hidden rounded-lg border transition-colors duration-[120ms]",
+        // GL cells keep the frame transparent so the canvas behind shows
+        // through the thumb hole; the meta strip below carries its own bg.
+        gl ? "bg-transparent" : "bg-panel",
         selected
-          ? "border-accent bg-accent/8 shadow-[0_0_0_1px_var(--color-accent)]"
+          ? gl
+            ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
+            : "border-accent bg-accent/8 shadow-[0_0_0_1px_var(--color-accent)]"
           : "border-border hover:border-accent/40",
       )}
     >
       <div
-        className={clsx("relative aspect-square w-full overflow-hidden bg-raised", checker && "alpha-checker")}
+        data-thumb-key={thumbKey}
+        className={clsx(
+          "relative aspect-square w-full overflow-hidden",
+          // GL cells are a transparent hole; the canvas behind paints the
+          // background, so bg-raised/checker here would just occlude it.
+          gl ? "bg-transparent" : ["bg-raised", checker && "alpha-checker"],
+        )}
       >
-        {children}
+        {gl ? null : children}
         {badges !== undefined && badges.length > 0 && (
           <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5 flex items-center gap-1">
             {badges.map((b, i) => (
@@ -66,7 +81,7 @@ function AssetCellInner({
         )}
       </div>
 
-      <div className="flex flex-col gap-0.5 px-2 pb-2 pt-1.5">
+      <div className={clsx("flex flex-col gap-0.5 px-2 pb-2 pt-1.5", gl && "bg-panel")}>
         <div className="truncate text-[11.5px]" title={name}>
           {name}
         </div>

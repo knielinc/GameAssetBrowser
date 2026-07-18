@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
+import clsx from "clsx";
 import { modelUrl } from "../../model/loadModel";
+import { useRenderPrefs } from "../../stores/renderPrefs";
 import { thumbUrl } from "../../types";
 
 /** Formats the browser decodes natively — served as the ORIGINAL file so a
@@ -20,6 +22,12 @@ export interface Sprite2DViewProps {
   /** Thumbnail cache key — the only viewable form for DDS/TGA/EXR. */
   thumbKey?: string;
   sprite: SpriteConfig;
+  /** Scale the image to fill the available space (upscaling small textures).
+   *  When false, show it at `zoomPct` of native size and scroll if it
+   *  overflows. */
+  zoomFit: boolean;
+  /** Zoom percent of native size when not fitting (100 = 1:1). */
+  zoomPct: number;
 }
 
 /**
@@ -34,13 +42,18 @@ export interface Sprite2DViewProps {
  * animates and the sheet is crisp); DDS/TGA/EXR fall back to the decoded
  * thumbnail, which is the only thing that exists for them.
  */
-export default function Sprite2DView({ path, ext, thumbKey, sprite }: Sprite2DViewProps): ReactElement {
+export default function Sprite2DView({ path, ext, thumbKey, sprite, zoomFit, zoomPct }: Sprite2DViewProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pixelArt = useRenderPrefs((s) => s.pixelArt);
+  // Natural pixel size of the loaded image — the base the zoom percent scales.
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   const usable = BROWSER_DECODABLE.has(ext.toLowerCase());
   const src = usable ? modelUrl(path) : thumbKey !== undefined ? thumbUrl(thumbKey) : null;
   const isGif = ext.toLowerCase() === "gif";
+
+  // The image changed — drop the old size until the new one loads.
+  useEffect(() => setDims(null), [src]);
 
   // Sprite-sheet playback: load the sheet once, blit the current cell each
   // frame. Cropping a GIF sheet loses its animation, but a GIF *is* the
@@ -61,7 +74,6 @@ export default function Sprite2DView({ path, ext, thumbKey, sprite }: Sprite2DVi
 
     img.onload = () => {
       loaded = true;
-      setDims({ w: img.naturalWidth, h: img.naturalHeight });
     };
     img.src = src;
 
@@ -101,26 +113,48 @@ export default function Sprite2DView({ path, ext, thumbKey, sprite }: Sprite2DVi
     );
   }
 
+  // Zoom applies only to the still image — a sprite sheet plays at frame size.
+  const fit = zoomFit || sprite.enabled;
+  const rendering = pixelArt ? "pixelated" : "auto";
+  // Explicit zoomed size once we know the native dimensions.
+  const zoomW = dims !== null ? Math.max(1, Math.round((dims.w * zoomPct) / 100)) : undefined;
+
   return (
-    <div className="alpha-checker flex h-full w-full items-center justify-center overflow-hidden p-2">
+    <div
+      className={clsx(
+        "alpha-checker relative h-full w-full",
+        fit ? "flex items-center justify-center overflow-hidden p-2" : "overflow-auto",
+      )}
+    >
       {sprite.enabled ? (
         <canvas
           ref={canvasRef}
           className="max-h-full max-w-full object-contain"
-          style={{ imageRendering: "pixelated" }}
+          style={{ imageRendering: rendering }}
         />
-      ) : (
+      ) : fit ? (
+        // Fit: scale to fill the available space, upscaling small textures.
         <img
           src={src}
           alt=""
           draggable={false}
-          onLoad={(e) =>
-            setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-          }
-          className="max-h-full max-w-full object-contain"
-          // Pixel art (small sources) crisp; large textures smooth.
-          style={{ imageRendering: dims !== null && Math.max(dims.w, dims.h) <= 256 ? "pixelated" : "auto" }}
+          onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+          className="h-full w-full object-contain"
+          style={{ imageRendering: rendering }}
         />
+      ) : (
+        // Zoom: native size × percent, centered while it fits, scrollable once
+        // it overflows (min-full keeps it centered until then).
+        <div className="flex min-h-full min-w-full items-center justify-center p-2">
+          <img
+            src={src}
+            alt=""
+            draggable={false}
+            onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+            className="max-w-none"
+            style={{ width: zoomW, height: "auto", imageRendering: rendering }}
+          />
+        </div>
       )}
       {isGif && !sprite.enabled && (
         <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-dim">

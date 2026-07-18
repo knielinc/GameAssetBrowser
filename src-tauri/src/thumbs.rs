@@ -172,6 +172,9 @@ fn analyze(img: &DynamicImage) -> ThumbInfo {
     ThumbInfo {
         width: img.width(),
         height: img.height(),
+        // Overwritten by build() with the pre-downscale source dimensions.
+        source_width: img.width(),
+        source_height: img.height(),
         normal_like,
         grayscale,
         bimodal,
@@ -230,8 +233,12 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
     // Cache hit: the RGBA and its dims are already here — recompute stats from
     // it (cheap) rather than touching the 4K original again.
     if let Some(px) = cache.get(h) {
+        let (sw, sh) = (px.src_w, px.src_h);
         if let Some(buf) = image::RgbaImage::from_raw(px.width, px.height, px.rgba) {
-            return Ok((key, analyze(&DynamicImage::ImageRgba8(buf))));
+            let mut info = analyze(&DynamicImage::ImageRgba8(buf));
+            info.source_width = sw;
+            info.source_height = sh;
+            return Ok((key, info));
         }
     }
 
@@ -251,13 +258,17 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
     // same pixels the thumbnail shows.
     let thumb = to_ldr(thumb);
 
-    let info = analyze(&thumb);
+    let mut info = analyze(&thumb);
+    info.source_width = w;
+    info.source_height = ih;
     let rgba = thumb.to_rgba8();
     cache.put(
         h,
         Pixels {
             width: rgba.width(),
             height: rgba.height(),
+            src_w: w,
+            src_h: ih,
             rgba: rgba.into_raw(),
         },
     );
@@ -453,7 +464,18 @@ pub fn model_thumb_store(
     }
     let (size, mtime) = file_stamp(Path::new(&path));
     let h = hash_key("m", &path, size, mtime);
-    app.state::<ThumbCache>().put(h, Pixels { width, height, rgba });
+    // A model thumbnail is rendered, not decoded — its "source" size is just the
+    // render size. The status bar shows resolution for textures only.
+    app.state::<ThumbCache>().put(
+        h,
+        Pixels {
+            width,
+            height,
+            src_w: width,
+            src_h: height,
+            rgba,
+        },
+    );
     Ok(hex_key(h))
 }
 

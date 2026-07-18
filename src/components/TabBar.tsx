@@ -1,9 +1,39 @@
 import { useMemo, type ReactElement } from "react";
 import clsx from "clsx";
-import { AudioLines, Box, Image } from "lucide-react";
+import { AudioLines, Box, Image, PanelLeft, PanelRight } from "lucide-react";
 import { folderMatcher, useLibraryStore } from "../stores/libraryStore";
+import { usePanelPrefs } from "../stores/panelPrefs";
 import { ASSET_KINDS, type AssetKind } from "../types";
 import { switchTab } from "../stores/tabs";
+
+function PanelToggle({
+  on,
+  onClick,
+  icon: Icon,
+  title,
+}: {
+  on: boolean;
+  onClick: () => void;
+  icon: typeof PanelLeft;
+  title: string;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={on}
+      className={clsx(
+        "flex h-7 w-7 items-center justify-center rounded-md border transition-colors duration-[120ms]",
+        on
+          ? "border-accent/45 bg-accent/12 text-accent"
+          : "border-transparent text-dim hover:bg-raised hover:text-text",
+      )}
+      onClick={onClick}
+    >
+      <Icon size={14} />
+    </button>
+  );
+}
 
 const TAB_META: Record<AssetKind, { label: string; icon: typeof Box; hue: string }> = {
   audio: { label: "Audio", icon: AudioLines, hue: "text-kind-audio" },
@@ -20,6 +50,12 @@ export default function TabBar(): ReactElement {
   const activeTab = useLibraryStore((s) => s.activeTab);
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScope = useLibraryStore((s) => s.folderScope);
+  const leftOpen = usePanelPrefs((s) => s.left);
+  const rightOpen = usePanelPrefs((s) => s.right);
+  const toggleLeft = usePanelPrefs((s) => s.toggleLeft);
+  const toggleRight = usePanelPrefs((s) => s.toggleRight);
+  // Audio has no inspector, so hide the right toggle there.
+  const hasInspector = activeTab !== "audio";
 
   const counts = useMemo(() => {
     const inScope = folderScope === null ? null : folderMatcher(folderScope);
@@ -33,6 +69,13 @@ export default function TabBar(): ReactElement {
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border px-3">
+      <PanelToggle
+        on={leftOpen}
+        onClick={toggleLeft}
+        icon={PanelLeft}
+        title={leftOpen ? "Hide folders panel" : "Show folders panel"}
+      />
+      <div className="mr-1 h-5 w-px bg-border" />
       {ASSET_KINDS.map((kind, i) => {
         const { label, icon: Icon, hue } = TAB_META[kind];
         const active = activeTab === kind;
@@ -62,6 +105,16 @@ export default function TabBar(): ReactElement {
           </button>
         );
       })}
+      {hasInspector && (
+        <div className="ml-auto">
+          <PanelToggle
+            on={rightOpen}
+            onClick={toggleRight}
+            icon={PanelRight}
+            title={rightOpen ? "Hide inspector" : "Show inspector"}
+          />
+        </div>
+      )}
     </div>
   );
 }

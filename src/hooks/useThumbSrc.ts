@@ -6,6 +6,8 @@ import { thumbUrl, type ThumbInfo } from "../types";
 export interface ThumbSrc {
   /** thumb:// URL to show, or null while a known miss is being decoded. */
   src: string | null;
+  /** The bare cache key — what the WebGL grid feeds to the `tex://` atlas. */
+  cacheKey: string;
   /** Force-remounts the <img> only when a retry is actually needed. */
   imgKey: string;
   onError: () => void;
@@ -57,6 +59,7 @@ export function useThumbSrc(file: LibFile): ThumbSrc {
   const key = stored?.key ?? derived;
   return {
     src: broken && stored === undefined ? null : thumbUrl(key),
+    cacheKey: key,
     imgKey: `${key}:${attempt}`,
     onError: () => {
       brokeRef.current = true;

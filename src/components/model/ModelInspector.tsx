@@ -11,6 +11,8 @@ export interface ModelInspectorProps {
   path: string | null;
   size: number | null;
   onClose: () => void;
+  /** Panel width in px; owned by usePanelWidth in TabPane. */
+  width: number;
 }
 
 const fmt = (n: number): string => n.toLocaleString();
@@ -18,14 +20,14 @@ const fmt = (n: number): string => n.toLocaleString();
 /** Right-side drawer. Model metadata is intrinsically tall-and-narrow, and the
  *  grid stays the tool for the stated core need — browsing beats inspecting,
  *  so browsing keeps the space. Drag it wider for a big 3D view. */
-export default function ModelInspector({ path, size, onClose }: ModelInspectorProps): ReactElement {
+export default function ModelInspector({ path, size, onClose, width }: ModelInspectorProps): ReactElement {
   const [stats, setStats] = useState<ModelStats | null>(null);
   const onStats = useCallback((s: ModelStats | null) => setStats(s), []);
   const [rescue, setRescue] = useState<RescueResult | null>(null);
   const onRescue = useCallback((r: RescueResult | null) => setRescue(r), []);
 
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col border-l border-border bg-panel">
+    <aside style={{ width }} className="flex shrink-0 flex-col border-l border-border bg-panel">
       <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-border px-2.5">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-dim">Inspector</span>
         <button type="button" className="icon-btn" title="Close" onClick={onClose}>

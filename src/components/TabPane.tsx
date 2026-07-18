@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
+import clsx from "clsx";
 import { Copy, FolderOpen, Loader2 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
+import { usePanelWidth } from "../hooks/usePanelWidth";
+import { usePanelPrefs } from "../stores/panelPrefs";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
@@ -12,6 +15,7 @@ import FileList from "./FileList";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
 import AssetGrid from "./grid/AssetGrid";
+import { hasWebGL2 } from "./grid/thumbGL";
 import TextureCell from "./grid/TextureCell";
 import MaterialCell from "./grid/MaterialCell";
 import ModelCell from "./grid/ModelCell";
@@ -59,14 +63,27 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   }, [kind, tab.groupMaterials, tab.viewMode, visible, thumbsVersion]);
 
   const [menu, setMenu] = useState<{ x: number; y: number; file: LibFile } | null>(null);
-  const [showInspector, setShowInspector] = useState(true);
+  // Inspector show/hide is shared with the TabBar toggle; its width is a
+  // user-dragged right-anchored panel, just like the left sidebar.
+  const inspectorOpen = usePanelPrefs((s) => s.right);
+  const toggleInspector = usePanelPrefs((s) => s.toggleRight);
+  const inspector = usePanelWidth({
+    storageKey: "inspectorWidth",
+    min: 240,
+    max: 720,
+    defaultWidth: 300,
+    side: "right",
+  });
   // Shared by the drawer and the fullscreen overlay, so switching to
   // fullscreen keeps the mesh/lighting you were already looking at.
   const [preview3d, setPreview3d] = useState<PreviewState>({
-    mesh: "sphere",
+    // Flat by default: a texture preview is first of all the image itself.
+    mesh: "flat",
     light: "studio",
-    tiles: 2,
+    tiles: 1,
     relief: 0.05,
+    zoomFit: true,
+    zoomPct: 100,
     spriteOn: false,
     spriteCols: 4,
     spriteRows: 4,
@@ -147,6 +164,11 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     [grouped, visible, onVisibleRange],
   );
 
+  // Textures render through the shared WebGL canvas (no PNG round-trip, one
+  // draw call); everything else stays on the classic <img> path. Falls back to
+  // <img> if this WebView somehow lacks WebGL2.
+  const glThumbs = kind === "texture" && hasWebGL2();
+
   let content: ReactElement;
   if (scanning && !anyFiles) {
     content = (
@@ -175,11 +197,12 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         onSelect={onGroupSelect}
         onContextMenu={onGroupContextMenu}
         onVisibleRange={onGroupedRange}
+        glThumbs={glThumbs}
         renderCell={(it) =>
           it.kind === "material" ? (
             <MaterialCell material={it.material} selected={it.key === tab.selectedPath} />
           ) : (
-            <TextureCell file={it.file} selected={it.file.path === tab.selectedPath} />
+            <TextureCell file={it.file} selected={it.file.path === tab.selectedPath} gl={glThumbs} />
           )
         }
       />
@@ -194,9 +217,10 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         onSelect={onCellSelect}
         onContextMenu={onCellContextMenu}
         onVisibleRange={onVisibleRange}
+        glThumbs={glThumbs}
         renderCell={(f) =>
           kind === "texture" ? (
-            <TextureCell file={f} selected={f.path === tab.selectedPath} />
+            <TextureCell file={f} selected={f.path === tab.selectedPath} gl={glThumbs} />
           ) : (
             <ModelCell file={f} selected={f.path === tab.selectedPath} />
           )
@@ -223,20 +247,31 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">{content}</div>
         {/* Hidden while the fullscreen preview is up: both host a WebGL
-            context, and there is no reason to pay for two. */}
-        {kind === "model" && showInspector && preview === null && (
+            context, and there is no reason to pay for two. Drag the handle to
+            resize, just like the left sidebar; double-click resets the width. */}
+        {kind !== "audio" && inspectorOpen && preview === null && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            className={clsx("sidebar-resizer", inspector.isDragging && "sidebar-resizer-active")}
+            {...inspector.handleProps}
+          />
+        )}
+        {kind === "model" && inspectorOpen && preview === null && (
           <ModelInspector
             path={selectedFile?.path ?? null}
             size={selectedFile?.size ?? null}
-            onClose={() => setShowInspector(false)}
+            onClose={toggleInspector}
+            width={inspector.width}
           />
         )}
-        {kind === "texture" && showInspector && preview === null && (
+        {kind === "texture" && inspectorOpen && preview === null && (
           <TextureInspector
             item={selectedItem}
             preview={preview3d}
             onPreviewChange={patchPreview}
-            onClose={() => setShowInspector(false)}
+            onClose={toggleInspector}
+            width={inspector.width}
           />
         )}
       </div>

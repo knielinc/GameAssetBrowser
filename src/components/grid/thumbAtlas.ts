@@ -60,6 +60,16 @@ export class ThumbAtlas {
     return this.slotOf.has(key);
   }
 
+  /** Switch sampling between smooth (LINEAR) and crisp pixel-art (NEAREST).
+   *  Same texels, different filter — no re-upload, just a redraw. */
+  setFilter(nearest: boolean): void {
+    const gl = this.gl;
+    const f = nearest ? gl.NEAREST : gl.LINEAR;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, f);
+  }
+
   /**
    * Upload one thumbnail's RGBA into a layer. `w`/`h` are the image's real
    * dimensions; it is centred into the square cell and its aspect recorded so

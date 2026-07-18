@@ -1,9 +1,9 @@
-import { useEffect, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import type { TextureItem } from "../material/classify";
 import ModelViewport from "./model/ModelViewport";
-import TexturePreview from "./texture/TexturePreview";
+import TexturePreview, { type MeshMode } from "./texture/TexturePreview";
 import Sprite2DView from "./texture/Sprite2DView";
 import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
 import { keysForFile, keysForMaterial } from "./texture/TextureInspector";
@@ -47,8 +47,23 @@ export default function FullscreenPreview({
         ? keysForMaterial(item.material, thumbs)
         : keysForFile(item.file, item.channel, thumbs);
 
+  // Fullscreening an image opens it as a flat, framed picture — not wrapped on
+  // the drawer's default sphere. The mesh is a LOCAL override so the shared
+  // drawer state is untouched; the controls below still switch to sphere/cube.
+  const [meshOverride, setMeshOverride] = useState<MeshMode>("flat");
+  useEffect(() => {
+    setMeshOverride("flat");
+  }, [file.id]);
+  const mesh: MeshMode = file.kind === "texture" ? meshOverride : preview3d.mesh;
+  const onControlsChange = (patch: Partial<PreviewState>): void => {
+    if (patch.mesh !== undefined) setMeshOverride(patch.mesh);
+    const rest: Partial<PreviewState> = { ...patch };
+    delete rest.mesh;
+    if (Object.keys(rest).length > 0) onPreviewChange(rest);
+  };
+
   // Flat mode on a texture is the 2D lens — image / GIF / sprite sheet.
-  const use2D = file.kind === "texture" && preview3d.mesh === "flat";
+  const use2D = file.kind === "texture" && mesh === "flat";
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -94,6 +109,8 @@ export default function FullscreenPreview({
                   fps: preview3d.spriteFps,
                   playing: preview3d.spritePlaying,
                 }}
+                zoomFit={preview3d.zoomFit}
+                zoomPct={preview3d.zoomPct}
               />
             </div>
           ) : Object.keys(keys).length > 0 ? (
@@ -103,7 +120,7 @@ export default function FullscreenPreview({
             <div className="h-full w-full overflow-hidden rounded-lg border border-border bg-[#07070b]">
               <TexturePreview
                 keys={keys}
-                mesh={preview3d.mesh}
+                mesh={mesh}
                 light={preview3d.light}
                 tiles={preview3d.tiles}
                 relief={preview3d.relief}
@@ -119,11 +136,10 @@ export default function FullscreenPreview({
         {file.kind === "texture" && (Object.keys(keys).length > 0 || use2D) && (
           <div className="shrink-0">
             <PreviewControls
-              value={preview3d}
-              onChange={onPreviewChange}
+              value={{ ...preview3d, mesh }}
+              onChange={onControlsChange}
               inline
               hasHeight={keys.height !== undefined}
-              is2D={use2D}
             />
           </div>
         )}

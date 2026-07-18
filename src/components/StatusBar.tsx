@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { basename, useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import { useScopeCount } from "../hooks/useVisibleFiles";
+import { humanSize } from "./FileRow";
 import type { AssetKind } from "../types";
 
 const NOUN: Record<AssetKind, string> = {
@@ -20,6 +21,22 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
   const folderScope = useLibraryStore((s) => s.folderScope);
   const scanning = useLibraryStore((s) => s.scanning);
   const currentPath = usePlayerStore((s) => s.currentPath);
+
+  // Selected asset readout (bottom-right): its file size, and for an image its
+  // real resolution. Subscribing to selectedPath + thumbsVersion re-runs the
+  // lookups when the selection changes or a decode lands.
+  const selectedPath = useLibraryStore((s) => s.tabs[kind].selectedPath);
+  useLibraryStore((s) => s.thumbsVersion);
+  const selectedFile =
+    selectedPath === null
+      ? null
+      : (useLibraryStore.getState().allFiles.find((f) => f.path === selectedPath) ?? null);
+  const info =
+    selectedFile !== null ? useLibraryStore.getState().thumbs.get(selectedFile.id)?.info : undefined;
+  const resolution =
+    kind === "texture" && info != null && info.sourceWidth > 0
+      ? `${info.sourceWidth.toLocaleString()} × ${info.sourceHeight.toLocaleString()}`
+      : null;
 
   // Denominator = files OF THIS KIND in the current scope, so "N / M" reads
   // "visible after filters / total of this kind in what I'm looking at".
@@ -45,8 +62,14 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
       )}
       <span className="flex-1" />
       {currentPath !== null && (
-        <span className="max-w-[45%] truncate" title={currentPath}>
+        <span className="max-w-[35%] truncate" title={currentPath}>
           {basename(currentPath)}
+        </span>
+      )}
+      {selectedFile !== null && (
+        <span className="tabular-nums text-dim">
+          {humanSize(selectedFile.size)}
+          {resolution !== null && <span className="ml-3 text-text">{resolution}</span>}
         </span>
       )}
     </div>

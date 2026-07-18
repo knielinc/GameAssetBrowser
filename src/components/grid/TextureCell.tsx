@@ -2,18 +2,23 @@ import type { ReactElement } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import type { LibFile } from "../../stores/libraryStore";
 import { useThumbSrc } from "../../hooks/useThumbSrc";
+import { useRenderPrefs } from "../../stores/renderPrefs";
 import { humanSize } from "../FileRow";
 import AssetCell, { type Badge } from "./AssetCell";
 
 export interface TextureCellProps {
   file: LibFile;
   selected: boolean;
+  /** Render a transparent GL hole (the WebGL grid paints it) instead of an
+   *  `<img>`. Off → the classic thumb:// image path. */
+  gl?: boolean;
 }
 
-export default function TextureCell({ file, selected }: TextureCellProps): ReactElement {
+export default function TextureCell({ file, selected, gl }: TextureCellProps): ReactElement {
   // Derived key → the image shows the instant WebView2 can read it off disk,
   // no IPC round trip. `info` (badges) fills in when the stats request lands.
-  const { src, imgKey, info, onError, onLoad } = useThumbSrc(file);
+  const { src, cacheKey, imgKey, info, onError, onLoad } = useThumbSrc(file);
+  const pixelArt = useRenderPrefs((s) => s.pixelArt);
 
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];
   if (info != null) {
@@ -30,7 +35,14 @@ export default function TextureCell({ file, selected }: TextureCellProps): React
   }
 
   return (
-    <AssetCell name={file.name} sub={humanSize(file.size)} badges={badges} selected={selected} checker>
+    <AssetCell
+      name={file.name}
+      sub={humanSize(file.size)}
+      badges={badges}
+      selected={selected}
+      checker
+      thumbKey={gl === true ? cacheKey : undefined}
+    >
       {src !== null ? (
         <img
           key={imgKey}
@@ -41,6 +53,7 @@ export default function TextureCell({ file, selected }: TextureCellProps): React
           onError={onError}
           onLoad={onLoad}
           className="h-full w-full object-contain"
+          style={{ imageRendering: pixelArt ? "pixelated" : "auto" }}
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center">

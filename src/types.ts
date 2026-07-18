@@ -85,6 +85,9 @@ export interface ThumbInfo {
   /** Thumbnail dimensions, not the source's. */
   width: number;
   height: number;
+  /** The source image's real pixel dimensions (before downscale). */
+  sourceWidth: number;
+  sourceHeight: number;
   /** Mean ≈ (0.5, 0.5, 1.0) — tangent-space normal map. */
   normalLike: boolean;
   /** Near-zero chroma — roughness/height/AO/metallic are single-channel. */
@@ -106,6 +109,12 @@ export interface ThumbBatch {
  *  thread. On Windows a custom scheme resolves as http://<name>.localhost. */
 export function thumbUrl(key: string): string {
   return `http://thumb.localhost/${key}`;
+}
+
+/** Raw RGBA for the WebGL grid: `[u32 w][u32 h][rgba]`. Uploaded straight to
+ *  the GPU atlas — no PNG decode. Served by the `tex://` scheme. */
+export function texUrl(key: string): string {
+  return `http://tex.localhost/${key}`;
 }
 
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4a"] as const;

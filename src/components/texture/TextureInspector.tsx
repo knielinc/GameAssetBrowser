@@ -109,6 +109,8 @@ export interface TextureInspectorProps {
   preview: PreviewState;
   onPreviewChange: (patch: Partial<PreviewState>) => void;
   onClose: () => void;
+  /** Panel width in px; owned by usePanelWidth in TabPane. */
+  width: number;
 }
 
 export default function TextureInspector({
@@ -116,6 +118,7 @@ export default function TextureInspector({
   preview,
   onPreviewChange,
   onClose,
+  width,
 }: TextureInspectorProps): ReactElement {
   useLibraryStore((s) => s.thumbsVersion);
   const thumbs = useLibraryStore.getState().thumbs;
@@ -137,7 +140,7 @@ export default function TextureInspector({
   const use2D = preview.mesh === "flat" && file2d !== null;
 
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col border-l border-border bg-panel">
+    <aside style={{ width }} className="flex shrink-0 flex-col border-l border-border bg-panel">
       <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-border px-2.5">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-dim">Inspector</span>
         <button type="button" className="icon-btn" title="Close" onClick={onClose}>
@@ -163,6 +166,8 @@ export default function TextureInspector({
                 fps: preview.spriteFps,
                 playing: preview.spritePlaying,
               }}
+              zoomFit={preview.zoomFit}
+              zoomPct={preview.zoomPct}
             />
           ) : (
             <TexturePreview
@@ -182,7 +187,6 @@ export default function TextureInspector({
               value={preview}
               onChange={onPreviewChange}
               hasHeight={keys.height !== undefined}
-              is2D={use2D}
             />
 
             <div>

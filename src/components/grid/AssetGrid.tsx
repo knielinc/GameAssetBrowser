@@ -10,6 +10,8 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { gridNavRef, scrollToIndexRef } from "../../hooks/useKeyboardShortcuts";
+import { useLibraryStore } from "../../stores/libraryStore";
+import ThumbGLOverlay from "./ThumbGLOverlay";
 
 const GAP = 12;
 const PAD = 14;
@@ -28,6 +30,9 @@ export interface AssetGridProps<T> {
    *  lazy thumbnail requests — decoding 2000 textures eagerly is not an
    *  option at any concurrency. */
   onVisibleRange?: (start: number, end: number) => void;
+  /** Paint thumbnails through the shared WebGL canvas behind the grid — cells
+   *  must render `[data-thumb-key]` holes (see TextureCell `gl`). */
+  glThumbs?: boolean;
 }
 
 /**
@@ -48,9 +53,19 @@ export default function AssetGrid<T>({
   onSelect,
   onContextMenu,
   onVisibleRange,
+  glThumbs,
 }: AssetGridProps<T>): ReactElement {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
+
+  // The WebGL overlay measures the DOM each frame, so it only needs a nudge
+  // when the slots move for a reason other than scroll/resize: a new item set
+  // (filter, group toggle) or a decode landing (a 404'd fetch can now succeed).
+  const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
+  const [glRevision, setGlRevision] = useState(0);
+  useEffect(() => {
+    if (glThumbs === true) setGlRevision((r) => r + 1);
+  }, [items, thumbsVersion, glThumbs]);
 
   // Column count comes from the live container width, so the grid reflows when
   // the sidebar or inspector is dragged.
@@ -130,7 +145,15 @@ export default function AssetGrid<T>({
   }, [onVisibleRange, firstRow, lastRow, columns, items.length]);
 
   return (
-    <div ref={parentRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-scroll">
+    <div className="relative min-h-0 flex-1">
+      {/* Behind the grid: one WebGL canvas paints every visible thumbnail. It
+          shows through the cells' transparent `[data-thumb-key]` holes, so it
+          must sit under the scroll layer (z-0 vs z-10). */}
+      {glThumbs === true && <ThumbGLOverlay scrollRef={parentRef} revision={glRevision} />}
+      <div
+        ref={parentRef}
+        className="absolute inset-0 z-10 overflow-x-hidden overflow-y-scroll"
+      >
       <div style={{ height: `${virtualizer.getTotalSize() + PAD * 2}px`, position: "relative" }}>
         {virtualItems.map((row) => {
           const start = row.index * columns;
@@ -163,6 +186,7 @@ export default function AssetGrid<T>({
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );

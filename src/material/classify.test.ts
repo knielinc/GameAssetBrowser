@@ -33,6 +33,8 @@ const at = (n: string): LibFile => f(`${DIR}\\${n}`);
 const info = (o: Partial<ThumbInfo>): ThumbInfo => ({
   width: 256,
   height: 256,
+  sourceWidth: 1024,
+  sourceHeight: 1024,
   normalLike: false,
   grayscale: false,
   bimodal: false,
