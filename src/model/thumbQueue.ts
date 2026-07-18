@@ -122,11 +122,14 @@ interface WorkerResult {
   buf: ArrayBuffer;
 }
 
-/** One render thread per core is ideal for parse-bound work, but each worker
- *  holds its own WebGL context (a ~16 budget shared with the viewport and the
- *  texture grid), so cap at 4 — comfortably short of the limit, and past ~4 the
- *  gain tapers as workers contend on the single GPU. */
-const POOL_SIZE = Math.max(1, Math.min(4, (navigator.hardwareConcurrency ?? 4) - 1));
+/** The bottleneck is the loader PARSE (100-400 ms of single-threaded JS per
+ *  FBX), and each worker is a real OS thread, so throughput scales with worker
+ *  count up to the core count. The limit is the WebGL context each worker holds:
+ *  a ~16-context budget shared with the model viewport (1) and the texture grid
+ *  (1). Cap at 8 — even at 8 that's 10 contexts, comfortably under the budget —
+ *  and leave one core for the main thread. The render itself is a few ms at
+ *  256px, so GPU contention between workers is not the ceiling; CPU cores are. */
+const POOL_SIZE = Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 1));
 
 interface Slot {
   worker: Worker;
