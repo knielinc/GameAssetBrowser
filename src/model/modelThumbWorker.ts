@@ -88,10 +88,10 @@ function ensure(): {
   r.toneMapping = THREE.ACESFilmicToneMapping;
   r.outputColorSpace = THREE.SRGBColorSpace;
 
-  // Render into an sRGB target so the read-back bytes match the main-thread
-  // canvas path (tone mapping + sRGB encoding). Plain (non-MSAA) target — the
-  // async readback is proven on a plain target; MSAA needs a resolve step.
-  const rt = new THREE.WebGLRenderTarget(EDGE, EDGE);
+  // Render into an sRGB, multisampled target so the read-back bytes match the
+  // main-thread canvas path: tone mapping + sRGB encoding + antialiasing (the
+  // inspector and the old main-thread renderer both use antialias:true).
+  const rt = new THREE.WebGLRenderTarget(EDGE, EDGE, { samples: 4 });
   rt.texture.colorSpace = THREE.SRGBColorSpace;
 
   const s = new THREE.Scene();
