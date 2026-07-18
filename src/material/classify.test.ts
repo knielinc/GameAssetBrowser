@@ -206,6 +206,122 @@ describe("real vendor packs", () => {
   });
 });
 
+describe("expanded vocabulary", () => {
+  it("short base-color forms: _dif and _alb are Base Color", () => {
+    expect(parse(at("Crate_dif.png")).candidates[0]?.channel).toBe("baseColor");
+    expect(parse(at("Crate_alb.png")).candidates[0]?.channel).toBe("baseColor");
+  });
+
+  it("_base_col (2-gram) is Base Color and does not leave 'base' in the key", () => {
+    const p = parse(at("Wood_Base_Col.png"));
+    expect(p.candidates[0]?.channel).toBe("baseColor");
+    expect(p.keyTokens).toEqual(["wood"]);
+  });
+
+  it("the common 'metalic' misspelling still reads as Metallic", () => {
+    expect(parse(at("Steel_Metalic.png")).candidates[0]?.channel).toBe("metallic");
+  });
+
+  it("nrml and normal_ogl read as Normal and record the convention", () => {
+    expect(parse(at("Rock_nrml.png")).candidates[0]?.channel).toBe("normal");
+    const p = parse(at("Rock_Normal_OGL.png"));
+    expect(p.candidates[0]?.channel).toBe("normal");
+    expect(p.convention).toBe("gl");
+  });
+
+  it("_opac and _transparent read as Opacity", () => {
+    expect(parse(at("Leaf_opac.png")).candidates[0]?.channel).toBe("opacity");
+    expect(parse(at("Leaf_transparent.png")).candidates[0]?.channel).toBe("opacity");
+  });
+});
+
+describe("qualified '* color' beats bare color", () => {
+  it("EmissiveColor is Emissive, not Base Color", () => {
+    // The bare `color`/`colour` rule would misfile this as albedo; the 2-gram
+    // is tried first (n=2 before n=1) so the qualifier wins.
+    expect(parse(at("Lamp_EmissiveColor.png")).candidates[0]?.channel).toBe("emissive");
+    expect(parse(at("Lamp_Emissive_Color.png")).candidates[0]?.channel).toBe("emissive");
+  });
+  it("SpecularColor is Specular, not Base Color", () => {
+    expect(parse(at("Metal_SpecularColor.png")).candidates[0]?.channel).toBe("specular");
+  });
+});
+
+describe("subsurface / scattering", () => {
+  it("Subsurface, SSS, and Scattering all read as subsurface", () => {
+    expect(parse(at("Skin_Subsurface.png")).candidates[0]?.channel).toBe("subsurface");
+    expect(parse(at("Skin_SSS.png")).candidates[0]?.channel).toBe("subsurface");
+    expect(parse(at("Skin_Scattering.png")).candidates[0]?.channel).toBe("subsurface");
+  });
+  it("SubsurfaceColor (2-gram) reads as subsurface and clears the key", () => {
+    const p = parse(at("Skin_SubsurfaceColor.png"));
+    expect(p.candidates[0]?.channel).toBe("subsurface");
+    expect(p.keyTokens).toEqual(["skin"]);
+  });
+  it("groups a subsurface map into the material", () => {
+    const items = groupTextures(
+      [at("Skin_BaseColor.png"), at("Skin_Normal.png"), at("Skin_Subsurface.png")],
+      new Map(),
+    );
+    const m = (items.find((i) => i.kind === "material") as Extract<TextureItem, { kind: "material" }>)
+      .material;
+    expect([...m.channels.keys()].sort()).toEqual(["baseColor", "normal", "subsurface"]);
+  });
+});
+
+describe("platform conventions (research pass)", () => {
+  it("GameTextures _MRAO packs as a metallic/roughness/AO map", () => {
+    expect(parse(at("Metal_MRAO.png")).candidates[0]?.channel).toBe("packedMRA");
+  });
+
+  it("Unity _MetallicGloss(Map) packs as metallic/smoothness", () => {
+    expect(parse(at("Wall_MetallicGloss.png")).candidates[0]?.channel).toBe("packedMetalSmooth");
+    // The `Map` noise token peels first, then the 2-gram matches.
+    expect(parse(at("Wall_MetallicGlossMap.png")).candidates[0]?.channel).toBe("packedMetalSmooth");
+  });
+
+  it("Megascans _NormalBump is a normal map, not a height field", () => {
+    expect(parse(at("rock_2K_NormalBump.jpg")).candidates[0]?.channel).toBe("normal");
+  });
+
+  it("Fab importer short forms: _nmap, _rou", () => {
+    expect(parse(at("cube_nmap.png")).candidates[0]?.channel).toBe("normal");
+    expect(parse(at("cube_rou.png")).candidates[0]?.channel).toBe("roughness");
+  });
+
+  it("Poliigon spec-workflow reflection (_REFL / _Reflection) is Specular", () => {
+    expect(parse(at("Tile_REFL.png")).candidates[0]?.channel).toBe("specular");
+    expect(parse(at("Tile_Reflection.png")).candidates[0]?.channel).toBe("specular");
+  });
+
+  it("height aliases: _displ (Substance), _depth (Godot)", () => {
+    expect(parse(at("mat_displ.png")).candidates[0]?.channel).toBe("height");
+    expect(parse(at("mat_depth.png")).candidates[0]?.channel).toBe("height");
+  });
+
+  it("Poliigon 16-bit tokens _NRM16 / _DISP16 keep their channel", () => {
+    expect(parse(at("Poliigon_Brick_4225_NRM16.tif")).candidates[0]?.channel).toBe("normal");
+    expect(parse(at("Poliigon_Brick_4225_DISP16.tif")).candidates[0]?.channel).toBe("height");
+  });
+
+  it("cloth sheen / fuzz: _Sheen, _Fuzz, _SheenColor", () => {
+    expect(parse(at("Fabric_Sheen.png")).candidates[0]?.channel).toBe("sheen");
+    expect(parse(at("Fabric_Fuzz.png")).candidates[0]?.channel).toBe("sheen");
+    const p = parse(at("Fabric_SheenColor.png"));
+    expect(p.candidates[0]?.channel).toBe("sheen");
+    expect(p.keyTokens).toEqual(["fabric"]);
+  });
+
+  it("glass _Transmission is its own channel", () => {
+    expect(parse(at("Glass_Transmission.png")).candidates[0]?.channel).toBe("transmission");
+  });
+
+  it("GameTextures legacy _T resolves to Opacity via its pinned siblings", () => {
+    // _D pins Base Color, _N pins Normal; the ambiguous _T is left as Opacity.
+    expect(channelOf(["Crate_D.png", "Crate_N.png", "Crate_T.png"], "Crate_T.png")).toBe("opacity");
+  });
+});
+
 describe("guardrails", () => {
   it("never groups across directories — two packs' rock_D are two materials", () => {
     const items = groupTextures([f("C:\\PackA\\rock_D.png"), f("C:\\PackB\\rock_D.png")], new Map());
