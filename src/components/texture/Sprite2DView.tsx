@@ -127,9 +127,14 @@ export default function Sprite2DView({ path, ext, thumbKey, sprite, zoomFit, zoo
       )}
     >
       {sprite.enabled ? (
+        // Fill the available space like the still "fit" image below — the
+        // canvas's intrinsic size is one frame (often small), so `max-*` alone
+        // would pin it at native size and never scale up. `h-full w-full` gives
+        // it the container box; `object-contain` scales the frame to fit,
+        // letterboxed, preserving aspect ratio.
         <canvas
           ref={canvasRef}
-          className="max-h-full max-w-full object-contain"
+          className="h-full w-full object-contain"
           style={{ imageRendering: rendering }}
         />
       ) : fit ? (

@@ -139,6 +139,36 @@ function isBroken(t: THREE.Texture | null | undefined): boolean {
   return img == null || (img.width ?? 0) === 0 || (img.height ?? 0) === 0;
 }
 
+/** Neutral grey for an untextured slot — matches STL/PLY defaults and the
+ *  main-thread rescue, so every untextured model reads the same tone. */
+const NEUTRAL = 0x9a9aae;
+
+/**
+ * Normalize any still-broken base-color slot to a plain neutral surface. This
+ * is what keeps FBX thumbnails from rendering black: FBXLoader leaves a Texture
+ * whose declared image 404'd AND a dark baked diffuse, so the mesh samples an
+ * empty map (black). Clearing the dead map and resetting the colour makes an
+ * untextured FBX render the same grey an untextured OBJ already does. Runs after
+ * the atlas step, so a slot that got a real texture (isBroken=false) is skipped.
+ */
+function neutralize(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if ((mesh as unknown as { isMesh?: boolean }).isMesh !== true) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      const s = mat as THREE.MeshStandardMaterial;
+      if (!isBroken(s.map)) continue;
+      if (s.map != null) {
+        s.map.dispose();
+        s.map = null;
+      }
+      if (s.color !== undefined) s.color.set(NEUTRAL);
+      s.needsUpdate = true;
+    }
+  });
+}
+
 /**
  * Worker-local texture rescue: fill broken base-color slots with the caller's
  * chosen atlas. The atlas orientation is handled here directly (pre-flip the
@@ -187,6 +217,10 @@ async function renderOne(msg: RenderMsg): Promise<{ w: number; h: number; buf: A
       /* untextured is still a usable thumbnail */
     }
   }
+  // Anything still lacking a working base-color map (untextured FBX/OBJ, or an
+  // atlas that failed to load) becomes neutral grey rather than sampling an
+  // empty map as black.
+  neutralize(root);
   s.add(root);
   try {
     const box = new THREE.Box3().setFromObject(root);

@@ -1,10 +1,10 @@
-# Build a release and drop a standalone, portable GameFileBrowser.exe into the
+# Build a release and drop a standalone, portable GameAssetBrowser.exe into the
 # git-ignored export/ folder. Run at major milestones: `npm run export`.
 #
 # "Standalone" = the raw release binary, which runs in portable mode (it keeps
-# its data in a GameFileBrowser.data folder beside itself), so a single .exe is
+# its data in a GameAssetBrowser.data folder beside itself), so a single .exe is
 # genuinely all you need. Renamed from the crate's lowercase game-file-browser.exe
-# to GameFileBrowser.exe so the file the user double-clicks matches the product.
+# to GameAssetBrowser.exe so the file the user double-clicks matches the product.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -32,13 +32,13 @@ New-Item -ItemType Directory -Force -Path $exportDir | Out-Null
 # Stamp the export with version + short commit so it's clear what each one is.
 $version = (Get-Content (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
 $commit = (git -C $root rev-parse --short HEAD).Trim()
-$dest = Join-Path $exportDir "GameFileBrowser.exe"
+$dest = Join-Path $exportDir "GameAssetBrowser.exe"
 
 Copy-Item $builtExe $dest -Force
 
 $sizeMB = "{0:N1}" -f ((Get-Item $dest).Length / 1MB)
-"Game File Browser $version ($commit) - exported $(Get-Date -Format 'yyyy-MM-dd HH:mm')" |
+"Game Asset Browser $version ($commit) - exported $(Get-Date -Format 'yyyy-MM-dd HH:mm')" |
     Out-File -FilePath (Join-Path $exportDir "VERSION.txt") -Encoding utf8
 
-Write-Host "Exported GameFileBrowser.exe ($sizeMB MB, v$version @ $commit) to:" -ForegroundColor Green
+Write-Host "Exported GameAssetBrowser.exe ($sizeMB MB, v$version @ $commit) to:" -ForegroundColor Green
 Write-Host "  $dest"

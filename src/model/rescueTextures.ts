@@ -62,7 +62,14 @@ export async function rescueTextures(root: THREE.Object3D, path: string): Promis
   const hints = await invoke<TextureHints>("model_texture_hints", { path });
   const manual = atlasFor(path);
   if (manual === undefined) {
-    // No choice yet — leave it grey and hand the candidates to the picker.
+    // No choice yet — normalize the broken slots to a neutral grey and hand the
+    // candidates to the picker. This is what fixes "FBX renders black while OBJ
+    // renders white": FBXLoader leaves a Texture object whose image never
+    // loaded AND a dark baked diffuse, so the mesh samples an empty map and
+    // renders black. OBJ ships no such map, so its default grey shows through.
+    // Clearing the dead map and resetting the colour makes both render the
+    // same honest grey.
+    neutralize(empty);
     return { brokenSlots: empty.length, applied: null, candidates: hints.candidates };
   }
 
@@ -74,6 +81,23 @@ export async function rescueTextures(root: THREE.Object3D, path: string): Promis
   tex.flipY = manual.flipY;
   applyTexture(empty, tex);
   return { brokenSlots: empty.length, applied: manual.path, candidates: hints.candidates };
+}
+
+/** Neutral grey for an untextured slot — the same tone STL/PLY get by default,
+ *  so every untextured model reads identically regardless of loader. */
+const NEUTRAL = 0x9a9aae;
+
+/** Strip a broken map and reset the colour so an untextured slot renders as a
+ *  plain neutral surface instead of sampling an empty texture (black). */
+function neutralize(mats: THREE.MeshStandardMaterial[]): void {
+  for (const m of mats) {
+    if (m.map != null) {
+      m.map.dispose();
+      m.map = null;
+    }
+    if (m.color !== undefined) m.color.set(NEUTRAL);
+    m.needsUpdate = true;
+  }
 }
 
 /** Assign `tex` as base color on `mats`, unlit-safe. Exported so the manual

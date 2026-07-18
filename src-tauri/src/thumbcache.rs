@@ -130,13 +130,16 @@ pub fn parse_key(hex: &str) -> Option<u64> {
 }
 
 /// One-time cleanup of any on-disk cache a previous build left behind: the
-/// legacy `thumbs/` directory of loose PNGs AND the single-file `thumbs.cache`.
-/// We keep nothing on disk now, so remove both.
+/// legacy `thumbs/` directory of loose PNGs, the single-file `thumbs.cache`, and
+/// the `model-thumbs/` directory (model thumbnails were briefly persisted; they
+/// are RAM-only again now). We keep nothing on disk, so remove all of them.
 pub fn remove_legacy_dir(data_home: &std::path::Path) {
-    let dir = data_home.join("thumbs");
-    if dir.is_dir() {
-        if let Err(e) = std::fs::remove_dir_all(&dir) {
-            eprintln!("[thumbs] could not remove legacy dir {}: {e}", dir.display());
+    for name in ["thumbs", "model-thumbs"] {
+        let dir = data_home.join(name);
+        if dir.is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                eprintln!("[thumbs] could not remove legacy dir {}: {e}", dir.display());
+            }
         }
     }
     let blob = data_home.join("thumbs.cache");

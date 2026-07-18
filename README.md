@@ -1,4 +1,4 @@
-# Game File Browser
+# Game Asset Browser
 
 A sleek dark-mode game-file browser for Windows — built for navigating big
 asset packs (Synty, ambientCG/freestylized, Megascans, HDRIs) without opening an

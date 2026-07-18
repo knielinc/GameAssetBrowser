@@ -141,8 +141,15 @@ export default function AssetGrid<T>({
   const lastRow = virtualItems[virtualItems.length - 1]?.index ?? -1;
   useEffect(() => {
     if (onVisibleRange === undefined || lastRow < 0) return;
+    // Wait for a real measured width. Before layout `width` is 0, which
+    // collapses `columns` to 1 and makes `rowHeight` a wrong (tiny) estimate —
+    // the virtualizer then renders far more rows than actually fit and we'd
+    // request thumbnails for a big slab of the list instead of just what's on
+    // screen. One frame later the ResizeObserver reports the true width and
+    // this fires with the correct, small window.
+    if (width === 0) return;
     onVisibleRange(firstRow * columns, Math.min(items.length, (lastRow + 1) * columns));
-  }, [onVisibleRange, firstRow, lastRow, columns, items.length]);
+  }, [onVisibleRange, firstRow, lastRow, columns, items.length, width]);
 
   return (
     <div className="relative min-h-0 flex-1">

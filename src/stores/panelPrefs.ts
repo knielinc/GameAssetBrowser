@@ -5,7 +5,7 @@ import { create } from "zustand";
  * right inspector. Persisted to localStorage (UI chrome, off the settings
  * contract), shared so App can toggle the left panel and TabPane the right.
  */
-const KEY = "gamefilebrowser.panels";
+const KEY = "gameassetbrowser.panels";
 
 function load(): { left: boolean; right: boolean } {
   try {

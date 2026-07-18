@@ -1,4 +1,5 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import {
   ASSET_KINDS,
   EXTENSIONS,
@@ -11,8 +12,14 @@ import {
   type TabSettings,
   type ViewMode,
 } from "../types";
-import { playerSetLoop, playerSetVolume, settingsStorePath } from "../ipc/commands";
-import { defaultTabs, useLibraryStore, type TabState } from "./libraryStore";
+import {
+  playerSetLoop,
+  playerSetVolume,
+  settingsExport,
+  settingsImport,
+  settingsStorePath,
+} from "../ipc/commands";
+import { defaultTabs, rescanRoots, useLibraryStore, type TabState } from "./libraryStore";
 import { useAtlasStore } from "./atlasStore";
 import { usePlayerStore } from "./playerStore";
 
@@ -252,7 +259,18 @@ export async function loadSettings(): Promise<Settings> {
   });
   const raw = await storeHandle.get<unknown>("settings");
   const settings = sanitize(raw);
+  applySettings(settings);
+  installSubscriptions();
+  return settings;
+}
 
+/**
+ * Push a sanitized Settings into every store and sync the audio engine. Shared
+ * by startup hydration and "Import settings…", so an imported file lands
+ * identically to a persisted one. Does NOT trigger a scan — the caller decides
+ * (startup scans in main.tsx; import rescans below).
+ */
+function applySettings(settings: Settings): void {
   // Merge persisted view state onto fresh defaults so session-only fields
   // (selection, query) start clean rather than being left undefined.
   const tabs = defaultTabs();
@@ -276,10 +294,53 @@ export async function loadSettings(): Promise<Settings> {
     autoplay: settings.autoplay,
   });
 
-  // Bring the audio engine in line with the persisted preferences.
+  // Bring the audio engine in line with the preferences.
   void playerSetVolume(settings.volume);
   void playerSetLoop(settings.loop);
+}
 
-  installSubscriptions();
-  return settings;
+/**
+ * "Export settings…": write the CURRENT settings as pretty JSON to a path the
+ * user picks. Returns false if they cancel the dialog. The working settings
+ * file keeps auto-saving to its usual location — this is an extra copy.
+ */
+export async function exportSettings(): Promise<boolean> {
+  const path = await save({
+    defaultPath: "gameassetbrowser-settings.json",
+    filters: [{ name: "Settings", extensions: ["json"] }],
+  });
+  if (path === null) return false;
+  await settingsExport(path, JSON.stringify(currentSettings(), null, 2));
+  return true;
+}
+
+/**
+ * "Import settings…": read a settings file the user picks, sanitize it, apply
+ * it to every store, persist it to the working location, and rescan the new
+ * roots. Returns false if they cancel. Throws only on an unreadable/!JSON file
+ * — a structurally-wrong file is repaired by `sanitize` to defaults, never a
+ * crash.
+ */
+export async function importSettings(): Promise<boolean> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Settings", extensions: ["json"] }],
+  });
+  if (typeof picked !== "string") return false;
+  const text = await settingsImport(picked);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error("That file isn't valid JSON.");
+  }
+  const settings = sanitize(raw);
+  applySettings(settings);
+  // Subscriptions are already installed by now, so applySettings' store writes
+  // schedule a save on their own; call it explicitly too so the imported state
+  // is the file's state without waiting on the debounce.
+  saveSettings();
+  await rescanRoots(settings.roots);
+  return true;
 }

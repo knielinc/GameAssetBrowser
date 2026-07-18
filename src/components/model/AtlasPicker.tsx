@@ -45,6 +45,10 @@ export default function AtlasPicker({ modelPath, candidates, applied }: AtlasPic
     const picked = await open({
       multiple: false,
       directory: false,
+      // Start in the model's own folder — a pack's textures almost always sit
+      // beside or one level from the model, so this is one or two clicks from
+      // the target instead of wherever the dialog last opened.
+      defaultPath: modelPath.replace(/[\\/][^\\/]*$/, ""),
       filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "tga", "bmp", "webp", "dds"] }],
     });
     if (typeof picked === "string") choose(picked);

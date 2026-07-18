@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { useThumbProgress } from "../stores/thumbProgress";
 
 /**
  * Lazy model thumbnails for the visible grid window.
@@ -22,15 +23,22 @@ export function useModelThumbs(files: readonly LibFile[], enabled: boolean): (st
     if (!enabled) return;
     let off: (() => void) | undefined;
     let cancelled = false;
+    let offProgress: (() => void) | undefined;
     void import("../model/thumbQueue").then((m) => {
       if (cancelled) return;
       off = m.onModelThumb((id, key) => {
         useLibraryStore.getState().setModelThumbs([[id, key]]);
       });
+      offProgress = m.onModelThumbProgress((remaining) => {
+        useThumbProgress.getState().setModelRemaining(remaining);
+      });
     });
     return () => {
       cancelled = true;
       off?.();
+      offProgress?.();
+      // Leaving the model tab: clear the readout so a stale count doesn't linger.
+      useThumbProgress.getState().setModelRemaining(0);
     };
   }, [enabled]);
 

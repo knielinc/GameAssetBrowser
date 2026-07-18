@@ -211,9 +211,13 @@ pub fn run() {
             // "main" (capabilities/default.json and the frontend assume it).
             let mut window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-                    .title("Game File Browser")
+                    .title("Game Asset Browser")
                     .inner_size(1200.0, 760.0)
                     .min_inner_size(900.0, 600.0)
+                    // Frameless: the app draws its own title bar (TitleBar.tsx)
+                    // with minimize / maximize / fullscreen / close. The window
+                    // stays resizable from its edges on Windows despite this.
+                    .decorations(false)
                     .theme(Some(tauri::Theme::Dark))
                     .background_color(tauri::webview::Color(0x0a, 0x0a, 0x0f, 0xff));
             if let Some(dir) = webview_dir {
@@ -225,6 +229,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             portable::settings_store_path,
+            portable::settings_export,
+            portable::settings_import,
             scanner::start_scan,
             thumbs::request_thumbs,
             thumbs::model_thumb_lookup,

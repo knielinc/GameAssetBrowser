@@ -6,6 +6,51 @@ import { analyze, loadModel, type ModelStats } from "../../model/loadModel";
 import { disposeModel } from "../../model/dispose";
 import { rescueTextures, type RescueResult } from "../../model/rescueTextures";
 import { packDirOf, useAtlasStore } from "../../stores/atlasStore";
+import { useRenderPrefs, type ModelLight } from "../../stores/renderPrefs";
+
+/**
+ * Build a light rig for `mode`. Every rig keeps a hemisphere fill so nothing
+ * ever goes fully black; the key/rim placement is what changes the mood.
+ * Returned as a flat list so the viewport can swap rigs by removing the old set
+ * and adding the new one, with no other scene bookkeeping.
+ */
+function buildLightRig(mode: ModelLight): THREE.Light[] {
+  switch (mode) {
+    case "sun": {
+      // One hard, warm key from high on one side — strong shad's terminator,
+      // the "outdoor at 3pm" look. Low sky fill so the shadow side stays dark.
+      const key = new THREE.DirectionalLight(0xfff2d6, 3.4);
+      key.position.set(5, 8, 3);
+      return [key, new THREE.HemisphereLight(0x9fb4ff, 0x2a2620, 0.55)];
+    }
+    case "rim": {
+      // Dim front key + bright cool back-rim to pop the silhouette against the
+      // dark background — good for reading shape on a solid-colour model.
+      const key = new THREE.DirectionalLight(0xffffff, 1.0);
+      key.position.set(-3, 4, 6);
+      const rim = new THREE.DirectionalLight(0xbcd2ff, 3.0);
+      rim.position.set(2, 5, -6);
+      return [key, rim, new THREE.HemisphereLight(0x8fa4e0, 0x2a2a30, 0.7)];
+    }
+    case "soft": {
+      // Two gentle fills from either side + strong sky — near-shadowless, the
+      // flattering "product on a lightbox" look that hides nothing.
+      const l = new THREE.DirectionalLight(0xffffff, 1.1);
+      l.position.set(-5, 4, 4);
+      const r = new THREE.DirectionalLight(0xffffff, 1.1);
+      r.position.set(5, 3, 2);
+      return [l, r, new THREE.HemisphereLight(0xcfd8ff, 0x40403a, 1.7)];
+    }
+    case "studio":
+    default: {
+      // The original balanced rig — also what thumbnails bake with, so the
+      // grid and the detail view agree by default.
+      const key = new THREE.DirectionalLight(0xffffff, 2.2);
+      key.position.set(-4, 6, 5);
+      return [key, new THREE.HemisphereLight(0x9fb4ff, 0x33302c, 1.2)];
+    }
+  }
+}
 
 export interface ModelViewportProps {
   path: string | null;
@@ -30,9 +75,13 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const currentRef = useRef<THREE.Object3D | null>(null);
+  /** The active light rig, so a lighting change can remove exactly these. */
+  const lightsRef = useRef<THREE.Light[]>([]);
   /** Orbit state, outside React so dragging never re-renders. */
   const camRef = useRef({ yaw: 0.7, pitch: 0.35, dist: 5, target: new THREE.Vector3() });
   const dirtyRef = useRef(true);
+
+  const modelLight = useRenderPrefs((s) => s.modelLight);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,11 +110,11 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
 
     // FBXLoader downgrades materials to Phong/Lambert, which largely ignore
     // scene.environment — so ship a light rig too, or every Synty FBX renders
-    // flat and unlit.
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(-4, 6, 5);
-    scene.add(key);
-    scene.add(new THREE.HemisphereLight(0x9fb4ff, 0x33302c, 1.2));
+    // flat and unlit. The rig honours the user's chosen mode and is swapped in
+    // place by the effect below when they change it.
+    const rig = buildLightRig(useRenderPrefs.getState().modelLight);
+    for (const l of rig) scene.add(l);
+    lightsRef.current = rig;
 
     const grid = new THREE.GridHelper(20, 20, 0x2a2a38, 0x1c1c26);
     (grid.material as THREE.Material).transparent = true;
@@ -174,6 +223,17 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
       el.remove();
     };
   }, []);
+
+  // --- swap the light rig when the user changes it -------------------------
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (scene === null) return;
+    for (const l of lightsRef.current) scene.remove(l);
+    const rig = buildLightRig(modelLight);
+    for (const l of rig) scene.add(l);
+    lightsRef.current = rig;
+    dirtyRef.current = true;
+  }, [modelLight]);
 
   // --- load on path change -------------------------------------------------
   useEffect(() => {

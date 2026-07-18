@@ -73,3 +73,13 @@ export function openInExplorer(path: string): Promise<void> {
 export function settingsStorePath(): Promise<string> {
   return invoke<string>("settings_store_path");
 }
+
+/** Write a settings JSON blob to a user-chosen path ("Export settings…"). */
+export function settingsExport(path: string, contents: string): Promise<void> {
+  return invoke<void>("settings_export", { path, contents });
+}
+
+/** Read a settings JSON blob from a user-chosen path ("Import settings…"). */
+export function settingsImport(path: string): Promise<string> {
+  return invoke<string>("settings_import", { path });
+}

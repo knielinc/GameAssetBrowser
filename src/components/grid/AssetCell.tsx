@@ -22,6 +22,10 @@ export interface AssetCellProps {
    *  (ThumbGLOverlay), which paints the letterbox, checker and image behind it.
    *  `children` are ignored — the canvas is the thumbnail. */
   thumbKey?: string;
+  /** Small label pinned to the thumb's top-left — e.g. a texture's pixel
+   *  dimensions. Rendered as chrome (like badges), so it shows in GL cells too
+   *  where `children` are dropped. */
+  corner?: ReactNode;
 }
 
 function AssetCellInner({
@@ -32,6 +36,7 @@ function AssetCellInner({
   children,
   checker,
   thumbKey,
+  corner,
 }: AssetCellProps): ReactElement {
   const gl = thumbKey !== undefined;
   return (
@@ -58,6 +63,11 @@ function AssetCellInner({
         )}
       >
         {gl ? null : children}
+        {corner !== undefined && (
+          <div className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-[#0a0a0fd9] px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-text">
+            {corner}
+          </div>
+        )}
         {badges !== undefined && badges.length > 0 && (
           <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5 flex items-center gap-1">
             {badges.map((b, i) => (

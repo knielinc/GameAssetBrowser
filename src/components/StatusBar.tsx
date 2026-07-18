@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { Loader2 } from "lucide-react";
 import { basename, useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
+import { useThumbProgress } from "../stores/thumbProgress";
 import { useScopeCount } from "../hooks/useVisibleFiles";
 import { humanSize } from "./FileRow";
 import type { AssetKind } from "../types";
@@ -21,6 +22,9 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
   const folderScope = useLibraryStore((s) => s.folderScope);
   const scanning = useLibraryStore((s) => s.scanning);
   const currentPath = usePlayerStore((s) => s.currentPath);
+  // Model thumbnails render one at a time in the webview; show how many are
+  // still queued so a slow folder reads as "working", not "frozen".
+  const buildingThumbs = useThumbProgress((s) => s.modelRemaining);
 
   // Selected asset readout (bottom-right): its file size, and for an image its
   // real resolution. Subscribing to selectedPath + thumbsVersion re-runs the
@@ -58,6 +62,14 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
         <span className="flex items-center gap-1.5 text-accent">
           <Loader2 size={11} className="animate-spin" />
           scanning…
+        </span>
+      )}
+      {kind === "model" && buildingThumbs > 0 && (
+        <span className="flex items-center gap-1.5 text-accent">
+          <Loader2 size={11} className="animate-spin" />
+          <span className="tabular-nums">
+            building {buildingThumbs.toLocaleString()} {buildingThumbs === 1 ? "preview" : "previews"}…
+          </span>
         </span>
       )}
       <span className="flex-1" />

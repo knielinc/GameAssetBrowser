@@ -34,11 +34,19 @@ export default function TextureCell({ file, selected, gl }: TextureCellProps): R
     if (info.hasAlpha) badges.push({ text: "α", title: "Has an alpha channel" });
   }
 
+  // Real source resolution, once the decode lands — pinned to the corner so a
+  // 4K and a 256px atlas are told apart at a glance without opening either.
+  const dims =
+    info != null && info.sourceWidth > 0
+      ? `${info.sourceWidth.toLocaleString()}×${info.sourceHeight.toLocaleString()}`
+      : undefined;
+
   return (
     <AssetCell
       name={file.name}
       sub={humanSize(file.size)}
       badges={badges}
+      corner={dims}
       selected={selected}
       checker
       thumbKey={gl === true ? cacheKey : undefined}

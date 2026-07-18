@@ -48,7 +48,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
 
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
-      <div className="relative w-56 shrink-0">
+      <div className="relative w-56 min-w-[8rem] shrink">
         <Search
           size={13}
           className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-dim"
@@ -76,11 +76,13 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         )}
       </div>
 
-      {/* Only formats that actually exist here. No overflow scroll: the row is
-          short because the data is, and every chip can produce a result. An
-          active filter whose format left the scope stays visible, or you'd be
-          filtering by something you can no longer see or clear. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      {/* Only formats that actually exist here; an active filter whose format
+          left the scope stays visible, or you'd be filtering by something you
+          can no longer see or clear. This flexes to fill the leftover width and
+          scrolls horizontally (bar hidden) when the window is too narrow to lay
+          every chip out — chips must never wrap and clip under the fixed
+          toolbar height. */}
+      <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {chips.map(({ ext, count }) => (
           <button
             key={ext}
@@ -97,7 +99,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           <button
             type="button"
             title="Clear format filter"
-            className="text-dim transition-colors duration-[120ms] hover:text-text"
+            className="shrink-0 text-dim transition-colors duration-[120ms] hover:text-text"
             onClick={() => clearExts(kind)}
           >
             <X size={11} />
@@ -105,7 +107,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         )}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         {kind === "texture" && viewMode === "grid" && (
           <button
             type="button"

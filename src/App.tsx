@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import clsx from "clsx";
 import { FolderPlus } from "lucide-react";
 import Sidebar from "./components/Sidebar";
+import TitleBar from "./components/TitleBar";
 import TabBar from "./components/TabBar";
 import TabPane from "./components/TabPane";
 import PlayerBar from "./components/player/PlayerBar";
@@ -21,6 +22,7 @@ export default function App(): ReactElement {
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
+      <TitleBar />
       <div className="flex min-h-0 flex-1">
         {leftOpen && (
           <>

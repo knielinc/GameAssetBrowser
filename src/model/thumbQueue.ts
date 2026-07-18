@@ -86,6 +86,26 @@ export function onModelThumb(fn: Listener): () => void {
   return () => listeners.delete(fn);
 }
 
+// ── Progress ────────────────────────────────────────────────────────────────
+// How many thumbnails are still to render (queued + the one in flight). Model
+// renders are single-threaded and slow, so surfacing "N left" is the difference
+// between "the app froze" and "it's working through the folder".
+type ProgressListener = (remaining: number) => void;
+const progressListeners = new Set<ProgressListener>();
+let activeJob = false;
+export function onModelThumbProgress(fn: ProgressListener): () => void {
+  progressListeners.add(fn);
+  fn(remaining()); // hand the newcomer the current count immediately
+  return () => progressListeners.delete(fn);
+}
+function remaining(): number {
+  return queue.length + (activeJob ? 1 : 0);
+}
+function emitProgress(): void {
+  const n = remaining();
+  for (const fn of progressListeners) fn(n);
+}
+
 // ── Off-main rendering ────────────────────────────────────────────────────
 // The parse + render happen in a Web Worker on an OffscreenCanvas so the grid
 // doesn't jank. The worker returns raw pixels; storing them (Tauri invoke) and
@@ -159,8 +179,9 @@ function renderViaWorker(file: LibFileLike): Promise<WorkerResult | null> {
 
 /**
  * Queue thumbnails for the currently visible models, superseding any earlier
- * request. LIFO drain: during a fast scroll the cells under the cursor win and
- * the fly-over rows are dropped before they ever start.
+ * request: the queue is rebuilt to exactly the current window, so a fast scroll
+ * drops the fly-over rows before they ever start. The drain then works the
+ * window front-to-back (top-left downward).
  */
 export function requestModelThumbs(files: readonly LibFileLike[]): void {
   generation++;
@@ -169,6 +190,7 @@ export function requestModelThumbs(files: readonly LibFileLike[]): void {
     if (done.has(f.path)) continue;
     queue.push({ file: f, gen: generation });
   }
+  emitProgress();
   if (!draining) void drain();
 }
 
@@ -176,17 +198,28 @@ export function resetModelThumbs(): void {
   generation++;
   queue.length = 0;
   done.clear();
+  activeJob = false;
+  emitProgress();
 }
 
 async function drain(): Promise<void> {
   draining = true;
   try {
     for (;;) {
-      const job = queue.pop(); // LIFO
-      if (job === undefined) return;
+      // FIFO: the queue only ever holds the current visible window
+      // (requestModelThumbs clears it on each range change), so taking from the
+      // front fills previews in top-left → down, the order the eye scans — not
+      // bottom-up.
+      const job = queue.shift();
+      if (job === undefined) {
+        emitProgress(); // drained to empty → count is 0
+        return;
+      }
       if (job.gen !== generation) continue; // stale before it started
       if (done.has(job.file.path)) continue;
       done.add(job.file.path);
+      activeJob = true;
+      emitProgress();
 
       try {
         // Worker first (off-main). On any worker miss, render on this thread so
@@ -209,6 +242,8 @@ async function drain(): Promise<void> {
         // FBX 6100; not worth a user-facing error per cell.
         console.debug("[model-thumb]", job.file.name, err);
       }
+      activeJob = false;
+      emitProgress();
       // Yield so a 400 ms parse chain never starves input.
       await new Promise((r) => setTimeout(r, 0));
     }

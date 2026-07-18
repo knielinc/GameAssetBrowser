@@ -1,5 +1,5 @@
 //! Portable mode: when the exe is a loose standalone copy, ALL app data
-//! lives in one `GameFileBrowser.data` folder next to the exe. Installed
+//! lives in one `GameAssetBrowser.data` folder next to the exe. Installed
 //! copies (MSI/NSIS) keep using the OS-standard app-data locations.
 
 use std::fs;
@@ -45,7 +45,7 @@ impl DataHome {
 /// Everything else falls back to the OS app-data dir — the previous behavior.
 pub fn resolve(app: &tauri::App) -> Result<DataHome, Box<dyn std::error::Error>> {
     if let Some(exe_dir) = portable_exe_dir() {
-        let dir = exe_dir.join("GameFileBrowser.data");
+        let dir = exe_dir.join("GameAssetBrowser.data");
         // One call covers both: creating `webview` creates `dir` as well.
         match fs::create_dir_all(dir.join("webview")) {
             Ok(()) => return Ok(DataHome { dir, portable: true }),
@@ -106,6 +106,22 @@ pub fn settings_store_path(state: tauri::State<'_, DataHome>) -> Result<String, 
                 PathBuf::from(raw).display()
             )
         })
+}
+
+/// Write a settings JSON blob to a user-chosen path (the "Export settings…"
+/// action). The path comes from the frontend's save dialog; we only write what
+/// we're handed, so there's nothing to sanitize here.
+#[tauri::command]
+pub fn settings_export(path: String, contents: String) -> Result<(), String> {
+    fs::write(&path, contents).map_err(|e| format!("could not write {path}: {e}"))
+}
+
+/// Read a settings JSON blob from a user-chosen path (the "Import settings…"
+/// action). Returns the raw text; the frontend sanitizes it before applying, so
+/// a hand-edited or foreign file can never crash the app.
+#[tauri::command]
+pub fn settings_import(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| format!("could not read {path}: {e}"))
 }
 
 /// The exe's directory iff it qualifies as a portable install location.

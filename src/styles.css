@@ -75,6 +75,14 @@ textarea {
   background: transparent;
 }
 
+/* Opt-out for strips that scroll but are too short to host a 10px bar — the
+   toolbar's filter chips scroll horizontally when the window is narrow, and a
+   scrollbar in a 28px-tall row would eat the chips. WebView2 is Chromium, so
+   the webkit pseudo-element is all we need. */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* ---------------------------------------------------------- components --- */
 
 /* Virtualized list rows: subtle raise on hover, accent tint + left bar when
