@@ -334,7 +334,7 @@ impl Engine {
                 return;
             }
         };
-        let source = match Decoder::new(BufReader::new(file)) {
+        let mut source = match Decoder::new(BufReader::new(file)) {
             Ok(s) => s,
             Err(e) => {
                 let msg = format!("Unsupported or corrupt audio file: {e}");
@@ -342,6 +342,19 @@ impl Engine {
                 return;
             }
         };
+        // Decode-forward to the target by discarding samples. The OGG format
+        // seek panics in symphonia, and the lazy `skip_duration` didn't advance
+        // it, so skip explicitly. Runs on this thread — instant for WAV, a brief
+        // silent pause for a far compressed seek, but it lands on the cursor.
+        if !target.is_zero() {
+            let per_sec = source.sample_rate() as u64 * source.channels().max(1) as u64;
+            let to_skip = (target.as_secs_f64() * per_sec as f64) as u64;
+            for _ in 0..to_skip {
+                if source.next().is_none() {
+                    break;
+                }
+            }
+        }
         let sink = match Sink::try_new(&handle) {
             Ok(s) => s,
             Err(e) => {
@@ -354,7 +367,7 @@ impl Engine {
         if paused {
             sink.pause();
         }
-        sink.append(source.skip_duration(target));
+        sink.append(source);
         self.seek_base = target;
         self.last_pos = Duration::ZERO;
         self.stalled_ticks = 0;
