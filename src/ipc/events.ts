@@ -9,12 +9,18 @@ import {
   type PositionPayload,
   type ScanBatch,
   type ScanDone,
+  type SpectrogramReady,
   type StatePayload,
   type ThumbBatch,
   type WaveformReady,
 } from "../types";
 import { useLibraryStore, type LibraryState } from "../stores/libraryStore";
-import { positionRef, usePlayerStore, usePositionStore } from "../stores/playerStore";
+import {
+  maybeAutoAdvance,
+  positionRef,
+  usePlayerStore,
+  usePositionStore,
+} from "../stores/playerStore";
 
 let initialized = false;
 
@@ -129,6 +135,18 @@ export function initIpcEvents(): void {
     usePlayerStore.setState({ peaks: new Float32Array(peaks) });
   });
 
+  void listen<SpectrogramReady>(EVT.SPECTROGRAM_READY, (event) => {
+    const { path, width, height, data } = event.payload;
+    // Guard on currentPath (not selectedPath): the spectrogram belongs to the
+    // LOADED track, which a hover preview can move without selecting.
+    if (path !== usePlayerStore.getState().currentPath) return;
+    // Base64 → bytes. atob is fine at this size (≤ 128 KB decoded).
+    const bin = atob(data);
+    const bytes = new Uint8ClampedArray(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    usePlayerStore.setState({ spectrogram: { path, width, height, data: bytes } });
+  });
+
   void listen<PositionPayload>(EVT.PLAYBACK_POSITION, (event) => {
     const { path, seconds, playing } = event.payload;
     // Drop ticks from a track that is no longer current — during the
@@ -161,6 +179,9 @@ export function initIpcEvents(): void {
         positionRef.playing = false;
         positionRef.seconds = 0;
         usePositionStore.setState({ seconds: 0 });
+        // After the reset, not instead of it: if auto-advance declines (off,
+        // end of list, hover preview), the rewound-and-paused state stands.
+        maybeAutoAdvance();
         break;
       case "stopped":
         usePlayerStore.setState({ playing: false });

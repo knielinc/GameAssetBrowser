@@ -39,6 +39,7 @@ pub mod events {
     pub const META_AUDIO: &str = "meta:audio";
     pub const META_DIMENSIONS: &str = "meta:dimensions";
     pub const WAVEFORM_READY: &str = "waveform:ready";
+    pub const SPECTROGRAM_READY: &str = "spectrogram:ready";
     pub const PLAYBACK_POSITION: &str = "playback:position";
     pub const PLAYBACK_STATE: &str = "playback:state";
     pub const THUMB_READY: &str = "thumb:ready";
@@ -148,6 +149,20 @@ pub struct WaveformReady {
     pub path: String,
     pub bins: u32,
     pub peaks: Vec<f32>,
+}
+
+/// One rendered spectrogram image. `data` is base64 of `width × height`
+/// row-major u8 magnitudes (0 = silence floor, 255 = peak), row 0 at the TOP
+/// (highest frequency) so the frontend's ImageData needs no flip. Base64
+/// because a 1024×128 image as a JSON number array would be ~half a MB of
+/// digits; keyed by path like the waveform, so no scan generation is needed.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpectrogramReady {
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    pub data: String,
 }
 
 /// Duplicate-hunt progress: `done` of `total` size-collision candidates

@@ -1,16 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { scopePredicate, useLibraryStore } from "../stores/libraryStore";
 import { channelGroupOf } from "../material/classify";
-import { inRange, isPot } from "./useVisibleFiles";
+import {
+  audioChannelGroupOf,
+  colorBucketOf,
+  inRange,
+  isPot,
+  sampleRateBucketOf,
+} from "./useVisibleFiles";
 import { type MaterialMembership } from "./useMaterialMembership";
 import {
+  AUDIO_CHANNEL_GROUPS,
   CHANNEL_GROUPS,
+  COLOR_BUCKETS,
   EXTENSIONS,
   MIB,
+  SAMPLE_RATE_BUCKETS,
   rangeActive,
   type AssetKind,
+  type AudioChannelGroup,
   type ChannelGroup,
+  type ColorBucket,
   type RangeFilter,
+  type SampleRateBucket,
 } from "../types";
 
 // Private twin of useVisibleFiles' debounce (not exported there on purpose).
@@ -66,6 +78,16 @@ export interface FacetCounts {
   duration: RangeHistogram | null;             // audio only; null otherwise
   /** texture: scope-present groups ∪ selected, CHANNEL_GROUPS order; else []. */
   channels: FacetOption<ChannelGroup>[];
+  /** texture: measured-present buckets ∪ selected, COLOR_BUCKETS order; else [].
+   *  Presence needs a landed thumb (color is thumb-derived), so swatches grow
+   *  in as decode batches arrive — same canonical order, never a reshuffle. */
+  colors: FacetOption<ColorBucket>[];
+  /** audio: measured-present groups ∪ selected, AUDIO_CHANNEL_GROUPS order;
+   *  else []. */
+  audioChannels: FacetOption<AudioChannelGroup>[];
+  /** audio: measured-present buckets ∪ selected, SAMPLE_RATE_BUCKETS order;
+   *  else []. */
+  sampleRates: FacetOption<SampleRateBucket>[];
   /** texture with a non-null membership map: the single "Material" row
    *  (member of a material group), self-excluded. null otherwise. */
   material: ShapeRow | null;
@@ -94,7 +116,10 @@ const SQ = 32;
 const POT = 64;
 const SIZE = 128;
 const MOD = 256;
-const FULL = 511;
+const COLOR = 512;
+const ACHAN = 1024;
+const RATE = 2048;
+const FULL = 4095;
 
 function zeroRecord<K extends string>(keys: readonly K[]): Record<K, number> {
   const out = {} as Record<K, number>;
@@ -182,6 +207,10 @@ export function useFacetCounts(
   const durationsVersion = useLibraryStore((s) => s.durationsVersion);
   const dims = useLibraryStore((s) => s.dims);
   const dimsVersion = useLibraryStore((s) => s.dimsVersion);
+  const audioMeta = useLibraryStore((s) => s.audioMeta);
+  const audioMetaVersion = useLibraryStore((s) => s.audioMetaVersion);
+  const thumbs = useLibraryStore((s) => s.thumbs);
+  const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
   const debouncedQuery = useDebounced(query, 100);
 
   return useMemo(() => {
@@ -200,6 +229,9 @@ export function useFacetCounts(
     const potActive = kind === "texture" && flt.pot;
     const sizeActive = kind === "model" && rangeActive(flt.size);
     const modActive = rangeActive(flt.modified);
+    const colorActive = kind === "texture" && flt.colors.size > 0;
+    const achanActive = kind === "audio" && flt.audioChannels.size > 0;
+    const srActive = kind === "audio" && flt.sampleRates.size > 0;
 
     // Size is stored in MB; compare in bytes, converted once outside the loop.
     const sizeBytes: RangeFilter = {
@@ -217,11 +249,17 @@ export function useFacetCounts(
     if (potActive) base &= ~POT;
     if (sizeActive) base &= ~SIZE;
     if (modActive) base &= ~MOD;
+    if (colorActive) base &= ~COLOR;
+    if (achanActive) base &= ~ACHAN;
+    if (srActive) base &= ~RATE;
 
     // Range facets collect self-excluded measured VALUES for the histogram;
     // multi-select facets keep small fixed count records.
     const extHist = new Map<string, number>();
     const chanHist = zeroRecord(CHANNEL_GROUPS);
+    const colorHist = zeroRecord(COLOR_BUCKETS);
+    const achanHist = zeroRecord(AUDIO_CHANNEL_GROUPS);
+    const rateHist = zeroRecord(SAMPLE_RATE_BUCKETS);
     let matCount = 0;
     const durValues: number[] = [];   // seconds
     const resValues: number[] = [];   // px (max edge)
@@ -237,9 +275,14 @@ export function useFacetCounts(
     let potCount = 0;
 
     // Row sets are scope-only presence — stable under other facets and the
-    // query, so rows never appear/disappear as the user narrows.
+    // query, so rows never appear/disappear as the user narrows. The three
+    // probe-derived sets below additionally need a measurement to exist —
+    // scope-stable once measured, growing only as batches land.
     const presentExts = new Set<string>();
     const presentChans = new Set<ChannelGroup>();
+    const presentColors = new Set<ColorBucket>();
+    const presentAChans = new Set<AudioChannelGroup>();
+    const presentRates = new Set<SampleRateBucket>();
 
     let scoped = 0;
     let visible = 0;
@@ -258,6 +301,18 @@ export function useFacetCounts(
       const d = kind === "audio" ? durations.get(f.id) : undefined;
       const dm = kind === "texture" ? dims.get(f.id) : undefined;
       const edge = dm === undefined ? null : Math.max(dm[0], dm[1]);
+      // Probe-derived bucket memberships, computed once per file and reused
+      // for presence, predicate, and numerator — the channelGroupOf pattern.
+      // null = unmeasured (no thumb yet / a probe field the decoder couldn't
+      // read, which A1's probe reports as 0).
+      const ti = kind === "texture" ? thumbs.get(f.id)?.info : undefined;
+      const cb = ti == null ? null : colorBucketOf(ti.meanR, ti.meanG, ti.meanB);
+      const am = kind === "audio" ? audioMeta.get(f.id) : undefined;
+      const ag = am !== undefined && am[1] > 0 ? audioChannelGroupOf(am[1]) : null;
+      const rb = am !== undefined && am[0] > 0 ? sampleRateBucketOf(am[0]) : null;
+      if (cb !== null) presentColors.add(cb);
+      if (ag !== null) presentAChans.add(ag);
+      if (rb !== null) presentRates.add(rb);
       if (d !== undefined) widen(durDomain, d);
       if (edge !== null) widen(resDomain, edge);
       if (kind === "model") widen(sizeDomain, f.size / MIB);
@@ -283,12 +338,18 @@ export function useFacetCounts(
       if (potActive && (dm === undefined || (isPot(dm[0]) && isPot(dm[1])))) mask |= POT;
       if (sizeActive && inRange(f.size, sizeBytes)) mask |= SIZE; // always measured
       if (modActive && inRange(f.modified, flt.modified)) mask |= MOD; // always measured
+      if (colorActive && (cb === null || flt.colors.has(cb))) mask |= COLOR;
+      if (achanActive && (ag === null || flt.audioChannels.has(ag))) mask |= ACHAN;
+      if (srActive && (rb === null || flt.sampleRates.has(rb))) mask |= RATE;
 
       // Numerators are measured-only: an unmeasured file sits in no bucket
       // (while `visible` still keeps it — the documented discrepancy).
       if ((mask | EXT) === FULL) extHist.set(f.ext, (extHist.get(f.ext) ?? 0) + 1);
       if (d !== undefined && (mask | DUR) === FULL) durValues.push(d);
       if (g !== null && (mask | CHAN) === FULL) chanHist[g]++;
+      if (cb !== null && (mask | COLOR) === FULL) colorHist[cb]++;
+      if (ag !== null && (mask | ACHAN) === FULL) achanHist[ag]++;
+      if (rb !== null && (mask | RATE) === FULL) rateHist[rb]++;
       if (mem === "grouped" && (mask | MAT) === FULL) matCount++;
       if (edge !== null && (mask | RES) === FULL) resValues.push(edge);
       if (dm !== undefined) {
@@ -315,11 +376,42 @@ export function useFacetCounts(
             count: chanHist[c],
             selected: flt.channels.has(c),
           }));
+    const colors =
+      kind !== "texture"
+        ? []
+        : COLOR_BUCKETS.filter((c) => presentColors.has(c) || flt.colors.has(c)).map((c) => ({
+            value: c,
+            count: colorHist[c],
+            selected: flt.colors.has(c),
+          }));
+    const audioChannels =
+      kind !== "audio"
+        ? []
+        : AUDIO_CHANNEL_GROUPS.filter(
+            (c) => presentAChans.has(c) || flt.audioChannels.has(c),
+          ).map((c) => ({
+            value: c,
+            count: achanHist[c],
+            selected: flt.audioChannels.has(c),
+          }));
+    const sampleRates =
+      kind !== "audio"
+        ? []
+        : SAMPLE_RATE_BUCKETS.filter((r) => presentRates.has(r) || flt.sampleRates.has(r)).map(
+            (r) => ({
+              value: r,
+              count: rateHist[r],
+              selected: flt.sampleRates.has(r),
+            }),
+          );
 
     return {
       format,
       duration: kind !== "audio" ? null : histogram(durValues, true, asRangeDomain(durDomain)),
       channels,
+      colors,
+      audioChannels,
+      sampleRates,
       material:
         kind !== "texture" || membership === null
           ? null
@@ -337,5 +429,5 @@ export function useFacetCounts(
       visible,
       scoped,
     };
-  }, [kind, allFiles, folderScopes, hiddenFolders, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, membership]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
 }

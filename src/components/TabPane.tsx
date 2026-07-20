@@ -16,6 +16,7 @@ import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
 import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { useFavoritesStore } from "../stores/favoritesStore";
+import { audioVisibleRef } from "../stores/playerStore";
 import { publishShuffleSource } from "../stores/shuffle";
 import { showInExplorer } from "../ipc/commands";
 import { revealInNavigator } from "../stores/revealFolder";
@@ -84,6 +85,13 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   useEffect(() => {
     publishShuffleSource(visibleKeys, visible);
   }, [visibleKeys, visible]);
+
+  // Auto-advance's "next file" order. Deliberately NOT cleared on unmount:
+  // audio keeps playing while the user browses another tab, and advancing
+  // through the last-rendered audio order is exactly what they'd expect.
+  useEffect(() => {
+    if (kind === "audio") audioVisibleRef.current = visible;
+  }, [kind, visible]);
 
   const [preview, setPreview] = useState<LibFile | null>(null);
   // Recents: opening a fullscreen texture/model preview is this pane's

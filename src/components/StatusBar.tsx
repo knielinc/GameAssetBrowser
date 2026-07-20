@@ -16,6 +16,9 @@ const FACET_LABEL: Record<keyof TabFilterSettings, string> = {
   square: "Square",
   pot: "Power of two",
   size: "File size",
+  colors: "Color",
+  audioChannels: "Channels",
+  sampleRates: "Sample rate",
 };
 
 /** Comma-joined active facet names for the "· filtered" tooltip. */

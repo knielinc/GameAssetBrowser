@@ -113,6 +113,11 @@ webp = "0.3"
 # cryptographic on purpose, it only needs to be fast and collision-checked by
 # the full-file confirm pass.
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+# Spectrogram STFT (spectrogram.rs); base64 ships the u8 image over the event
+# without half a megabyte of JSON digits (0.22 is already in the tree
+# transitively via tauri's deps).
+rustfft = "6"
+base64 = "0.22"
 
 # Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs).
 # Same 0.61 tauri/tao already use, so no new crate in the tree.

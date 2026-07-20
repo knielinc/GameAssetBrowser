@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { basename, useLibraryStore } from "../../stores/libraryStore";
 import { usePlayerStore } from "../../stores/playerStore";
+import SpeedControl from "./SpeedControl";
 import TimeDisplay from "./TimeDisplay";
 import TransportControls from "./TransportControls";
 import VolumeSlider from "./VolumeSlider";
@@ -41,6 +42,7 @@ export default function PlayerBar(): ReactElement {
         </div>
       </div>
 
+      <SpeedControl />
       <VolumeSlider />
     </footer>
   );

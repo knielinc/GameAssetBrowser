@@ -97,6 +97,10 @@ export interface FileRowProps {
   /** Carries the click event so the pane can read Ctrl/Shift modifiers. */
   onSelect: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  /** Hover-preview dwell (audio list, only when the setting is on). The enter
+   *  handler gets the event so the pane can ignore hovers mid-drag. */
+  onHoverStart?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  onHoverEnd?: (index: number) => void;
 }
 
 function FileRowInner({
@@ -115,6 +119,8 @@ function FileRowInner({
   playing,
   onSelect,
   onContextMenu,
+  onHoverStart,
+  onHoverEnd,
 }: FileRowProps): ReactElement {
   return (
     <div
@@ -129,6 +135,8 @@ function FileRowInner({
         e.preventDefault();
         onContextMenu(index, e);
       }}
+      onMouseEnter={onHoverStart === undefined ? undefined : (e) => onHoverStart(index, e)}
+      onMouseLeave={onHoverEnd === undefined ? undefined : () => onHoverEnd(index)}
     >
       <div className="flex min-w-0 items-center gap-2">
         {/* Fixed slot (not hover-inserted) so names never shift; invisible

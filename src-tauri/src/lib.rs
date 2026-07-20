@@ -6,6 +6,7 @@ mod metadata;
 mod modeltex;
 mod portable;
 mod scanner;
+mod spectrogram;
 mod texmeta;
 mod thumbcache;
 mod thumbs;
@@ -97,6 +98,7 @@ pub fn run() {
         .manage(scanner::ScanState::default())
         .manage(watcher::WatcherState::default())
         .manage(waveform::WaveformState::default())
+        .manage(spectrogram::SpectrogramState::default())
         .manage(dupes::DupeState::default())
         .manage(thumbs::ThumbState::default())
         .manage(thumbs::PreviewState::default())
@@ -275,6 +277,7 @@ pub fn run() {
             modeltex::model_texture_hints,
             scanner::approve_texture,
             waveform::request_waveform,
+            spectrogram::request_spectrogram,
             dupes::find_duplicates,
             dupes::cancel_duplicates,
             explorer::show_in_explorer,
@@ -286,6 +289,7 @@ pub fn run() {
             audio::commands::player_seek,
             audio::commands::player_set_volume,
             audio::commands::player_set_loop,
+            audio::commands::player_set_speed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

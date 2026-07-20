@@ -50,6 +50,7 @@ fn run(app: AppHandle, rx: Receiver<PlayerCmd>) {
         sink: None,
         path: None,
         volume: 1.0,
+        speed: 1.0,
         loop_enabled: false,
         last_pos: Duration::ZERO,
         stalled_ticks: 0,
@@ -107,6 +108,10 @@ struct Engine {
     /// Path of the currently (or most recently) loaded track.
     path: Option<String>,
     volume: f32,
+    /// Playback rate (0.25–2.0). Session-lived like volume: sinks are rebuilt
+    /// on every load/seek, so the current speed must be re-applied to each
+    /// fresh sink or a seek would silently snap back to 1×.
+    speed: f32,
     loop_enabled: bool,
     /// Watchdog: last observed playback position, and how many consecutive
     /// ticks it failed to advance while supposedly playing.
@@ -127,6 +132,7 @@ impl Engine {
             PlayerCmd::Seek { seconds } => self.seek(seconds),
             PlayerCmd::SetVolume(volume) => self.set_volume(volume),
             PlayerCmd::SetLoop(enabled) => self.loop_enabled = enabled,
+            PlayerCmd::SetSpeed(speed) => self.set_speed(speed),
         }
     }
 
@@ -198,8 +204,20 @@ impl Engine {
         }
 
         if let Some(path) = &self.path {
-            emit_position(&self.app, path, (self.seek_base + pos).as_secs_f64(), true);
+            let seconds = self.source_pos(pos).as_secs_f64();
+            emit_position(&self.app, path, seconds, true);
         }
+    }
+
+    /// Translate a raw `sink.get_pos()` into source-time. rodio 0.20 builds
+    /// its sink chain as `.speed(1.0).track_position()` — the position tracker
+    /// sits OUTSIDE the speed wrapper and divides by the speed-scaled sample
+    /// rate, so `get_pos` advances at wall-clock rate regardless of speed (the
+    /// Sink::get_pos docs state this: at 2× a reported 5 s means 10 s into the
+    /// recording). Scale by the current speed; `set_speed` rebases `seek_base`
+    /// on every change so past segments at other speeds stay accounted for.
+    fn source_pos(&self, raw: Duration) -> Duration {
+        self.seek_base + raw.mul_f64(self.speed as f64)
     }
 
     fn load(&mut self, path: String, autoplay: bool) {
@@ -248,6 +266,7 @@ impl Engine {
         };
 
         sink.set_volume(self.volume);
+        sink.set_speed(self.speed);
         if !autoplay {
             // Pause before append so no samples slip out.
             sink.pause();
@@ -283,7 +302,8 @@ impl Engine {
         sink.pause();
         emit_state(&self.app, self.path.clone(), "paused", None);
         if let Some(path) = &self.path {
-            emit_position(&self.app, path, (self.seek_base + sink.get_pos()).as_secs_f64(), false);
+            let seconds = self.source_pos(sink.get_pos()).as_secs_f64();
+            emit_position(&self.app, path, seconds, false);
         }
     }
 
@@ -364,6 +384,7 @@ impl Engine {
         };
 
         sink.set_volume(self.volume);
+        sink.set_speed(self.speed);
         if paused {
             sink.pause();
         }
@@ -411,6 +432,24 @@ impl Engine {
         if let Some(sink) = &self.sink {
             sink.set_volume(self.volume);
         }
+    }
+
+    fn set_speed(&mut self, speed: f32) {
+        if !speed.is_finite() {
+            return;
+        }
+        let next = speed.clamp(0.25, 2.0);
+        if let Some(sink) = &self.sink {
+            // Rebase before switching: `get_pos` segments played at the OLD
+            // speed must keep their old scale (see source_pos). Fold the
+            // source position so far into seek_base such that
+            // `seek_base + raw × next` is continuous at the change instant.
+            let raw = sink.get_pos();
+            let so_far = self.source_pos(raw);
+            self.seek_base = so_far.saturating_sub(raw.mul_f64(next as f64));
+            sink.set_speed(next);
+        }
+        self.speed = next;
     }
 }
 

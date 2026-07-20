@@ -9,7 +9,9 @@
 //   player_seek         { seconds: number }
 //   player_set_volume   { volume: number }              // 0..1
 //   player_set_loop     { enabled: boolean }
+//   player_set_speed    { speed: number }               // 0.25..2, clamped in the engine
 //   request_waveform    { path: string, bins: number }  // result arrives via EVT.WAVEFORM_READY
+//   request_spectrogram { path: string }                // result arrives via EVT.SPECTROGRAM_READY
 //   show_in_explorer    { path: string }                // reveal file in Windows Explorer; rejects if path is gone
 //   open_in_explorer    { path: string }                // open a folder window in Explorer; rejects if not a directory
 //   settings_store_path {}                              → Promise<string> (absolute settings.json path, portable-aware)
@@ -72,6 +74,17 @@ export interface WaveformReady {
   peaks: number[];
 }
 
+/** One rendered spectrogram: `data` is base64 of `width × height` row-major
+ *  u8 magnitudes (0 = silence floor, 255 = peak), row 0 at the TOP (highest
+ *  frequency) so it maps straight onto an ImageData. Keyed by path like the
+ *  waveform — no scan generation needed. */
+export interface SpectrogramReady {
+  path: string;
+  width: number;
+  height: number;
+  data: string;
+}
+
 export interface PositionPayload {
   path: string;
   seconds: number;
@@ -92,6 +105,7 @@ export const EVT = {
   META_AUDIO: "meta:audio",
   META_DIMENSIONS: "meta:dimensions",
   WAVEFORM_READY: "waveform:ready",
+  SPECTROGRAM_READY: "spectrogram:ready",
   PLAYBACK_POSITION: "playback:position",
   PLAYBACK_STATE: "playback:state",
   THUMB_READY: "thumb:ready",
@@ -209,6 +223,44 @@ export const CHANNEL_GROUP_LABEL: Record<ChannelGroup, string> = {
   packed: "Packed", other: "Other",
 };
 
+/**
+ * Color facet vocabulary over ThumbInfo.meanR/G/B (0–1 sRGB means from the
+ * thumbnail decode). Canonical order — swatches render in it so they never
+ * reshuffle. Lightness and saturation outrank hue (a near-black red reads as
+ * "dark", not "red"); the classifier (useVisibleFiles.colorBucketOf) uses:
+ *
+ *   lightness < 0.13 → dark      hue table (degrees):
+ *   lightness > 0.87 → light       red    345–15    cyan   165–200
+ *   saturation < 0.12 → gray       orange  15–45    blue   200–255
+ *   else → hue bucket              yellow  45–70    purple 255–290
+ *                                  green   70–165   pink   290–345
+ */
+export const COLOR_BUCKETS = ["red", "orange", "yellow", "green", "cyan", "blue",
+  "purple", "pink", "dark", "light", "gray"] as const;
+export type ColorBucket = (typeof COLOR_BUCKETS)[number];
+export const COLOR_BUCKET_LABEL: Record<ColorBucket, string> = {
+  red: "Red", orange: "Orange", yellow: "Yellow", green: "Green", cyan: "Cyan",
+  blue: "Blue", purple: "Purple", pink: "Pink", dark: "Dark", light: "Light",
+  gray: "Gray",
+};
+
+/** Audio channel-layout facet vocabulary: 1 / 2 / >2 channels from the audio
+ *  probe (AudioMetaBatch). 0 channels = unmeasured, which is no bucket. */
+export const AUDIO_CHANNEL_GROUPS = ["mono", "stereo", "multi"] as const;
+export type AudioChannelGroup = (typeof AUDIO_CHANNEL_GROUPS)[number];
+export const AUDIO_CHANNEL_GROUP_LABEL: Record<AudioChannelGroup, string> = {
+  mono: "Mono", stereo: "Stereo", multi: "Multi",
+};
+
+/** Sample-rate facet vocabulary — the canonical tiers audio actually ships in.
+ *  Real rates bucket to the nearest tier at or above (a 24k file lands in 32k;
+ *  see useVisibleFiles.sampleRateBucketOf), so odd rates never vanish. */
+export const SAMPLE_RATE_BUCKETS = ["le22", "32k", "44k", "48k", "hi"] as const;
+export type SampleRateBucket = (typeof SAMPLE_RATE_BUCKETS)[number];
+export const SAMPLE_RATE_BUCKET_LABEL: Record<SampleRateBucket, string> = {
+  le22: "≤22.05k", "32k": "32k", "44k": "44.1k", "48k": "48k", hi: "88.2k+",
+};
+
 /** Persisted twin of TabState.filters (Sets → arrays; RangeFilter is already
  *  plain JSON and persists as-is). */
 export interface TabFilterSettings {
@@ -220,6 +272,9 @@ export interface TabFilterSettings {
   square: boolean;             // texture only
   pot: boolean;                // texture only
   size: RangeFilter;           // model only — MB (× MIB internally)
+  colors: string[];            // ColorBucket[] — texture only
+  audioChannels: string[];     // AudioChannelGroup[] — audio only
+  sampleRates: string[];       // SampleRateBucket[] — audio only
 }
 
 /**
@@ -228,8 +283,8 @@ export interface TabFilterSettings {
  * shown nor restored.
  */
 export const FILTER_FACETS_BY_KIND = {
-  audio: ["duration", "modified"],
-  texture: ["channels", "material", "res", "square", "pot", "modified"],
+  audio: ["duration", "audioChannels", "sampleRates", "modified"],
+  texture: ["channels", "material", "colors", "res", "square", "pot", "modified"],
   model: ["size", "modified"],
 } as const satisfies Record<AssetKind, readonly (keyof TabFilterSettings)[]>;
 
@@ -275,6 +330,11 @@ export interface Settings {
   volume: number;
   loop: boolean;
   autoplay: boolean;
+  /** When a track ends (loop off), advance to the next visible audio file and
+   *  play it — the player-bar toggle next to loop. */
+  autoAdvance: boolean;
+  /** Hovering an audio row for ~350 ms auditions it without selecting it. */
+  hoverPreview: boolean;
   activeTab: AssetKind;
   tabs: Record<AssetKind, TabSettings>;
   /** Selected parent folders scoping the file list; empty = whole library.

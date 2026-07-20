@@ -23,7 +23,7 @@ import { showInExplorer } from "../ipc/commands";
 import { activeFilterCount, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { revealInNavigator } from "../stores/revealFolder";
 import { toggleFavoriteSmart, useFavoritesStore } from "../stores/favoritesStore";
-import { loadAndSelect, usePlayerStore } from "../stores/playerStore";
+import { hoverPlay, hoverStop, loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import type { TextureItem } from "../material/classify";
 import ContextMenu from "./ContextMenu";
@@ -31,6 +31,9 @@ import CollectionPopup from "./CollectionPopup";
 import FileRow, { MaterialRow, rowGrid } from "./FileRow";
 
 const ROW_HEIGHT = 28;
+/** Hover-preview dwell before a row auditions — long enough that mousing
+ *  across the list to the scrollbar doesn't fire a stray play. */
+const HOVER_PREVIEW_MS = 350;
 
 interface HeaderSpec {
   field: SortField;
@@ -210,6 +213,43 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
     loadAndSelect(filesRef.current[index]!, index);
   }, []);
 
+  // Hover preview (audio only, opt-in): a 350 ms dwell on a row auditions it
+  // without selecting; leaving cancels the pending timer or stops a fired
+  // preview. hoverStop() is a no-op once a deliberate gesture (click/arrow)
+  // claims playback, so click-then-leave never cuts the chosen track.
+  const hoverPreview = usePlayerStore((s) => s.hoverPreview);
+  const hoverTimerRef = useRef<number | undefined>(undefined);
+  const onRowHoverStart = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
+    // Any held button (drag-select, scrollbar drag passing over rows, an
+    // in-progress click) suppresses the preview outright.
+    if (e.buttons !== 0) return;
+    if (hoverTimerRef.current !== undefined) window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = undefined;
+      const file = filesRef.current[index];
+      if (file !== undefined) hoverPlay(file);
+    }, HOVER_PREVIEW_MS);
+  }, []);
+  const cancelHoverTimer = useCallback(() => {
+    if (hoverTimerRef.current !== undefined) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = undefined;
+    }
+  }, []);
+  const onRowHoverEnd = useCallback(() => {
+    cancelHoverTimer();
+    hoverStop();
+  }, [cancelHoverTimer]);
+  // Keyboard tab switches unmount the pane with no mouseleave — don't leave a
+  // timer armed or a preview sounding.
+  useEffect(
+    () => () => {
+      if (hoverTimerRef.current !== undefined) window.clearTimeout(hoverTimerRef.current);
+      hoverStop();
+    },
+    [],
+  );
+
   // Stable like onSelect, resolved through the same refs. Grouped material
   // rows have no star slot, so only file-backed rows land here.
   const onToggleStar = useCallback((index: number) => {
@@ -306,7 +346,14 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
           )}
         </div>
       ) : (
-        <div ref={parentRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-scroll">
+        <div
+          ref={parentRef}
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-scroll"
+          // A press anywhere in the list (click, drag, scrollbar) kills any
+          // pending hover-preview dwell — enter-time e.buttons only catches
+          // buttons held BEFORE the row was entered. No-op on non-audio.
+          onMouseDownCapture={cancelHoverTimer}
+        >
           <div
             style={{
               height: `${virtualizer.getTotalSize()}px`,
@@ -372,6 +419,8 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                       playing={kind === "audio" && playing && file!.path === currentPath}
                       onSelect={onSelect}
                       onContextMenu={onRowContextMenu}
+                      onHoverStart={kind === "audio" && hoverPreview ? onRowHoverStart : undefined}
+                      onHoverEnd={kind === "audio" && hoverPreview ? onRowHoverEnd : undefined}
                     />
                   )}
                 </div>

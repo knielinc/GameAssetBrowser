@@ -16,6 +16,9 @@ pub enum PlayerCmd {
     Seek { seconds: f64 },
     SetVolume(f32),
     SetLoop(bool),
+    /// Playback rate 0.25–2.0 (clamped in the engine). rodio's speed is a
+    /// resample, so pitch shifts with it — accepted for auditioning.
+    SetSpeed(f32),
 }
 
 /// Managed state: the only handle the rest of the app holds to the engine.

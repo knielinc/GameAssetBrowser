@@ -39,6 +39,12 @@ export default function FilterMenu({ kind }: { kind: AssetKind }): ReactElement 
         return extFilter.size;
       case "duration":
         return rangeActive(filters.duration) ? 1 : 0;
+      case "audioChannels":
+        return filters.audioChannels.size;
+      case "sampleRate":
+        return filters.sampleRates.size;
+      case "color":
+        return filters.colors.size;
       case "material":
         // The group hosts membership AND the channel rows — badge both.
         return (filters.material ? 1 : 0) + filters.channels.size;

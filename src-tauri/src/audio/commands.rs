@@ -39,3 +39,8 @@ pub fn player_set_volume(state: State<'_, AudioController>, volume: f32) {
 pub fn player_set_loop(state: State<'_, AudioController>, enabled: bool) {
     state.send(PlayerCmd::SetLoop(enabled));
 }
+
+#[tauri::command]
+pub fn player_set_speed(state: State<'_, AudioController>, speed: f32) {
+    state.send(PlayerCmd::SetSpeed(speed));
+}

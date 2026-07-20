@@ -38,9 +38,19 @@ export function playerSetLoop(enabled: boolean): Promise<void> {
   return invoke<void>("player_set_loop", { enabled });
 }
 
+/** Playback rate; the engine clamps to 0.25..2 (rodio resamples, so pitch shifts too). */
+export function playerSetSpeed(speed: number): Promise<void> {
+  return invoke<void>("player_set_speed", { speed });
+}
+
 /** Request min/max peaks for `path`; the result arrives via the `waveform:ready` event. */
 export function requestWaveform(path: string, bins: number): Promise<void> {
   return invoke<void>("request_waveform", { path, bins });
+}
+
+/** Request a spectrogram image for `path`; arrives via `spectrogram:ready`. */
+export function requestSpectrogram(path: string): Promise<void> {
+  return invoke<void>("request_spectrogram", { path });
 }
 
 /**

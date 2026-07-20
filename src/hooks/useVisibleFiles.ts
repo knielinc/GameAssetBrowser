@@ -9,8 +9,11 @@ import {
   MIB,
   rangeActive,
   type AssetKind,
+  type AudioChannelGroup,
   type ChannelGroup,
+  type ColorBucket,
   type RangeFilter,
+  type SampleRateBucket,
   type SortField,
 } from "../types";
 
@@ -72,6 +75,49 @@ export const inRange = (v: number, r: RangeFilter): boolean =>
   (r.min === null || v >= r.min) && (r.max === null || v <= r.max);
 export const isPot = (n: number): boolean => n > 0 && (n & (n - 1)) === 0;
 
+/**
+ * Mean sRGB (0–1, from ThumbInfo) → color bucket. Total — every measured
+ * texture lands in exactly one bucket. Lightness and saturation outrank hue,
+ * then the hue table beside COLOR_BUCKETS in types.ts decides. Exported for
+ * useFacetCounts: one definition, counts can never disagree with the filter.
+ */
+export function colorBucketOf(r: number, g: number, b: number): ColorBucket {
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const l = (mx + mn) / 2;
+  if (l < 0.13) return "dark";
+  if (l > 0.87) return "light";
+  const d = mx - mn;
+  // HSL saturation; the l-guard above keeps the denominator well away from 0.
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (s < 0.12) return "gray";
+  let h = mx === r ? (g - b) / d : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  if (h < 15 || h >= 345) return "red";
+  if (h < 45) return "orange";
+  if (h < 70) return "yellow";
+  if (h < 165) return "green";
+  if (h < 200) return "cyan";
+  if (h < 255) return "blue";
+  if (h < 290) return "purple";
+  return "pink";
+}
+
+/** Channel count (≥1) → layout bucket. Callers gate out 0 (= unmeasured). */
+export const audioChannelGroupOf = (channels: number): AudioChannelGroup =>
+  channels === 1 ? "mono" : channels === 2 ? "stereo" : "multi";
+
+/** Sample rate in Hz (≥1) → the nearest canonical tier at or above, so odd
+ *  rates (24k, 96k) never fall between chips. Callers gate out 0. */
+export function sampleRateBucketOf(rate: number): SampleRateBucket {
+  if (rate <= 22050) return "le22";
+  if (rate <= 32000) return "32k";
+  if (rate <= 44100) return "44k";
+  if (rate <= 48000) return "48k";
+  return "hi";
+}
+
 export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
@@ -85,6 +131,10 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const durationsVersion = useLibraryStore((s) => s.durationsVersion);
   const dims = useLibraryStore((s) => s.dims);
   const dimsVersion = useLibraryStore((s) => s.dimsVersion);
+  const audioMeta = useLibraryStore((s) => s.audioMeta);
+  const audioMetaVersion = useLibraryStore((s) => s.audioMetaVersion);
+  const thumbs = useLibraryStore((s) => s.thumbs);
+  const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
   const { query, extFilter, sortField, sortDir, filters } = tab;
   const debouncedQuery = useDebounced(query, 100);
   // The grouping pass runs only while the material facet is actually active —
@@ -122,6 +172,9 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     const hasMat = kind === "texture" && flt.material && membership !== null;
     const hasRes = kind === "texture" && rangeActive(flt.res);
     const needShape = kind === "texture" && (flt.square || flt.pot);
+    const hasColor = kind === "texture" && flt.colors.size > 0;
+    const hasAChan = kind === "audio" && flt.audioChannels.size > 0;
+    const hasRate = kind === "audio" && flt.sampleRates.size > 0;
     const hasSize = kind === "model" && rangeActive(flt.size);
     // Size is stored in MB; compare in bytes, converted once outside the loop.
     const sizeBytes: RangeFilter = {
@@ -162,6 +215,27 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
           if (flt.pot && !(isPot(dm[0]) && isPot(dm[1]))) continue;
         }
       }
+      if (hasColor) {
+        // Color is measured by the thumbnail decode — unknown = keep until the
+        // thumb batch lands, the same lazy-probe rule as duration/dims.
+        const info = thumbs.get(f.id)?.info;
+        if (info != null && !flt.colors.has(colorBucketOf(info.meanR, info.meanG, info.meanB))) {
+          continue;
+        }
+      }
+      if (hasAChan || hasRate) {
+        // Per-FIELD unknowns: the probe emits 0 for a field it couldn't read,
+        // so channels can be known while the rate isn't (and vice versa).
+        const am = audioMeta.get(f.id);
+        if (am !== undefined) { // unknown = keep, same rule
+          if (hasAChan && am[1] > 0 && !flt.audioChannels.has(audioChannelGroupOf(am[1]))) {
+            continue;
+          }
+          if (hasRate && am[0] > 0 && !flt.sampleRates.has(sampleRateBucketOf(am[0]))) {
+            continue;
+          }
+        }
+      }
       if (hasQuery && !f.nameLower.includes(q)) continue;
       files.push(f);
     }
@@ -178,7 +252,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
       files.sort((a, b) => dir * cmp(a, b));
     }
     return files;
-  }, [kind, allFiles, folderScopes, hiddenFolders, collectionScope, favorites, collections, recents, debouncedQuery, extFilter, sortField, sortDir, filters, durations, durationsVersion, dims, dimsVersion, membership]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, collectionScope, favorites, collections, recents, debouncedQuery, extFilter, sortField, sortDir, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
 }
 
 /**

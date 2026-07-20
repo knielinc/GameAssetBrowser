@@ -2,12 +2,16 @@ import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "
 import clsx from "clsx";
 import { Check, ChevronDown, X } from "lucide-react";
 import {
+  AUDIO_CHANNEL_GROUP_LABEL,
   CHANNEL_GROUP_LABEL,
+  COLOR_BUCKET_LABEL,
   DAY_SECONDS,
   NOUN,
+  SAMPLE_RATE_BUCKET_LABEL,
   emptyRange,
   rangeActive,
   type AssetKind,
+  type ColorBucket,
   type RangeFilter,
 } from "../types";
 import { useLibraryStore, type TabFilters } from "../stores/libraryStore";
@@ -53,22 +57,43 @@ function parseDate(s: string, end: boolean): number | null {
 /** UI facet groups (not 1:1 with store keys — `shape` spans square+pot, and
  *  `material` hosts both the membership toggle and the channel rows). */
 export type FacetId =
-  | "format" | "duration" | "material" | "res" | "shape" | "size" | "modified";
+  | "format" | "duration" | "audioChannels" | "sampleRate" | "material"
+  | "color" | "res" | "shape" | "size" | "modified";
 
 export const FACET_ORDER: Record<AssetKind, readonly FacetId[]> = {
-  audio: ["format", "duration", "modified"],
-  texture: ["format", "material", "res", "shape", "modified"],
+  audio: ["format", "duration", "audioChannels", "sampleRate", "modified"],
+  texture: ["format", "material", "color", "res", "shape", "modified"],
   model: ["format", "size", "modified"],
 };
 
 const FACET_LABEL: Record<FacetId, string> = {
   format: "Format",
   duration: "Length",
+  audioChannels: "Channels",
+  sampleRate: "Sample rate",
   material: "Material",
+  color: "Color",
   res: "Resolution",
   shape: "Shape",
   size: "File size",
   modified: "Modified",
+};
+
+/** Swatch fills for the color facet — representative, not exact: a bucket
+ *  spans a hue arc, the swatch is its recognizable center. dark/light/gray sit
+ *  at fixed lightness so they read against both themes. */
+const COLOR_SWATCH: Record<ColorBucket, string> = {
+  red: "#e5484d",
+  orange: "#f76b15",
+  yellow: "#f5d90a",
+  green: "#46a758",
+  cyan: "#0ea5c6",
+  blue: "#3e63dd",
+  purple: "#8e4ec6",
+  pink: "#d6409f",
+  dark: "#232326",
+  light: "#f0f0f3",
+  gray: "#8b8d98",
 };
 
 /** Per-range-facet UI unit, rounding, and axis; the store patch key is the
@@ -535,10 +560,15 @@ export default function FilterPopup({
 
   // The lazily-probed facets: while one is on, some files may not have been
   // measured yet, and unknown = keep means they linger until their batch lands.
-  // Material is always-measured once computed — never lazy.
+  // Material is always-measured once computed — never lazy. Color rides the
+  // thumbnail decode; channels/sample-rate ride the audio probe.
   const lazyFacetOn =
-    (kind === "audio" && rangeActive(filters.duration)) ||
-    (kind === "texture" && (rangeActive(filters.res) || filters.square || filters.pot));
+    (kind === "audio" &&
+      (rangeActive(filters.duration) ||
+        filters.audioChannels.size > 0 ||
+        filters.sampleRates.size > 0)) ||
+    (kind === "texture" &&
+      (rangeActive(filters.res) || filters.square || filters.pot || filters.colors.size > 0));
 
   // Tokens in facet-group order, canonical vocabulary order within a facet —
   // never insertion order, so they don't reshuffle. Each removal is the exact
@@ -567,6 +597,28 @@ export default function FilterPopup({
           });
         }
         break;
+      case "audioChannels":
+        for (const o of counts.audioChannels) {
+          if (o.selected) {
+            tokens.push({
+              key: `audioChannels:${o.value}`,
+              label: AUDIO_CHANNEL_GROUP_LABEL[o.value],
+              remove: () => apply({ audioChannels: toggled(filters.audioChannels, o.value) }),
+            });
+          }
+        }
+        break;
+      case "sampleRate":
+        for (const o of counts.sampleRates) {
+          if (o.selected) {
+            tokens.push({
+              key: `sampleRate:${o.value}`,
+              label: SAMPLE_RATE_BUCKET_LABEL[o.value],
+              remove: () => apply({ sampleRates: toggled(filters.sampleRates, o.value) }),
+            });
+          }
+        }
+        break;
       case "material":
         // The group hosts two constraints: membership first, then channels.
         if (filters.material) {
@@ -582,6 +634,17 @@ export default function FilterPopup({
               key: `channels:${o.value}`,
               label: CHANNEL_GROUP_LABEL[o.value],
               remove: () => apply({ channels: toggled(filters.channels, o.value) }),
+            });
+          }
+        }
+        break;
+      case "color":
+        for (const o of counts.colors) {
+          if (o.selected) {
+            tokens.push({
+              key: `color:${o.value}`,
+              label: COLOR_BUCKET_LABEL[o.value],
+              remove: () => apply({ colors: toggled(filters.colors, o.value) }),
             });
           }
         }
@@ -647,6 +710,85 @@ export default function FilterPopup({
             onClick={() => toggleExt(kind, o.value)}
           />
         ));
+      }
+      case "audioChannels": {
+        const max = maxCount(counts.audioChannels);
+        return counts.audioChannels.map((o) => (
+          <OptionRow
+            key={o.value}
+            kind={kind}
+            label={AUDIO_CHANNEL_GROUP_LABEL[o.value]}
+            count={o.count}
+            max={max}
+            selected={o.selected}
+            onClick={() => apply({ audioChannels: toggled(filters.audioChannels, o.value) })}
+          />
+        ));
+      }
+      case "sampleRate": {
+        const max = maxCount(counts.sampleRates);
+        return counts.sampleRates.map((o) => (
+          <OptionRow
+            key={o.value}
+            kind={kind}
+            label={SAMPLE_RATE_BUCKET_LABEL[o.value]}
+            count={o.count}
+            max={max}
+            selected={o.selected}
+            onClick={() => apply({ sampleRates: toggled(filters.sampleRates, o.value) })}
+          />
+        ));
+      }
+      case "color": {
+        // Swatches, not OptionRows — the fill IS the label. A wrap row keeps
+        // canonical order; a zero-count unselected swatch dims but stays (the
+        // OptionRow dead-row rule), and count + name live in the tooltip.
+        if (counts.colors.length === 0) {
+          return (
+            <div className="px-2.5 pb-1.5 pt-0.5 text-[10px] leading-snug text-faint">
+              Nothing measured yet
+            </div>
+          );
+        }
+        return (
+          <div className="flex flex-wrap gap-1.5 px-2.5 pb-1.5 pt-0.5">
+            {counts.colors.map((o) => {
+              const dead = o.count === 0 && !o.selected;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  aria-pressed={o.selected}
+                  disabled={dead}
+                  title={`${COLOR_BUCKET_LABEL[o.value]} · ${o.count.toLocaleString()} ${NOUN[kind]}`}
+                  onClick={() => apply({ colors: toggled(filters.colors, o.value) })}
+                  className={clsx(
+                    "flex h-6 w-6 items-center justify-center rounded-full ring-inset transition-[box-shadow,opacity] duration-[120ms]",
+                    o.selected
+                      ? "ring-2 ring-accent"
+                      : dead
+                        ? "opacity-30 ring-1 ring-bg"
+                        : "ring-1 ring-bg hover:ring-2 hover:ring-accent/50",
+                  )}
+                  style={{ backgroundColor: COLOR_SWATCH[o.value] }}
+                >
+                  {o.selected && (
+                    <Check
+                      size={12}
+                      strokeWidth={3}
+                      // A white check drowns on the light/yellow swatches.
+                      className={
+                        o.value === "light" || o.value === "yellow" || o.value === "gray"
+                          ? "text-black/75"
+                          : "text-white"
+                      }
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        );
       }
       case "duration":
       case "res":

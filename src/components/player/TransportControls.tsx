@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import clsx from "clsx";
-import { Pause, Play, Repeat, Square } from "lucide-react";
+import { Pause, Play, Repeat, SkipForward, Square } from "lucide-react";
 import { playerStop } from "../../ipc/commands";
 import { positionRef, usePlayerStore, usePositionStore } from "../../stores/playerStore";
 
@@ -8,10 +8,12 @@ export default function TransportControls(): ReactElement {
   const playing = usePlayerStore((s) => s.playing);
   const loop = usePlayerStore((s) => s.loop);
   const autoplay = usePlayerStore((s) => s.autoplay);
+  const autoAdvance = usePlayerStore((s) => s.autoAdvance);
   const hasTrack = usePlayerStore((s) => s.currentPath !== null);
   const togglePlay = usePlayerStore((s) => s.togglePlay);
   const toggleLoop = usePlayerStore((s) => s.toggleLoop);
   const toggleAutoplay = usePlayerStore((s) => s.toggleAutoplay);
+  const toggleAutoAdvance = usePlayerStore((s) => s.toggleAutoAdvance);
 
   const onStop = (): void => {
     if (!hasTrack) return;
@@ -55,6 +57,17 @@ export default function TransportControls(): ReactElement {
         title="Loop (L)"
       >
         <Repeat size={14} />
+      </button>
+
+      {/* Loop and auto-advance are siblings on purpose: both answer "what
+          happens when the track ends?" — loop wins while both are lit. */}
+      <button
+        type="button"
+        className={clsx("icon-btn", autoAdvance && "icon-btn-active")}
+        onClick={toggleAutoAdvance}
+        title="Auto-advance: play the next file when a track ends"
+      >
+        <SkipForward size={14} />
       </button>
 
       <button

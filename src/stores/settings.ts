@@ -2,14 +2,20 @@ import { load, type Store } from "@tauri-apps/plugin-store";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import {
   ASSET_KINDS,
+  AUDIO_CHANNEL_GROUPS,
   CHANNEL_GROUPS,
+  COLOR_BUCKETS,
   EXTENSIONS,
   FILTER_FACETS_BY_KIND,
+  SAMPLE_RATE_BUCKETS,
   SORT_FIELDS_BY_KIND,
   emptyRange,
   type AssetKind,
   type AtlasChoiceSettings,
+  type AudioChannelGroup,
   type ChannelGroup,
+  type ColorBucket,
+  type SampleRateBucket,
   type CollectionSettings,
   type RecentSettings,
   type RangeFilter,
@@ -42,6 +48,9 @@ function defaultFilterSettings(): TabFilterSettings {
     square: false,
     pot: false,
     size: emptyRange(),
+    colors: [],
+    audioChannels: [],
+    sampleRates: [],
   };
 }
 
@@ -63,6 +72,8 @@ export const DEFAULT_SETTINGS: Settings = {
   volume: 0.8,
   loop: false,
   autoplay: true,
+  autoAdvance: false,
+  hoverPreview: false,
   activeTab: "audio",
   tabs: {
     audio: defaultTabSettings("audio"),
@@ -148,6 +159,9 @@ function sanitizeFilters(kind: AssetKind, raw: unknown): TabFilterSettings {
     square: bool(raw.square, false),
     pot: bool(raw.pot, false),
     size: sanitizeRange(raw.size),
+    colors: pick(raw.colors, COLOR_BUCKETS),
+    audioChannels: pick(raw.audioChannels, AUDIO_CHANNEL_GROUPS),
+    sampleRates: pick(raw.sampleRates, SAMPLE_RATE_BUCKETS),
   };
   // The sortField gate, generalized: a texture-only facet that somehow landed
   // in the audio tab's settings degrades to off, never to an invisible
@@ -215,6 +229,9 @@ export function sanitize(raw: unknown): Settings {
     volume: clampNum(v2.volume, 0, 1, d.volume),
     loop: bool(v2.loop, d.loop),
     autoplay: bool(v2.autoplay, d.autoplay),
+    // Absent pre-feature → both off, the no-migration path.
+    autoAdvance: bool(v2.autoAdvance, d.autoAdvance),
+    hoverPreview: bool(v2.hoverPreview, d.hoverPreview),
     activeTab: oneOf<AssetKind>(v2.activeTab, ASSET_KINDS, d.activeTab),
     tabs: {
       audio: sanitizeTab("audio", tabs.audio),
@@ -298,6 +315,9 @@ function tabToSettings(t: TabState): TabSettings {
       channels: [...t.filters.channels],
       res: { ...t.filters.res },
       size: { ...t.filters.size },
+      colors: [...t.filters.colors],
+      audioChannels: [...t.filters.audioChannels],
+      sampleRates: [...t.filters.sampleRates],
     },
   };
 }
@@ -312,6 +332,8 @@ function currentSettings(): Settings {
     volume: player.volume,
     loop: player.loop,
     autoplay: player.autoplay,
+    autoAdvance: player.autoAdvance,
+    hoverPreview: player.hoverPreview,
     activeTab: lib.activeTab,
     tabs: {
       audio: tabToSettings(lib.tabs.audio),
@@ -387,7 +409,9 @@ function installSubscriptions(): void {
     if (
       state.volume !== prev.volume ||
       state.loop !== prev.loop ||
-      state.autoplay !== prev.autoplay
+      state.autoplay !== prev.autoplay ||
+      state.autoAdvance !== prev.autoAdvance ||
+      state.hoverPreview !== prev.hoverPreview
     ) {
       saveSettings();
     }
@@ -441,6 +465,9 @@ function applySettings(settings: Settings): void {
         channels: new Set(p.filters.channels as ChannelGroup[]),
         res: { ...p.filters.res },
         size: { ...p.filters.size },
+        colors: new Set(p.filters.colors as ColorBucket[]),
+        audioChannels: new Set(p.filters.audioChannels as AudioChannelGroup[]),
+        sampleRates: new Set(p.filters.sampleRates as SampleRateBucket[]),
       },
     };
   }
@@ -461,6 +488,8 @@ function applySettings(settings: Settings): void {
     volume: settings.volume,
     loop: settings.loop,
     autoplay: settings.autoplay,
+    autoAdvance: settings.autoAdvance,
+    hoverPreview: settings.hoverPreview,
   });
 
   // Bring the audio engine in line with the preferences.

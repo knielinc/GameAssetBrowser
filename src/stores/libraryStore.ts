@@ -4,11 +4,14 @@ import { startScan } from "../ipc/commands";
 import { ASSET_KINDS, FILTER_FACETS_BY_KIND, emptyRange, rangeActive } from "../types";
 import type {
   AssetKind,
+  AudioChannelGroup,
   AudioMetaBatch,
   ChannelGroup,
+  ColorBucket,
   DimensionBatch,
   FileEntry,
   RangeFilter,
+  SampleRateBucket,
   ScanDone,
   SortDir,
   SortField,
@@ -36,6 +39,12 @@ export interface TabFilters {
   square: boolean;
   pot: boolean;
   size: RangeFilter;
+  /** Texture only — mean-color buckets from ThumbInfo (unmeasured = keep). */
+  colors: Set<ColorBucket>;
+  /** Audio only — channel-layout buckets from the audio probe. */
+  audioChannels: Set<AudioChannelGroup>;
+  /** Audio only — sample-rate buckets from the audio probe. */
+  sampleRates: Set<SampleRateBucket>;
 }
 
 export function defaultFilters(): TabFilters {
@@ -48,6 +57,9 @@ export function defaultFilters(): TabFilters {
     square: false,
     pot: false,
     size: emptyRange(),
+    colors: new Set(),
+    audioChannels: new Set(),
+    sampleRates: new Set(),
   };
 }
 
