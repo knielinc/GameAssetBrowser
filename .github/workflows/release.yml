@@ -1,0 +1,202 @@
+name: Release
+
+# Manual release to itch.io (kniti/gab). Bumps the patch version, builds all
+# three OSes, and uploads the portable build (+ installer) to itch.io via butler.
+# It does NOT create a GitHub Release. Run it from Actions → Release → "Run
+# workflow".
+#
+# Versioning is tag-driven: the next version is the latest `vX.Y.Z` tag with its
+# patch incremented (the first release uses the version in package.json). After a
+# successful upload a lightweight git tag records the version — that tag is the
+# only GitHub footprint (it is NOT a Release), and nothing else is committed back.
+#
+# Requires a BUTLER_API_KEY repository secret
+# (https://itch.io/user/settings/api-keys). Without it the workflow still builds,
+# but the itch upload and the version tag are skipped.
+#
+# "Paid" is an itch.io setting, not something CI controls: set the price on the
+# game's Edit page (Pricing → "$X or more" or a fixed price) and publish it.
+# butler only uploads builds; itch puts them behind the paywall automatically for
+# a paid game.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need all tags to find the latest
+      - id: v
+        shell: bash
+        run: |
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            version=$(node -p "require('./package.json').version")
+            echo "No tags yet — first release uses package.json version $version"
+          else
+            base=${latest#v}
+            IFS='.' read -r MA MI PA <<< "$base"
+            version="$MA.$MI.$((PA + 1))"
+            echo "Latest tag $latest — bumping to $version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            libasound2-dev \
+            file wget curl
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Stamp release version into tauri.conf.json
+        shell: bash
+        run: |
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version='${{ needs.version.outputs.version }}';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');console.log('app version ->',j.version)"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build the app (no GitHub Release — itch.io only)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.args }}
+
+      - name: Stage itch.io uploads
+        shell: bash
+        run: |
+          set -e
+          mkdir -p itch
+          case "$RUNNER_OS" in
+            Windows)
+              # Portable exe (runs in portable mode, keeping its data beside it).
+              cp "src-tauri/target/release/Game Asset Browser.exe" "itch/GameAssetBrowser-portable.exe"
+              s=$(ls src-tauri/target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -n1 || true)
+              [ -n "$s" ] && cp "$s" "itch/GameAssetBrowser-setup.exe" || echo "no NSIS installer"
+              ;;
+            Linux)
+              a=$(ls src-tauri/target/release/bundle/appimage/*.AppImage 2>/dev/null | head -n1 || true)
+              [ -n "$a" ] && cp "$a" "itch/GameAssetBrowser.AppImage" || echo "no AppImage"
+              d=$(ls src-tauri/target/release/bundle/deb/*.deb 2>/dev/null | head -n1 || true)
+              [ -n "$d" ] && cp "$d" "itch/GameAssetBrowser.deb" || echo "no .deb"
+              ;;
+            macOS)
+              m=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -n1 || true)
+              [ -n "$m" ] && cp "$m" "itch/GameAssetBrowser.dmg" || echo "no .dmg"
+              ;;
+          esac
+          ls -la itch
+
+      - name: Upload itch staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: itch-${{ matrix.platform }}
+          path: itch/
+          if-no-files-found: warn
+
+  itch:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    # secrets can't be read in a step `if`, but referencing one in `env` is
+    # allowed — so gate every step on this instead of hard-failing when unset.
+    env:
+      HAS_BUTLER: ${{ secrets.BUTLER_API_KEY != '' }}
+    steps:
+      - name: Note if the itch secret is missing
+        if: env.HAS_BUTLER != 'true'
+        run: echo "::warning::BUTLER_API_KEY secret is not set — skipping itch.io upload. Add it under Settings → Secrets and variables → Actions."
+
+      - name: Checkout (to tag the released version)
+        if: env.HAS_BUTLER == 'true'
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        if: env.HAS_BUTLER == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: dl
+
+      - name: Install butler
+        if: env.HAS_BUTLER == 'true'
+        run: |
+          curl -L -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip -q butler.zip
+          chmod +x butler
+          ./butler -V
+
+      - name: Push to itch.io
+        if: env.HAS_BUTLER == 'true'
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          push() { if [ -f "$1" ]; then echo "-> $2"; ./butler push "$1" "kniti/gab:$2" --userversion "$V"; else echo "skip $2 (missing $1)"; fi; }
+          push dl/itch-windows-latest/GameAssetBrowser-portable.exe windows
+          push dl/itch-windows-latest/GameAssetBrowser-setup.exe    windows-setup
+          push dl/itch-ubuntu-22.04/GameAssetBrowser.AppImage       linux
+          push dl/itch-ubuntu-22.04/GameAssetBrowser.deb            linux-deb
+          push dl/itch-macos-latest/GameAssetBrowser.dmg            osx
+
+      - name: Record the released version as a git tag
+        if: env.HAS_BUTLER == 'true'
+        run: |
+          # Lightweight tag only — this is NOT a GitHub Release; it just lets the
+          # next run compute the following patch version.
+          git tag "${{ needs.version.outputs.tag }}"
+          git push origin "${{ needs.version.outputs.tag }}"
