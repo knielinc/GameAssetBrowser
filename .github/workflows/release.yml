@@ -32,7 +32,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # need all tags to find the latest
       - id: v
@@ -69,7 +69,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -88,7 +88,7 @@ jobs:
             file wget curl
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -144,7 +144,7 @@ jobs:
           ls -la itch
 
       - name: Upload itch staging artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: itch-${{ matrix.platform }}
           path: itch/
@@ -164,11 +164,11 @@ jobs:
 
       - name: Checkout (to tag the released version)
         if: env.HAS_BUTLER == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download build artifacts
         if: env.HAS_BUTLER == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dl
 
