@@ -4,8 +4,8 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   EVT,
+  type AudioMetaBatch,
   type DimensionBatch,
-  type DurationBatch,
   type PositionPayload,
   type ScanBatch,
   type ScanDone,
@@ -57,8 +57,12 @@ export function initIpcEvents(): void {
     lib.finishScan(event.payload);
   });
 
-  void listen<DurationBatch>(EVT.META_DURATIONS, (event) => {
-    useLibraryStore.getState().mergeDurations(event.payload.entries);
+  // Drop-only gen guard, same reasoning as meta:dimensions below: ids restart
+  // at 0 each scan, so a late batch from a superseded scan would land on the
+  // wrong files.
+  void listen<AudioMetaBatch>(EVT.META_AUDIO, (event) => {
+    if (event.payload.gen !== useLibraryStore.getState().scanGen) return;
+    useLibraryStore.getState().mergeAudioMeta(event.payload.entries);
 
     // Backfill the player's duration if it was unknown when the track loaded.
     const player = usePlayerStore.getState();

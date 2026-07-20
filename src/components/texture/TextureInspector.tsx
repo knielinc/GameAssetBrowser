@@ -169,6 +169,8 @@ export default function TextureInspector({
               }}
               zoomFit={preview.zoomFit}
               zoomPct={preview.zoomPct}
+              iso={preview.iso}
+              tiles={preview.flatTiles}
             />
           ) : (
             <TexturePreview
@@ -178,6 +180,8 @@ export default function TextureInspector({
               tiles={preview.tiles}
               relief={preview.relief}
               channel={preview.channel}
+              iso={preview.iso}
+              flatTiles={preview.flatTiles}
             />
           )}
         </div>

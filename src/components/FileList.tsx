@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -42,6 +43,33 @@ function headersFor(kind: AssetKind): HeaderSpec[] {
   return ALL_HEADERS.filter((h) => allowed.includes(h.field));
 }
 
+/** Channel-count shorthand: mono/stereo dominate game audio; the common
+ *  surround layouts get their familiar names, anything exotic its raw count. */
+function channelLabel(n: number): string {
+  if (n === 1) return "mo";
+  if (n === 2) return "st";
+  if (n === 6) return "5.1";
+  if (n === 8) return "7.1";
+  return `${n}ch`;
+}
+
+/** Compact audio format readout, e.g. `44.1k · 16-bit · st`. Unknown (0)
+ *  parts are omitted — a lossy mp3 has no bit depth but still shows rate +
+ *  channels. Empty string until the probe has reported the file. */
+function formatAudioMeta(
+  meta: readonly [rate: number, channels: number, bits: number] | undefined,
+): string {
+  if (meta === undefined) return "";
+  const [rate, channels, bits] = meta;
+  const parts: string[] = [];
+  // Number formatting keeps only meaningful decimals: 48000 → "48k",
+  // 44100 → "44.1k", 22050 → "22.05k".
+  if (rate > 0) parts.push(`${rate / 1000}k`);
+  if (bits > 0) parts.push(`${bits}-bit`);
+  if (channels > 0) parts.push(channelLabel(channels));
+  return parts.join(" · ");
+}
+
 export interface FileListProps {
   kind: AssetKind;
   files: LibFile[];
@@ -70,6 +98,10 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const { selectedPath, sortField, sortDir } = tab;
   const durations = useLibraryStore((s) => s.durations);
+  const audioMeta = useLibraryStore((s) => s.audioMeta);
+  // Map identity is stable across merges — subscribe to the version counter so
+  // Format cells refresh as probe batches land.
+  useLibraryStore((s) => s.audioMetaVersion);
   const setSort = useLibraryStore((s) => s.setSort);
   const clearFilters = useLibraryStore((s) => s.clearFilters);
   const anyFiles = useLibraryStore((s) => s.allFiles.length > 0);
@@ -151,20 +183,29 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
       <div className="shrink-0 pr-[10px] shadow-[inset_0_-1px_0_var(--color-bg)]">
         <div className={clsx(rowGrid(kind === "audio"), "h-8")}>
           {headers.map((h) => (
-            <button
-              key={h.field}
-              type="button"
-              onClick={() => setSort(kind, h.field)}
-              className={clsx(
-                "flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest transition-colors duration-[120ms]",
-                h.alignRight && "justify-end",
-                sortField === h.field ? "text-text" : "text-dim hover:text-text",
+            <Fragment key={h.field}>
+              {/* Format sits before Length but is display-only (no new sort
+                  fields), so it can't join ALL_HEADERS — headers are sort
+                  buttons keyed by SortField. */}
+              {h.field === "duration" && (
+                <span className="flex items-center justify-end text-[10px] font-medium uppercase tracking-widest text-dim">
+                  Format
+                </span>
               )}
-            >
-              {h.label}
-              {sortField === h.field &&
-                (sortDir === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
-            </button>
+              <button
+                type="button"
+                onClick={() => setSort(kind, h.field)}
+                className={clsx(
+                  "flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest transition-colors duration-[120ms]",
+                  h.alignRight && "justify-end",
+                  sortField === h.field ? "text-text" : "text-dim hover:text-text",
+                )}
+              >
+                {h.label}
+                {sortField === h.field &&
+                  (sortDir === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
+              </button>
+            </Fragment>
           ))}
         </div>
       </div>
@@ -214,6 +255,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         size={it.file.size}
                         modified={it.file.modified}
                         durationSeconds={undefined}
+                        formatLabel={undefined}
                         showDuration={false}
                         selected={it.file.path === selectedPath}
                         playing={false}
@@ -229,6 +271,9 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                       size={file!.size}
                       modified={file!.modified}
                       durationSeconds={durations.get(file!.id)}
+                      formatLabel={
+                        kind === "audio" ? formatAudioMeta(audioMeta.get(file!.id)) : undefined
+                      }
                       showDuration={kind === "audio"}
                       selected={file!.path === selectedPath}
                       playing={kind === "audio" && playing && file!.path === currentPath}

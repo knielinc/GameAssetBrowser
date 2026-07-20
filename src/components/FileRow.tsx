@@ -6,13 +6,14 @@ import { CHANNEL_CODE } from "../material/table";
 import type { Material } from "../material/classify";
 
 /**
- * Shared grid template so the header and rows always line up. The Length
- * column only exists for audio, so the template has to drop with it — a fixed
- * 5-column grid would leave a dead 64px gutter on the texture/model lists.
+ * Shared grid template so the header and rows always line up. The Format and
+ * Length columns only exist for audio, so the template has to drop with them —
+ * a fixed grid would leave a dead gutter on the texture/model lists. 108px
+ * fits the widest format readout ("44.1k · 16-bit · st") at 11px.
  */
 export function rowGrid(withDuration: boolean): string {
   return withDuration
-    ? "grid grid-cols-[minmax(0,1fr)_50px_74px_84px_64px] items-center gap-x-3 pl-3 pr-4"
+    ? "grid grid-cols-[minmax(0,1fr)_50px_74px_84px_108px_64px] items-center gap-x-3 pl-3 pr-4"
     : "grid grid-cols-[minmax(0,1fr)_50px_74px_84px] items-center gap-x-3 pl-3 pr-4";
 }
 
@@ -78,7 +79,9 @@ export interface FileRowProps {
   size: number;
   modified: number;
   durationSeconds: number | undefined;
-  /** Audio only — drives both the column and the grid template. */
+  /** Audio only — compact `44.1k · 16-bit · st` readout; empty until probed. */
+  formatLabel: string | undefined;
+  /** Audio only — drives the Format/Length columns and the grid template. */
   showDuration: boolean;
   selected: boolean;
   playing: boolean;
@@ -93,6 +96,7 @@ function FileRowInner({
   size,
   modified,
   durationSeconds,
+  formatLabel,
   showDuration,
   selected,
   playing,
@@ -130,6 +134,11 @@ function FileRowInner({
 
       <span className="text-right text-[11px] tabular-nums text-dim">{humanSize(size)}</span>
       <span className="text-right text-[11px] tabular-nums text-dim">{formatDate(modified)}</span>
+      {showDuration && (
+        // Blank (not "–") until probed: unknown parts inside the label are
+        // simply omitted, so a dash would read as "measured: nothing".
+        <span className="text-right text-[11px] tabular-nums text-dim">{formatLabel ?? ""}</span>
+      )}
       {showDuration && (
         <span className="text-right text-[11px] tabular-nums text-dim">
           {durationSeconds !== undefined ? formatTime(durationSeconds) : "–"}

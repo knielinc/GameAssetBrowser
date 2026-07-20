@@ -4,7 +4,7 @@ import { basename } from "../../stores/libraryStore";
 import { humanSize } from "../FileRow";
 import type { ModelStats } from "../../model/loadModel";
 import type { RescueResult } from "../../model/rescueTextures";
-import ModelViewport from "./ModelViewport";
+import ModelViewport, { CM_HEURISTIC_MIN } from "./ModelViewport";
 import ModelLightControls from "./ModelLightControls";
 import AtlasPicker from "./AtlasPicker";
 
@@ -93,6 +93,13 @@ export default function ModelInspector({ path, size, onClose, width }: ModelInsp
                     <dt className="text-dim">Size</dt>
                     <dd className="m-0 text-right tabular-nums">
                       {stats.size.map((v) => v.toFixed(2)).join(" × ")}
+                      {/* Same threshold as the viewport's silhouette scaling,
+                          so the hint and the capsule always agree. */}
+                      {Math.max(...stats.size) >= CM_HEURISTIC_MIN && (
+                        <span className="ml-1 text-dim">
+                          (cm → {(Math.max(...stats.size) / 100).toFixed(2)} m)
+                        </span>
+                      )}
                     </dd>
                   </dl>
                   {/* FBX unit scale is usually cm, so models arrive 100x wrong.

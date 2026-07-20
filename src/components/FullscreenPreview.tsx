@@ -109,6 +109,8 @@ export default function FullscreenPreview({
                 }}
                 zoomFit={preview3d.zoomFit}
                 zoomPct={preview3d.zoomPct}
+                iso={preview3d.iso}
+                tiles={preview3d.flatTiles}
               />
             </div>
           ) : Object.keys(keys).length > 0 ? (
@@ -123,6 +125,8 @@ export default function FullscreenPreview({
                 tiles={preview3d.tiles}
                 relief={preview3d.relief}
                 channel={preview3d.channel}
+                iso={preview3d.iso}
+                flatTiles={preview3d.flatTiles}
               />
             </div>
           ) : (

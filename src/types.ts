@@ -48,9 +48,13 @@ export interface ScanDone {
   elapsedMs: number;
 }
 
-/** Batched [file id, duration seconds] pairs. */
-export interface DurationBatch {
-  entries: [id: number, seconds: number][];
+/** Batched [file id, seconds, sample rate Hz, channels, bits per sample] from
+ *  the audio probe — 0 = unknown for every field but the id. Carries the scan
+ *  generation for the same reason DimensionBatch does: ids restart at 0 every
+ *  scan, so a late batch from a superseded scan would land on the wrong files. */
+export interface AudioMetaBatch {
+  gen: number;
+  entries: [id: number, seconds: number, rate: number, channels: number, bits: number][];
 }
 
 /** Batched [file id, width, height] triples from the texture dimension probe.
@@ -85,7 +89,7 @@ export interface StatePayload {
 export const EVT = {
   SCAN_BATCH: "scan:batch",
   SCAN_DONE: "scan:done",
-  META_DURATIONS: "meta:durations",
+  META_AUDIO: "meta:audio",
   META_DIMENSIONS: "meta:dimensions",
   WAVEFORM_READY: "waveform:ready",
   PLAYBACK_POSITION: "playback:position",

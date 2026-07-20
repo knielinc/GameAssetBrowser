@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { sourceUrl } from "../../model/loadModel";
+import { modelUrl, sourceUrl } from "../../model/loadModel";
+import { useEnvPrefs } from "../../stores/envPrefs";
 import { applyParallax } from "./parallax";
 
 /** Shared 1×1 white — the parallax shader keys off a base-color map, so a
@@ -18,6 +19,48 @@ function whiteTex(): THREE.DataTexture {
 
 export type MeshMode = "flat" | "plane" | "sphere" | "cube" | "env";
 export type LightMode = "studio" | "sun" | "rim" | "soft" | "unlit";
+
+/** Channel isolation: view one channel of the image as grayscale. "rgb" =
+ *  untouched. Alpha renders opaque (the alpha VALUE as brightness). Offered in
+ *  flat and plane modes only — the modes where you inspect the image itself. */
+export type IsoChannel = "rgb" | "r" | "g" | "b" | "a";
+export const ISO_CHANNELS: { id: IsoChannel; label: string }[] = [
+  { id: "rgb", label: "RGB" },
+  { id: "r", label: "R" },
+  { id: "g", label: "G" },
+  { id: "b", label: "B" },
+  { id: "a", label: "A" },
+];
+
+/**
+ * Patch a material so the sampled base color collapses to one channel shown as
+ * grayscale (alpha shown opaque). A tiny onBeforeCompile swizzle rather than a
+ * dedicated ShaderMaterial: the material keeps all of three's map/colorspace
+ * plumbing, we only rewrite the one line after the map sample.
+ *
+ * Composes with a previously-installed onBeforeCompile (parallax): it runs
+ * AFTER it, so the `#include <map_fragment>` anchor may already be expanded to
+ * raw chunk source — in that case anchor on the sample assignment instead.
+ */
+function applyIsolation(mat: THREE.Material, iso: IsoChannel): void {
+  if (iso === "rgb") return;
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey.bind(mat);
+  mat.onBeforeCompile = (shader, renderer) => {
+    prev.call(mat, shader, renderer);
+    const swizzle = `\n\tdiffuseColor = vec4( vec3( diffuseColor.${iso} ), 1.0 );`;
+    const fs = shader.fragmentShader;
+    shader.fragmentShader = fs.includes("#include <map_fragment>")
+      ? fs.replace("#include <map_fragment>", `#include <map_fragment>${swizzle}`)
+      : fs.replace(
+          "diffuseColor *= sampledDiffuseColor;",
+          `diffuseColor *= sampledDiffuseColor;${swizzle}`,
+        );
+  };
+  // Closure state is invisible to the default toString()-based cache key, so
+  // without this three could hand an isolated material a non-isolated program.
+  mat.customProgramCacheKey = () => `${prevKey()}|iso:${iso}`;
+}
 
 export const MESH_MODES: { id: MeshMode; label: string }[] = [
   { id: "flat", label: "Flat" },
@@ -74,6 +117,11 @@ export interface TexturePreviewProps {
    *  normal / roughness / AO / height maps themselves, not just their effect
    *  on the composed surface. */
   channel?: keyof ChannelKeys;
+  /** Channel isolation, applied in flat and plane modes. */
+  iso: IsoChannel;
+  /** Flat mode: n×n tiled repeat of the shown image (seam check). The 3D
+   *  modes keep their own `tiles`. */
+  flatTiles: number;
 }
 
 interface Rig {
@@ -141,6 +189,8 @@ export default function TexturePreview({
   tiles,
   relief,
   channel,
+  iso,
+  flatTiles,
 }: TexturePreviewProps): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const refs = useRef<{
@@ -155,6 +205,14 @@ export default function TexturePreview({
      *  already-loaded textures is what keeps that rebuild flicker-free —
      *  reloading async painted the mesh untextured for a few frames. */
     texCache: Map<string, THREE.Texture>;
+    /** Kept for the library-HDRI environment: the generator outlives init so
+     *  a later env switch can PMREM a new equirect without a new one. */
+    pmrem?: THREE.PMREMGenerator;
+    /** The built-in RoomEnvironment PMREM — what "Default" restores. */
+    defaultEnv?: THREE.Texture;
+    /** Last generated library-HDRI env, cached so toggling Default ↔ the same
+     *  file (or entering/leaving env mode) never re-decodes the HDR. */
+    customEnv?: { path: string; tex: THREE.Texture };
   }>({ lights: [], texCache: new Map() });
   const cam = useRef({ yaw: 0.6, pitch: 0.3, dist: 3.2, panX: 0, panY: 0 });
   const dirty = useRef(true);
@@ -184,12 +242,15 @@ export default function TexturePreview({
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x07070b);
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const defaultEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = defaultEnv;
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
     refs.current.renderer = renderer;
     refs.current.scene = scene;
     refs.current.camera = camera;
+    refs.current.pmrem = pmrem;
+    refs.current.defaultEnv = defaultEnv;
     setReady(true);
 
     const ro = new ResizeObserver(() => {
@@ -280,6 +341,8 @@ export default function TexturePreview({
       refs.current.texCache.clear();
       refs.current.obj?.geometry.dispose();
       refs.current.mat?.dispose();
+      refs.current.customEnv?.tex.dispose();
+      refs.current.customEnv = undefined;
       pmrem.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
@@ -308,6 +371,63 @@ export default function TexturePreview({
     scene.environmentIntensity = light === "unlit" ? 0 : 1;
     dirty.current = true;
   }, [light, ready]);
+
+  // --- library HDRI environment ---
+  // A .hdr/.exr picked from the library replaces the built-in room rig as the
+  // IBL for every 3D mode, and doubles as the backdrop in env mode. Loaded at
+  // source quality over model:// (the browser can't decode HDR — RGBELoader/
+  // EXRLoader parse the bytes themselves), then PMREM'd like any environment.
+  const envPath = useEnvPrefs((s) => s.envPath);
+  useEffect(() => {
+    const { scene, pmrem } = refs.current;
+    if (scene === undefined || pmrem === undefined) return;
+    const apply = (tex: THREE.Texture | undefined): void => {
+      scene.environment = tex ?? refs.current.defaultEnv ?? null;
+      // Backdrop only in env mode — the other meshes keep the neutral void, a
+      // busy background behind a roughness sphere reads as noise.
+      scene.background =
+        mesh === "env" && tex !== undefined ? tex : new THREE.Color(0x07070b);
+      dirty.current = true;
+    };
+    if (envPath === null) {
+      // Default: keep customEnv cached — flipping back is then instant.
+      apply(undefined);
+      return;
+    }
+    const cached = refs.current.customEnv;
+    if (cached !== undefined && cached.path === envPath) {
+      apply(cached.tex);
+      return;
+    }
+    let stale = false;
+    (async () => {
+      const ext = envPath.slice(envPath.lastIndexOf(".") + 1).toLowerCase();
+      // Lazy loader imports, same idiom as loadModel: a user who never picks
+      // an .exr environment never parses EXRLoader.
+      const loader =
+        ext === "exr"
+          ? new (await import("three/examples/jsm/loaders/EXRLoader.js")).EXRLoader()
+          : new (await import("three/examples/jsm/loaders/RGBELoader.js")).RGBELoader();
+      const equirect = await loader.loadAsync(modelUrl(envPath));
+      const env = pmrem.fromEquirectangular(equirect).texture;
+      equirect.dispose(); // PMREM copied it — the raw floats are dead weight
+      if (stale) {
+        env.dispose();
+        return;
+      }
+      refs.current.customEnv?.tex.dispose();
+      refs.current.customEnv = { path: envPath, tex: env };
+      apply(env);
+    })().catch((err: unknown) => {
+      // A truncated/exotic HDR must not kill the preview — silently keep the
+      // default rig, exactly what "Default" would have given.
+      console.warn("library HDRI failed to load — keeping default environment", err);
+      if (!stale) apply(undefined);
+    });
+    return () => {
+      stale = true;
+    };
+  }, [envPath, mesh, ready]);
 
   // The camera belongs to the USER: a rebuild triggered by lighting, tiling,
   // relief, or channel changes must not touch it. Only an actual geometry
@@ -430,6 +550,10 @@ export default function TexturePreview({
         // verbatim it has to be tagged sRGB like any other image file.
         raw.colorSpace = THREE.SRGBColorSpace;
         raw.needsUpdate = true;
+        // Flat tiling is its own control (1–3), independent of the 3D `tiles`:
+        // RepeatWrapping is already set at load, so repeat alone tiles the
+        // quad n×n. Re-asserted per build, so leaving flat restores `tiles`.
+        raw.repeat.set(flatTiles, flatTiles);
       }
       const geo = new THREE.PlaneGeometry(2, 2);
       const mat = new THREE.MeshBasicMaterial({
@@ -438,6 +562,7 @@ export default function TexturePreview({
         transparent: true,
         side: THREE.DoubleSide,
       });
+      applyIsolation(mat, iso);
       const m = new THREE.Mesh(geo, mat);
       scene.add(m);
       refs.current.obj = m;
@@ -517,6 +642,10 @@ export default function TexturePreview({
     if (useParallax && heightMap !== null && mat instanceof THREE.MeshStandardMaterial) {
       applyParallax(mat, heightMap, relief);
     }
+    // Isolation is a plane-mode affordance (like flat, it's for inspecting the
+    // image); on sphere/cube the control is hidden and iso stays "rgb".
+    // Applied AFTER parallax — applyIsolation composes with its shader patch.
+    if (mesh === "plane") applyIsolation(mat, iso);
     const m = new THREE.Mesh(geo, mat);
     scene.add(m);
     refs.current.obj = m;
@@ -535,7 +664,7 @@ export default function TexturePreview({
   }, [
     keys.baseColor, keys.normal, keys.roughness, keys.metallic,
     keys.ao, keys.height, keys.emissive, keys.opacity,
-    mesh, light, tiles, relief, channel, ready,
+    mesh, light, tiles, relief, channel, iso, flatTiles, ready,
   ]);
 
   return <div ref={hostRef} className="h-full w-full" />;

@@ -1,4 +1,4 @@
-import type { Group, Object3D } from "three";
+import type { AnimationClip, Group, Object3D } from "three";
 
 /**
  * Local model files, loaded into the webview over our own `model://` scheme.
@@ -39,8 +39,10 @@ export function sourceUrl(path: string, ext: string): string {
 
 export interface LoadedModel {
   root: Object3D;
-  /** Loader-reported animation clips, if any. */
-  clips: unknown[];
+  /** Loader-reported animation clips — FBX/glTF carry them, the rest are
+   *  static formats and return an empty list. Typed so the viewport can feed
+   *  an AnimationMixer without casts. */
+  animations: AnimationClip[];
 }
 
 /**
@@ -56,19 +58,19 @@ export async function loadModel(path: string): Promise<LoadedModel> {
     case "glb": {
       const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
       const gltf = await new GLTFLoader().loadAsync(url);
-      return { root: gltf.scene, clips: gltf.animations };
+      return { root: gltf.scene, animations: gltf.animations };
     }
     case "fbx": {
       const { FBXLoader } = await import("three/examples/jsm/loaders/FBXLoader.js");
       const g: Group = await new FBXLoader().loadAsync(url);
-      return { root: g, clips: g.animations };
+      return { root: g, animations: g.animations };
     }
     case "obj": {
       const { OBJLoader } = await import("three/examples/jsm/loaders/OBJLoader.js");
       // MTL is resolved by the OBJ's own relative reference through the same
       // scheme — this is the case that proves sibling resolution works.
       const g = await new OBJLoader().loadAsync(url);
-      return { root: g, clips: [] };
+      return { root: g, animations: [] };
     }
     case "stl": {
       const [{ STLLoader }, THREE] = await Promise.all([
@@ -78,7 +80,7 @@ export async function loadModel(path: string): Promise<LoadedModel> {
       const geo = await new STLLoader().loadAsync(url);
       geo.computeVertexNormals();
       const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x9a9aae }));
-      return { root: mesh, clips: [] };
+      return { root: mesh, animations: [] };
     }
     case "ply": {
       const [{ PLYLoader }, THREE] = await Promise.all([
@@ -91,12 +93,12 @@ export async function loadModel(path: string): Promise<LoadedModel> {
         geo,
         new THREE.MeshStandardMaterial({ color: 0x9a9aae, vertexColors: geo.hasAttribute("color") }),
       );
-      return { root: mesh, clips: [] };
+      return { root: mesh, animations: [] };
     }
     case "dae": {
       const { ColladaLoader } = await import("three/examples/jsm/loaders/ColladaLoader.js");
       const c = await new ColladaLoader().loadAsync(url);
-      return { root: c.scene, clips: [] };
+      return { root: c.scene, animations: [] };
     }
     default:
       throw new Error(`No loader for .${ext}`);

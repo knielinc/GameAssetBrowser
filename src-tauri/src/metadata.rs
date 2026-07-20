@@ -1,7 +1,8 @@
-//! Lazy duration probing. Header-only symphonia probes run on a small
-//! dedicated rayon pool (capped so disk reads never starve auditioning);
-//! results are buffered and flushed to the frontend as one `meta:durations`
-//! event every ~250 ms — never tens of thousands of individual events.
+//! Lazy audio metadata probing (duration + sample rate/channels/bit depth).
+//! Header-only symphonia probes run on a small dedicated rayon pool (capped so
+//! disk reads never starve auditioning); results are buffered and flushed to
+//! the frontend as one `meta:audio` event every ~250 ms — never tens of
+//! thousands of individual events.
 
 use std::fs::File;
 use std::path::Path;
@@ -11,23 +12,29 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, FormatReader};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::units::TimeBase;
 use tauri::{AppHandle, Emitter};
 
 use crate::scanner;
-use crate::types::{events, DurationBatch};
+use crate::types::{events, AudioMetaBatch};
+
+/// One probed file: `(id, seconds, sample rate Hz, channels, bits per sample)`.
+/// 0 means "unknown" for every field but the id — lossy codecs have no bit
+/// depth, and the duration fallback can fail while the header facts survive.
+type ProbedEntry = (u32, f32, u32, u16, u16);
 
 const FLUSH_INTERVAL: Duration = Duration::from_millis(250);
 /// Cap the probe pool — don't starve the disk while the user is auditioning.
 const PROBE_THREADS: usize = 2;
 
-/// Probe durations for `entries`, emitting batched results until done.
-/// Blocks the calling (background scan) thread; aborts early — and stops
+/// Probe duration + format facts for `entries`, emitting batched results until
+/// done. Blocks the calling (background scan) thread; aborts early — and stops
 /// emitting — as soon as the scan generation moves past `gen`.
-pub fn probe_durations(app: AppHandle, entries: Vec<(u32, String)>, gen: u32) {
+pub fn probe_audio_meta(app: AppHandle, entries: Vec<(u32, String)>, gen: u32) {
     if entries.is_empty() {
         return;
     }
@@ -44,7 +51,7 @@ pub fn probe_durations(app: AppHandle, entries: Vec<(u32, String)>, gen: u32) {
         }
     };
 
-    let buffer: Arc<Mutex<Vec<(u32, f32)>>> = Arc::new(Mutex::new(Vec::new()));
+    let buffer: Arc<Mutex<Vec<ProbedEntry>>> = Arc::new(Mutex::new(Vec::new()));
     let done = Arc::new(AtomicBool::new(false));
 
     let flusher = {
@@ -68,8 +75,8 @@ pub fn probe_durations(app: AppHandle, entries: Vec<(u32, String)>, gen: u32) {
             if scanner::current_generation(&app) != gen {
                 return; // stale — drain remaining items as no-ops
             }
-            if let Some(seconds) = probe_duration(Path::new(path)) {
-                buffer.lock().push((*id, seconds));
+            if let Some((seconds, rate, channels, bits)) = probe_file(Path::new(path)) {
+                buffer.lock().push((*id, seconds, rate, channels, bits));
             }
         });
     });
@@ -82,22 +89,22 @@ pub fn probe_durations(app: AppHandle, entries: Vec<(u32, String)>, gen: u32) {
 
 fn flusher_loop(
     app: AppHandle,
-    buffer: Arc<Mutex<Vec<(u32, f32)>>>,
+    buffer: Arc<Mutex<Vec<ProbedEntry>>>,
     done: Arc<AtomicBool>,
     gen: u32,
 ) {
     loop {
         std::thread::sleep(FLUSH_INTERVAL);
         if scanner::current_generation(&app) != gen {
-            return; // superseded — these durations are for a dead file list
+            return; // superseded — this metadata is for a dead file list
         }
         // Read `done` BEFORE draining: if it was already set, every probe
         // result is guaranteed to be in the buffer, so this drain is final.
         let finished = done.load(Ordering::SeqCst);
         let entries = std::mem::take(&mut *buffer.lock());
         if !entries.is_empty() {
-            if let Err(e) = app.emit(events::META_DURATIONS, DurationBatch { entries }) {
-                eprintln!("[meta] failed to emit meta:durations: {e}");
+            if let Err(e) = app.emit(events::META_AUDIO, AudioMetaBatch { gen, entries }) {
+                eprintln!("[meta] failed to emit meta:audio: {e}");
             }
         }
         if finished {
@@ -106,11 +113,10 @@ fn flusher_loop(
     }
 }
 
-/// Header-only duration probe: no packets are decoded. Prefers the exact
-/// `n_frames` from the header; for files without one (typically CBR mp3
-/// lacking a Xing header) it measures the first packet's bitrate and
-/// extrapolates over the file size.
-fn probe_duration(path: &Path) -> Option<f32> {
+/// Header-only probe: `(seconds, sample rate, channels, bits per sample)`,
+/// each 0 when the header doesn't say. `None` only when nothing at all could
+/// be learned — emitting an all-zero entry would just churn the frontend maps.
+fn probe_file(path: &Path) -> Option<(f32, u32, u16, u16)> {
     let file = File::open(path).ok()?;
     let byte_len = file.metadata().ok().map(|m| m.len());
 
@@ -129,12 +135,44 @@ fn probe_duration(path: &Path) -> Option<f32> {
         .ok()?;
     let mut format = probed.format;
 
-    let (sample_rate, n_frames, time_base) = {
+    let (sample_rate, n_frames, time_base, channels, bits) = {
         let track = format.default_track()?;
         let params = &track.codec_params;
-        (params.sample_rate, params.n_frames, params.time_base)
+        (
+            params.sample_rate,
+            params.n_frames,
+            params.time_base,
+            // Fields the header may omit map to 0 = unknown. Lossy codecs
+            // (mp3/ogg/m4a) legitimately have no bit depth — 0 is expected.
+            params.channels.map_or(0u16, |c| c.count() as u16),
+            params.bits_per_sample.map_or(0u16, |b| b as u16),
+        )
     };
+    let rate = sample_rate.unwrap_or(0);
 
+    // Duration can fail (no header frame count AND no usable first packet)
+    // while the format facts above survive — report 0 rather than dropping
+    // the whole entry.
+    let seconds =
+        duration_seconds(format.as_mut(), sample_rate, n_frames, time_base, byte_len)
+            .unwrap_or(0.0);
+    if seconds <= 0.0 && rate == 0 && channels == 0 && bits == 0 {
+        return None;
+    }
+    Some((seconds, rate, channels, bits))
+}
+
+/// Header-only duration: no packets are decoded on the happy path. Prefers the
+/// exact `n_frames` from the header; for files without one (typically CBR mp3
+/// lacking a Xing header) it measures the first packet's bitrate and
+/// extrapolates over the file size.
+fn duration_seconds(
+    format: &mut dyn FormatReader,
+    sample_rate: Option<u32>,
+    n_frames: Option<u64>,
+    time_base: Option<TimeBase>,
+    byte_len: Option<u64>,
+) -> Option<f32> {
     if let Some(frames) = n_frames {
         if let Some(sr) = sample_rate {
             if sr > 0 {

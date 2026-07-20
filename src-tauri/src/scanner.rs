@@ -108,7 +108,7 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
     let mut next_id: u32 = 0;
     let mut total: u64 = 0;
     let mut batch: Vec<FileEntry> = Vec::with_capacity(BATCH_SIZE);
-    // (id, path) list handed to the duration-probe worker after the walk.
+    // (id, path) list handed to the audio-metadata probe worker after the walk.
     let mut meta_queue: Vec<(u32, String)> = Vec::new();
     // (id, path) list handed to the dimension-probe worker after the walk.
     let mut tex_queue: Vec<(u32, String)> = Vec::new();
@@ -168,7 +168,7 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             let id = next_id;
             next_id += 1;
             total += 1;
-            // AUDIO ONLY. probe_durations hands every queued path to symphonia;
+            // AUDIO ONLY. probe_audio_meta hands every queued path to symphonia;
             // queueing textures/models would make it try to decode `.png` and
             // `.fbx` — thousands of them in a Synty pack — burning CPU and
             // flooding stderr for results that can never exist.
@@ -210,7 +210,7 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
     }
 
     // Dimension probing gets its OWN thread rather than running after
-    // probe_durations below: an audio-heavy library would otherwise hold
+    // probe_audio_meta below: an audio-heavy library would otherwise hold
     // texture dims — and the Resolution/Shape filters — hostage to the
     // duration probe.
     {
@@ -223,9 +223,9 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
         }
     }
 
-    // Lazy duration probing runs on this (already background) thread until
-    // done or superseded.
-    metadata::probe_durations(app, meta_queue, gen);
+    // Lazy audio metadata probing runs on this (already background) thread
+    // until done or superseded.
+    metadata::probe_audio_meta(app, meta_queue, gen);
 }
 
 fn emit_batch(app: &AppHandle, gen: u32, batch: &mut Vec<FileEntry>) {

@@ -4,9 +4,9 @@ import { startScan } from "../ipc/commands";
 import { ASSET_KINDS, FILTER_FACETS_BY_KIND, emptyRange, rangeActive } from "../types";
 import type {
   AssetKind,
+  AudioMetaBatch,
   ChannelGroup,
   DimensionBatch,
-  DurationBatch,
   FileEntry,
   RangeFilter,
   ScanDone,
@@ -109,6 +109,12 @@ export interface LibraryState {
   /** file id → duration seconds. Mutated in place; `durationsVersion` signals changes. */
   durations: Map<number, number>;
   durationsVersion: number;
+  /** file id → [sample rate Hz, channels, bits per sample] from the audio
+   *  probe (0 = unknown part). Kept beside `durations` — same probe, same
+   *  batch — but separate so every duration consumer keeps its plain-seconds
+   *  map. Same mutate-in-place + version-counter idiom. */
+  audioMeta: Map<number, readonly [rate: number, channels: number, bits: number]>;
+  audioMetaVersion: number;
   /** file id → thumbnail cache key + image stats. Same mutate-in-place +
    *  version-counter idiom as `durations`. */
   thumbs: Map<number, { key: string; info: ThumbInfo | null }>;
@@ -139,7 +145,7 @@ export interface LibraryState {
   beginScan: (gen: number) => void;
   appendFiles: (files: FileEntry[]) => void;
   finishScan: (done: ScanDone) => void;
-  mergeDurations: (entries: DurationBatch["entries"]) => void;
+  mergeAudioMeta: (entries: AudioMetaBatch["entries"]) => void;
   mergeDims: (entries: DimensionBatch["entries"]) => void;
   mergeThumbs: (entries: ThumbBatch["entries"]) => void;
   /** Model thumbnails: rendered in the webview, so they arrive as a bare key
@@ -257,6 +263,8 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   total: 0,
   durations: new Map<number, number>(),
   durationsVersion: 0,
+  audioMeta: new Map<number, readonly [number, number, number]>(),
+  audioMetaVersion: 0,
   thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
   thumbsVersion: 0,
   dims: new Map<number, readonly [number, number]>(),
@@ -276,6 +284,8 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       total: 0,
       durations: new Map<number, number>(),
       durationsVersion: s.durationsVersion + 1,
+      audioMeta: new Map<number, readonly [number, number, number]>(),
+      audioMetaVersion: s.audioMetaVersion + 1,
       // File ids are per-scan, so a stale id would index the wrong texture.
       thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
       thumbsVersion: s.thumbsVersion + 1,
@@ -302,13 +312,20 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       hiddenFolders: pruneFolders(s.hiddenFolders, s),
     })),
 
-  mergeDurations: (entries) =>
+  mergeAudioMeta: (entries) =>
     set((s) => {
-      for (const [id, seconds] of entries) {
-        s.durations.set(id, seconds);
+      for (const [id, seconds, rate, channels, bits] of entries) {
+        // 0 = unmeasured. Keep `durations` holding only real values, so the
+        // duration sort/filter's unknown-handling (absent = keep / sort last)
+        // stays exactly as it was.
+        if (seconds > 0) s.durations.set(id, seconds);
+        if (rate > 0 || channels > 0 || bits > 0) s.audioMeta.set(id, [rate, channels, bits]);
       }
-      // Map identity is stable on purpose — the version counter is the signal.
-      return { durationsVersion: s.durationsVersion + 1 };
+      // Map identity is stable on purpose — the version counters are the signal.
+      return {
+        durationsVersion: s.durationsVersion + 1,
+        audioMetaVersion: s.audioMetaVersion + 1,
+      };
     }),
 
   mergeDims: (entries) =>

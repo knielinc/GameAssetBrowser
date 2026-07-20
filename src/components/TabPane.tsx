@@ -114,16 +114,21 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     spriteRows: 1,
     spriteFps: 12,
     spritePlaying: true,
+    iso: "rgb",
+    flatTiles: 1,
   });
   const patchPreview = useCallback(
     (p: Partial<PreviewState>) => setPreview3d((s) => ({ ...s, ...p })),
     [],
   );
-  // Sprite mode is a property of one image, not a global mode. Turn it off
-  // whenever the selection changes, so a normal texture never opens cropped
-  // into a grid cell because the last one happened to be a sprite sheet.
+  // Sprite mode and channel isolation are properties of one image, not global
+  // modes. Reset both whenever the selection changes, so a normal texture
+  // never opens cropped into a grid cell (or as a lone red channel) because
+  // of what the LAST one happened to be.
   useEffect(() => {
-    setPreview3d((s) => (s.spriteOn ? { ...s, spriteOn: false } : s));
+    setPreview3d((s) =>
+      s.spriteOn || s.iso !== "rgb" ? { ...s, spriteOn: false, iso: "rgb" } : s,
+    );
   }, [tab.selectedPath]);
   const onCellSelect = useCallback(
     (index: number) => {

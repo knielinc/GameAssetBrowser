@@ -12,6 +12,10 @@ import { create } from "zustand";
 const KEY = "gameassetbrowser.pixelArt";
 const LIGHT_KEY = "gameassetbrowser.modelLight";
 const INFO_KEY = "gameassetbrowser.showCellInfo";
+const WIRE_KEY = "gameassetbrowser.modelWireframe";
+const CHECKER_KEY = "gameassetbrowser.modelChecker";
+const SILHOUETTE_KEY = "gameassetbrowser.modelSilhouette";
+const TURNTABLE_KEY = "gameassetbrowser.modelTurntable";
 
 /** Lighting rigs for the 3D model viewport. Studio is the balanced default
  *  (and what thumbnails are baked with, for agreement between the two). */
@@ -40,6 +44,24 @@ function loadInfo(): boolean {
   }
 }
 
+/** Off-by-default viewport toggles (wireframe, checker, silhouette, turntable)
+ *  — the plain model view is the honest default; overlays are opt-in. */
+function loadFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveFlag(key: string, v: boolean): void {
+  try {
+    localStorage.setItem(key, v ? "1" : "0");
+  } catch {
+    /* private mode / storage disabled — keep it in-memory only */
+  }
+}
+
 function loadLight(): ModelLight {
   try {
     const v = localStorage.getItem(LIGHT_KEY);
@@ -62,6 +84,18 @@ export interface RenderPrefs {
   /** Which light rig the 3D model viewport uses. */
   modelLight: ModelLight;
   setModelLight: (v: ModelLight) => void;
+  /** Model viewport: render every material as wireframe. */
+  modelWireframe: boolean;
+  setModelWireframe: (v: boolean) => void;
+  /** Model viewport: swap base-colour maps for a UV checker grid. */
+  modelChecker: boolean;
+  setModelChecker: (v: boolean) => void;
+  /** Model viewport: show a 1.8-unit human capsule for scale reference. */
+  modelSilhouette: boolean;
+  setModelSilhouette: (v: boolean) => void;
+  /** Model viewport: slow auto-rotation of the model. */
+  modelTurntable: boolean;
+  setModelTurntable: (v: boolean) => void;
 }
 
 export const useRenderPrefs = create<RenderPrefs>((set, get) => ({
@@ -93,5 +127,25 @@ export const useRenderPrefs = create<RenderPrefs>((set, get) => ({
       /* storage disabled — keep it in-memory only */
     }
     set({ modelLight: v });
+  },
+  modelWireframe: loadFlag(WIRE_KEY),
+  setModelWireframe: (v) => {
+    saveFlag(WIRE_KEY, v);
+    set({ modelWireframe: v });
+  },
+  modelChecker: loadFlag(CHECKER_KEY),
+  setModelChecker: (v) => {
+    saveFlag(CHECKER_KEY, v);
+    set({ modelChecker: v });
+  },
+  modelSilhouette: loadFlag(SILHOUETTE_KEY),
+  setModelSilhouette: (v) => {
+    saveFlag(SILHOUETTE_KEY, v);
+    set({ modelSilhouette: v });
+  },
+  modelTurntable: loadFlag(TURNTABLE_KEY),
+  setModelTurntable: (v) => {
+    saveFlag(TURNTABLE_KEY, v);
+    set({ modelTurntable: v });
   },
 }));

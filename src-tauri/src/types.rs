@@ -36,7 +36,7 @@ pub const SKIP_DIRS: [&str; 1] = ["node_modules"];
 pub mod events {
     pub const SCAN_BATCH: &str = "scan:batch";
     pub const SCAN_DONE: &str = "scan:done";
-    pub const META_DURATIONS: &str = "meta:durations";
+    pub const META_AUDIO: &str = "meta:audio";
     pub const META_DIMENSIONS: &str = "meta:dimensions";
     pub const WAVEFORM_READY: &str = "waveform:ready";
     pub const PLAYBACK_POSITION: &str = "playback:position";
@@ -117,11 +117,15 @@ pub struct ScanDone {
     pub elapsed_ms: u64,
 }
 
-/// Batched `(file id, duration seconds)` pairs.
+/// Batched audio metadata: `(file id, seconds, sample rate Hz, channels, bits
+/// per sample)` — 0 = unknown for every field but the id. Carries the scan
+/// generation for the same reason `DimensionBatch` does (see below): file ids
+/// restart at 0 every scan, so the frontend drops stale-gen batches.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DurationBatch {
-    pub entries: Vec<(u32, f32)>,
+pub struct AudioMetaBatch {
+    pub gen: u32,
+    pub entries: Vec<(u32, f32, u32, u16, u16)>,
 }
 
 /// Batched `(file id, width, height)` triples. Carries the scan generation:
