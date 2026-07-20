@@ -4,6 +4,7 @@ import { FolderPlus, RefreshCw, Download, Upload } from "lucide-react";
 import { addFolders, rescanRoots, useLibraryStore } from "../stores/libraryStore";
 import { exportSettings, importSettings } from "../stores/settings";
 import FolderTree from "./FolderTree";
+import CollectionsSection from "./CollectionsSection";
 
 export interface SidebarProps {
   /** Panel width in px; owned by useSidebarWidth up in App. */
@@ -43,6 +44,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <FolderTree />
+        <CollectionsSection />
       </div>
 
       {/* One bordered footer: folder actions on top, settings import/export

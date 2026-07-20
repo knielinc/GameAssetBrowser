@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { Box, FileQuestion } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../../stores/libraryStore";
 import { useRenderPrefs } from "../../stores/renderPrefs";
+import { toggleFavoriteSmart, useFavoritesStore } from "../../stores/favoritesStore";
 import { thumbUrl } from "../../types";
 import { humanSize } from "../FileRow";
 import AssetCell, { type Badge } from "./AssetCell";
@@ -21,6 +22,7 @@ export default function ModelCell({ file, selected, focused }: ModelCellProps): 
   useLibraryStore((s) => s.thumbsVersion);
   const thumb = useLibraryStore.getState().thumbs.get(file.id);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
+  const starred = useFavoritesStore((s) => s.favorites.has(file.path));
 
   const unsupported = UNPREVIEWABLE.has(file.ext);
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];
@@ -35,6 +37,8 @@ export default function ModelCell({ file, selected, focused }: ModelCellProps): 
       badges={badges}
       selected={selected}
       focused={focused}
+      starred={starred}
+      onToggleStar={() => toggleFavoriteSmart(file.path)}
     >
       <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-[#15151d] to-[#0c0c12]">
         {thumb !== undefined ? (

@@ -8,16 +8,26 @@ import {
   type ReactElement,
 } from "react";
 import clsx from "clsx";
-import { ChevronDown, ChevronUp, Copy, FolderOpen, FolderTree as FolderTreeIcon } from "lucide-react";
+import {
+  BookmarkMinus,
+  BookmarkPlus,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  FolderOpen,
+  FolderTree as FolderTreeIcon,
+} from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { showInExplorer } from "../ipc/commands";
 import { activeFilterCount, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { revealInNavigator } from "../stores/revealFolder";
+import { toggleFavoriteSmart, useFavoritesStore } from "../stores/favoritesStore";
 import { loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import type { TextureItem } from "../material/classify";
 import ContextMenu from "./ContextMenu";
+import CollectionPopup from "./CollectionPopup";
 import FileRow, { MaterialRow, rowGrid } from "./FileRow";
 
 const ROW_HEIGHT = 28;
@@ -142,6 +152,9 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   const currentPath = usePlayerStore((s) => s.currentPath);
   const playing = usePlayerStore((s) => s.playing);
+  // Fresh Set identity per toggle, so the row props (plain booleans) recompute.
+  const favorites = useFavoritesStore((s) => s.favorites);
+  const collectionScope = useLibraryStore((s) => s.collectionScope);
   const headers = headersFor(kind);
 
   const virtualizer = useVirtualizer({
@@ -197,6 +210,20 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
     loadAndSelect(filesRef.current[index]!, index);
   }, []);
 
+  // Stable like onSelect, resolved through the same refs. Grouped material
+  // rows have no star slot, so only file-backed rows land here.
+  const onToggleStar = useCallback((index: number) => {
+    const its = itemsRef.current;
+    const it = its?.[index];
+    const path =
+      its !== undefined
+        ? it !== undefined && it.kind === "file"
+          ? it.file.path
+          : undefined
+        : filesRef.current[index]?.path;
+    if (path !== undefined) toggleFavoriteSmart(path);
+  }, []);
+
   // Single menu state = at most one menu. Right-click INSIDE the selection
   // keeps it — the menu acts on all of it; outside, it collapses to the
   // clicked row first (Explorer convention). Either way it deliberately does
@@ -204,6 +231,9 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   // ContextMenu's mousedown close, so the menu re-opens at the new position.
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  // "Add to collection…" chooser, anchored where the context menu was — it
+  // opens as the menu closes, carrying the same selection snapshot.
+  const [colPopup, setColPopup] = useState<{ x: number; y: number; paths: string[] } | null>(null);
   const onRowContextMenu = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
     const its = itemsRef.current;
     const kind = kindRef.current;
@@ -314,6 +344,8 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         durationSeconds={undefined}
                         formatLabel={undefined}
                         showDuration={false}
+                        starred={favorites.has(it.file.path)}
+                        onToggleStar={onToggleStar}
                         selected={selectedPaths.has(it.key)}
                         focused={multiSelect && it.key === selectedPath}
                         playing={false}
@@ -333,6 +365,8 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         kind === "audio" ? formatAudioMeta(audioMeta.get(file!.id)) : undefined
                       }
                       showDuration={kind === "audio"}
+                      starred={favorites.has(file!.path)}
+                      onToggleStar={onToggleStar}
                       selected={selectedPaths.has(file!.path)}
                       focused={multiSelect && file!.path === selectedPath}
                       playing={kind === "audio" && playing && file!.path === currentPath}
@@ -378,7 +412,37 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                 });
               },
             },
+            {
+              // Whole selection, like Copy paths (materials expand to members).
+              label: menu.count > 1 ? `Add to collection… (${menu.count})` : "Add to collection…",
+              icon: BookmarkPlus,
+              onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
+            },
+            // Only while browsing a user collection — the one place "remove"
+            // has an unambiguous target. Favorites/Recent are not collections.
+            ...(collectionScope !== null && collectionScope.startsWith("col:")
+              ? [
+                  {
+                    label: menu.count > 1 ? `Remove from collection (${menu.count})` : "Remove from collection",
+                    icon: BookmarkMinus,
+                    onClick: () => {
+                      useFavoritesStore
+                        .getState()
+                        .removeFromCollection(collectionScope.slice(4), menu.paths);
+                    },
+                  },
+                ]
+              : []),
           ]}
+        />
+      )}
+
+      {colPopup !== null && (
+        <CollectionPopup
+          x={colPopup.x}
+          y={colPopup.y}
+          paths={colPopup.paths}
+          onClose={() => setColPopup(null)}
         />
       )}
     </div>

@@ -42,6 +42,8 @@ pub mod events {
     pub const PLAYBACK_POSITION: &str = "playback:position";
     pub const PLAYBACK_STATE: &str = "playback:state";
     pub const THUMB_READY: &str = "thumb:ready";
+    pub const DUPES_PROGRESS: &str = "dupes:progress";
+    pub const DUPES_DONE: &str = "dupes:done";
 }
 
 /// Per-image facts derived while building the thumbnail — free, since the
@@ -146,6 +148,32 @@ pub struct WaveformReady {
     pub path: String,
     pub bins: u32,
     pub peaks: Vec<f32>,
+}
+
+/// Duplicate-hunt progress: `done` of `total` size-collision candidates
+/// prefix-hashed so far (the confirm pass rides inside the same count).
+/// Keyed by path, not file id, so no scan generation is needed.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DupeProgress {
+    pub done: u32,
+    pub total: u32,
+}
+
+/// One confirmed duplicate set: files whose full content hashed identical.
+/// `size` is the byte size of EACH member.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DupeGroup {
+    pub size: u64,
+    pub paths: Vec<String>,
+}
+
+/// Groups sorted by wasted bytes — `size × (n − 1)` — descending.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DupesDone {
+    pub groups: Vec<DupeGroup>,
 }
 
 #[derive(Clone, Serialize)]

@@ -55,6 +55,21 @@ export function requestThumbs(items: [number, string][]): Promise<number[]> {
   return invoke<number[]>("request_thumbs", { items });
 }
 
+/**
+ * Start a duplicate hunt over `files` (`[path, size]` pairs — the backend
+ * retains no scan list, so the frontend hands its copy over). Progress and
+ * the result arrive via the `dupes:progress` / `dupes:done` events (payload
+ * types in src/ipc/events.ts); a new call supersedes any in-flight run.
+ */
+export function findDuplicates(files: [string, number][]): Promise<void> {
+  return invoke<void>("find_duplicates", { files });
+}
+
+/** Abort any in-flight duplicate hunt; no further dupes:* events are emitted. */
+export function cancelDuplicates(): Promise<void> {
+  return invoke<void>("cancel_duplicates");
+}
+
 /** Open a Windows Explorer window with `path` pre-selected. Rejects if the path no longer exists. */
 export function showInExplorer(path: string): Promise<void> {
   return invoke<void>("show_in_explorer", { path });

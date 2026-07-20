@@ -7,6 +7,7 @@ import {
   playerSetVolume,
 } from "../ipc/commands";
 import { useLibraryStore, type LibFile } from "./libraryStore";
+import { useFavoritesStore } from "./favoritesStore";
 
 /**
  * Mutable playhead written by the 20 Hz `playback:position` listener and read
@@ -89,11 +90,18 @@ let loadTimer: number | undefined;
  * `debounceMs > 0` delays only the invoke (trailing) — selection, waveform
  * reset, and playhead reset are applied immediately so the UI keeps up with
  * rapid arrow-key scrubbing without spamming the backend.
+ * `forcePlay` starts playback even with autoplay off (the shuffle button —
+ * a deliberate "play me something" gesture, unlike passive selection).
  */
-export function loadAndSelect(file: LibFile, index: number, debounceMs = 0): void {
+export function loadAndSelect(file: LibFile, index: number, debounceMs = 0, forcePlay = false): void {
   const lib = useLibraryStore.getState();
   // The player is audio-only by construction; other kinds never reach here.
   lib.select("audio", index, file.path);
+
+  // Recents: loading a sample into the player counts as using it. The store
+  // throttles per-path (60 s), so arrow-scrub churn stays bounded; recorded
+  // before the same-path bail below so a genuine re-listen refreshes its slot.
+  useFavoritesStore.getState().recordRecent(file.path);
 
   // Re-selecting the already-loaded track (clicking the selected row, or a
   // clamped arrow press at the list edge): leave peaks/playhead/playback
@@ -103,7 +111,7 @@ export function loadAndSelect(file: LibFile, index: number, debounceMs = 0): voi
   // path, so letting it fire is correct.
   if (usePlayerStore.getState().currentPath === file.path) return;
 
-  const autoplay = usePlayerStore.getState().autoplay;
+  const autoplay = forcePlay || usePlayerStore.getState().autoplay;
   usePlayerStore.setState({
     currentPath: file.path,
     peaks: null,

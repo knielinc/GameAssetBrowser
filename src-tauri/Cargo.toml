@@ -109,6 +109,10 @@ image = { version = "0.25", default-features = false, features = [
 # libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
 # animated WebP (launcher assets, etc.); libwebp reads them.
 webp = "0.3"
+# Duplicate finder (dupes.rs): xxh3 for the two-stage content hash — not
+# cryptographic on purpose, it only needs to be fast and collision-checked by
+# the full-file confirm pass.
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs).
 # Same 0.61 tauri/tao already use, so no new crate in the tree.

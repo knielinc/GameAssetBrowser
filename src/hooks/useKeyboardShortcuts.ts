@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { playerSeek } from "../ipc/commands";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { toggleFavoriteSmart } from "../stores/favoritesStore";
 import { switchTab } from "../stores/tabs";
 import {
   loadAndSelect,
@@ -38,6 +39,7 @@ const AUTOPLAY_DEBOUNCE_MS = 60;
  *   ↑/↓        move selection — by 1 in a list, by one row in a grid
  *   ←/→        seek ±2 s (audio list) · move ∓1 cell (grid)
  *   Space      play/pause · Enter replay · L loop
+ *   F          toggle favorite (whole selection when the focused item is in it)
  *   Ctrl+1/2/3 switch tab
  *   Ctrl+A     select all visible · Escape collapse multi-selection
  */
@@ -174,6 +176,16 @@ export function useKeyboardShortcuts(
         case "KeyL": {
           if (!isAudio) return;
           usePlayerStore.getState().toggleLoop();
+          break;
+        }
+
+        case "KeyF": {
+          // Toggle favorite on the focused item — or the whole selection when
+          // the focused item is a member of it (toggleFavoriteSmart's rule).
+          // Typing targets already returned at the top of the handler.
+          const t = useLibraryStore.getState().tabs[activeKind];
+          if (t.selectedPath === null) return;
+          toggleFavoriteSmart(t.selectedPath);
           break;
         }
 

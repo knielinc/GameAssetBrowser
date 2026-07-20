@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { scopePredicate, useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { FAVORITES_SCOPE, RECENTS_SCOPE, useFavoritesStore } from "../stores/favoritesStore";
 import { channelGroupOf } from "../material/classify";
 import { useMaterialMembership } from "./useMaterialMembership";
 import {
@@ -75,6 +76,10 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const collectionScope = useLibraryStore((s) => s.collectionScope);
+  const favorites = useFavoritesStore((s) => s.favorites);
+  const collections = useFavoritesStore((s) => s.collections);
+  const recents = useFavoritesStore((s) => s.recents);
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const durations = useLibraryStore((s) => s.durations);
   const durationsVersion = useLibraryStore((s) => s.durationsVersion);
@@ -93,6 +98,22 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     // Folder scope (selected minus hidden) narrows the library BEFORE query/ext
     // filters apply.
     const inScope = scopePredicate(folderScopes, hiddenFolders);
+
+    // Collection scope: a plain path-membership filter layered on top of the
+    // folder scope — favorites, recents, or one user collection. Paths that
+    // fell out of the library (deleted files) simply never match; nothing to
+    // prune. `recentRank` doubles as the recency sort key below.
+    let inCollection: ReadonlySet<string> | null = null;
+    let recentRank: Map<string, number> | null = null;
+    if (collectionScope === FAVORITES_SCOPE) {
+      inCollection = favorites;
+    } else if (collectionScope === RECENTS_SCOPE) {
+      inCollection = new Set(recents.map((r) => r.path));
+      recentRank = new Map(recents.map((r) => [r.path, r.ts]));
+    } else if (collectionScope !== null) {
+      const col = collections.find((c) => `col:${c.name}` === collectionScope);
+      inCollection = new Set(col?.paths ?? []);
+    }
 
     // Facet gates hoisted out of the loop; each per-file check is O(1).
     const flt = filters;
@@ -115,6 +136,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
       if (!inScope(f.path)) continue;
+      if (inCollection !== null && !inCollection.has(f.path)) continue;
       if (hasExtFilter && !extFilter.has(f.ext)) continue;
       // Facets before the query: Map lookups beat the substring scan.
       if (hasMod && !inRange(f.modified, flt.modified)) continue; // always known
@@ -144,13 +166,19 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
       files.push(f);
     }
 
-    if (files.length > 1) {
+    if (recentRank !== null && files.length > 1) {
+      // The Recent scope overrides the toolbar sort: most-recently-used first
+      // — recency IS that view's point, and the ts ranking exists nowhere in
+      // SortField's vocabulary. Ties (never recorded) sink to the bottom.
+      const rank = recentRank;
+      files.sort((a, b) => (rank.get(b.path) ?? 0) - (rank.get(a.path) ?? 0));
+    } else if (files.length > 1) {
       const cmp = makeComparator(sortField, durations);
       const dir = sortDir === "asc" ? 1 : -1;
       files.sort((a, b) => dir * cmp(a, b));
     }
     return files;
-  }, [kind, allFiles, folderScopes, hiddenFolders, debouncedQuery, extFilter, sortField, sortDir, filters, durations, durationsVersion, dims, dimsVersion, membership]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, collectionScope, favorites, collections, recents, debouncedQuery, extFilter, sortField, sortDir, filters, durations, durationsVersion, dims, dimsVersion, membership]);
 }
 
 /**

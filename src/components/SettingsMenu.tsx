@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
-import { Check, Settings } from "lucide-react";
+import { BarChart3, Check, CopyCheck, Settings } from "lucide-react";
 import { MAX_SCALE, MIN_SCALE, THEMES, useThemeStore } from "../stores/theme";
+import DuplicatesModal from "./DuplicatesModal";
+import StatsModal from "./StatsModal";
 
 /**
  * The header settings menu: theme palette + UI scale. Both are global, persisted
@@ -13,6 +15,11 @@ import { MAX_SCALE, MIN_SCALE, THEMES, useThemeStore } from "../stores/theme";
  */
 export default function SettingsMenu(): ReactElement {
   const [open, setOpen] = useState(false);
+  // Library tools launched from the menu. Mounted as siblings of the popup —
+  // opening one closes the popup, so the outside-mousedown closer never
+  // fights the modal's own backdrop handling.
+  const [showDupes, setShowDupes] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const themeId = useThemeStore((s) => s.themeId);
   const setTheme = useThemeStore((s) => s.setTheme);
@@ -108,8 +115,37 @@ export default function SettingsMenu(): ReactElement {
           <div className="mt-1.5 text-[10px] leading-snug text-faint">
             Scales the whole interface on release — 100% is the 16px base.
           </div>
+
+          <div className="mb-1.5 mt-4 text-[10px] font-medium uppercase tracking-wide text-faint">
+            Library
+          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            onClick={() => {
+              setOpen(false);
+              setShowDupes(true);
+            }}
+          >
+            <CopyCheck size={13} className="shrink-0 text-faint" />
+            Find duplicates…
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            onClick={() => {
+              setOpen(false);
+              setShowStats(true);
+            }}
+          >
+            <BarChart3 size={13} className="shrink-0 text-faint" />
+            Library statistics…
+          </button>
         </div>
       )}
+
+      {showDupes && <DuplicatesModal onClose={() => setShowDupes(false)} />}
+      {showStats && <StatsModal onClose={() => setShowStats(false)} />}
     </div>
   );
 }

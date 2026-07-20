@@ -1,6 +1,6 @@
 import { memo, type CSSProperties, type MouseEvent, type ReactElement } from "react";
 import clsx from "clsx";
-import { Layers } from "lucide-react";
+import { Layers, Star } from "lucide-react";
 import { formatTime } from "./player/TimeDisplay";
 import { CHANNEL_CODE } from "../material/table";
 import type { Material } from "../material/classify";
@@ -83,6 +83,11 @@ export interface FileRowProps {
   formatLabel: string | undefined;
   /** Audio only — drives the Format/Length columns and the grid template. */
   showDuration: boolean;
+  /** Favorited — the filled amber star; off renders a hover-reveal outline. */
+  starred: boolean;
+  /** Star-slot click, by row index (the FileList onSelect idiom, so the memo'd
+   *  row keeps one stable callback). Omitted → no star slot (material rows). */
+  onToggleStar?: (index: number) => void;
   /** Multi-selection membership — the accent tint + left bar. */
   selected: boolean;
   /** Keyboard cursor while a multi-selection exists — the extra inset ring.
@@ -103,6 +108,8 @@ function FileRowInner({
   durationSeconds,
   formatLabel,
   showDuration,
+  starred,
+  onToggleStar,
   selected,
   focused,
   playing,
@@ -112,7 +119,7 @@ function FileRowInner({
   return (
     <div
       className={clsx(
-        "file-row",
+        "group file-row",
         rowGrid(showDuration),
         selected && "row-selected",
         focused && "row-focused",
@@ -124,6 +131,27 @@ function FileRowInner({
       }}
     >
       <div className="flex min-w-0 items-center gap-2">
+        {/* Fixed slot (not hover-inserted) so names never shift; invisible
+            until hover unless favorited. stopPropagation: a star click must
+            not select — or on the audio list, play — the row. */}
+        {onToggleStar !== undefined && (
+          <button
+            type="button"
+            title={starred ? "Remove from favorites" : "Add to favorites (F)"}
+            className={clsx(
+              "shrink-0 rounded p-0.5 transition-opacity duration-[120ms]",
+              starred
+                ? "text-kind-model opacity-100"
+                : "text-dim opacity-0 hover:text-text group-hover:opacity-100",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleStar(index);
+            }}
+          >
+            <Star size={12} fill={starred ? "currentColor" : "none"} />
+          </button>
+        )}
         {playing && (
           <span className="eq shrink-0">
             <span />

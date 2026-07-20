@@ -10,6 +10,8 @@ import {
   type AssetKind,
   type AtlasChoiceSettings,
   type ChannelGroup,
+  type CollectionSettings,
+  type RecentSettings,
   type RangeFilter,
   type Settings,
   type SortDir,
@@ -27,6 +29,7 @@ import {
 } from "../ipc/commands";
 import { defaultTabs, rescanRoots, useLibraryStore, type TabState } from "./libraryStore";
 import { useAtlasStore } from "./atlasStore";
+import { RECENTS_CAP, useFavoritesStore } from "./favoritesStore";
 import { usePlayerStore } from "./playerStore";
 
 function defaultFilterSettings(): TabFilterSettings {
@@ -69,6 +72,9 @@ export const DEFAULT_SETTINGS: Settings = {
   folderScopes: [],
   hiddenFolders: [],
   atlases: {},
+  favorites: [],
+  collections: [],
+  recents: [],
 };
 
 const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
@@ -221,7 +227,47 @@ export function sanitize(raw: unknown): Settings {
     folderScopes: strArray(v2.folderScopes, d.folderScopes),
     hiddenFolders: strArray(v2.hiddenFolders, d.hiddenFolders),
     atlases: sanitizeAtlases(v2.atlases),
+    // Absent pre-feature → empty; malformed entries drop, the file never
+    // crashes startup. Stale paths (files since deleted) are NOT pruned —
+    // a favorite must survive an unplugged external drive.
+    favorites: [...new Set(strArray(v2.favorites, d.favorites))],
+    collections: sanitizeCollections(v2.collections),
+    recents: sanitizeRecents(v2.recents),
   };
+}
+
+/** Entries need a non-empty string name (deduped, first wins) and a string
+ *  array of paths — anything else is dropped, the sanitizer stays total. */
+function sanitizeCollections(raw: unknown): CollectionSettings[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CollectionSettings[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    if (!isObj(v)) continue;
+    if (typeof v.name !== "string" || v.name.trim() === "") continue;
+    if (seen.has(v.name)) continue;
+    seen.add(v.name);
+    out.push({ name: v.name, paths: [...new Set(strArray(v.paths, []))] });
+  }
+  return out;
+}
+
+/** Entries need a non-empty path and a finite ts; deduped by path (first =
+ *  most recent wins, matching the store's most-recent-first order), capped. */
+function sanitizeRecents(raw: unknown): RecentSettings[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RecentSettings[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    if (!isObj(v)) continue;
+    if (typeof v.path !== "string" || v.path === "") continue;
+    if (typeof v.ts !== "number" || !Number.isFinite(v.ts)) continue;
+    if (seen.has(v.path)) continue;
+    seen.add(v.path);
+    out.push({ path: v.path, ts: Math.round(v.ts) });
+    if (out.length >= RECENTS_CAP) break;
+  }
+  return out;
 }
 
 /** Keys are absolute paths, values {path, flipY}. Anything malformed is
@@ -259,6 +305,7 @@ function tabToSettings(t: TabState): TabSettings {
 function currentSettings(): Settings {
   const lib = useLibraryStore.getState();
   const player = usePlayerStore.getState();
+  const fav = useFavoritesStore.getState();
   return {
     version: 2,
     roots: lib.roots,
@@ -274,6 +321,9 @@ function currentSettings(): Settings {
     folderScopes: lib.folderScopes,
     hiddenFolders: lib.hiddenFolders,
     atlases: useAtlasStore.getState().overrides,
+    favorites: [...fav.favorites],
+    collections: fav.collections.map((c) => ({ name: c.name, paths: [...c.paths] })),
+    recents: fav.recents.map((r) => ({ ...r })),
   };
 }
 
@@ -318,6 +368,19 @@ function installSubscriptions(): void {
 
   useAtlasStore.subscribe((state, prev) => {
     if (state.overrides !== prev.overrides) saveSettings();
+  });
+
+  // Every favorites-store mutation builds a fresh identity, mirroring the
+  // `tabs` contract above — one shallow compare covers star/collection/recent
+  // changes.
+  useFavoritesStore.subscribe((state, prev) => {
+    if (
+      state.favorites !== prev.favorites ||
+      state.collections !== prev.collections ||
+      state.recents !== prev.recents
+    ) {
+      saveSettings();
+    }
   });
 
   usePlayerStore.subscribe((state, prev) => {
@@ -387,8 +450,13 @@ function applySettings(settings: Settings): void {
     tabs,
     folderScopes: settings.folderScopes,
     hiddenFolders: settings.hiddenFolders,
+    // Session-only; an import may drop the collection it referenced.
+    collectionScope: null,
   });
   useAtlasStore.getState().hydrate(settings.atlases);
+  useFavoritesStore
+    .getState()
+    .hydrate(settings.favorites, settings.collections, settings.recents);
   usePlayerStore.setState({
     volume: settings.volume,
     loop: settings.loop,

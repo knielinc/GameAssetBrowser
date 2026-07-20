@@ -18,6 +18,32 @@ import { positionRef, usePlayerStore, usePositionStore } from "../stores/playerS
 
 let initialized = false;
 
+// ---- duplicate finder ------------------------------------------------------
+// Event names + payload types live HERE rather than in types.ts/EVT because
+// nothing global listens for them: the duplicates modal subscribes only while
+// mounted (initIpcEvents stays app-lifetime listeners only). Payloads are
+// keyed by path, not file id, so no scan-generation guard is needed.
+
+export const DUPES_PROGRESS = "dupes:progress";
+export const DUPES_DONE = "dupes:done";
+
+/** `done` of `total` size-collision candidates hashed so far. */
+export interface DupeProgress {
+  done: number;
+  total: number;
+}
+
+/** One confirmed duplicate set; `size` is the byte size of EACH member. */
+export interface DupeGroup {
+  size: number;
+  paths: string[];
+}
+
+/** Groups sorted by wasted bytes — `size × (n − 1)` — descending. */
+export interface DupesDone {
+  groups: DupeGroup[];
+}
+
 /**
  * Scan generations are monotonic, and events for a brand-new generation can
  * reach the webview BEFORE the `start_scan` invoke promise resolves (event

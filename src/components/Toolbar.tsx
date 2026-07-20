@@ -6,6 +6,7 @@ import {
   Blend,
   Check,
   ChevronDown,
+  Dices,
   Eye,
   EyeOff,
   Grid2x2,
@@ -22,6 +23,7 @@ import { activeFilterCount, useLibraryStore } from "../stores/libraryStore";
 import FilterMenu from "./FilterMenu";
 import { useRenderPrefs } from "../stores/renderPrefs";
 import { usePanelPrefs } from "../stores/panelPrefs";
+import { shuffleVisible, useShuffleStore } from "../stores/shuffle";
 import { MAX_CELL, MIN_CELL } from "../stores/settings";
 
 /** A folder/inspector panel toggle, sitting next to the panel it opens. */
@@ -85,6 +87,8 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const toggleRight = usePanelPrefs((s) => s.toggleRight);
   const showCellInfo = useRenderPrefs((s) => s.showCellInfo);
   const toggleCellInfo = useRenderPrefs((s) => s.toggleCellInfo);
+  // Published by TabPane so the dice greys out on an empty visible list.
+  const shuffleCount = useShuffleStore((s) => s.count);
 
   // A custom sort dropdown — the native <select> popup can't be rounded or
   // themed in WebView2, so it never matched the rest of the app.
@@ -163,6 +167,18 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           <X size={11} />
         </button>
       )}
+
+      {/* Shuffle sits with the narrowing cluster: it picks FROM the current
+          visible list, so it reads as acting on what search/filters left. */}
+      <button
+        type="button"
+        className="icon-btn"
+        disabled={shuffleCount === 0}
+        title={kind === "audio" ? "Shuffle — play a random sample" : "Shuffle — jump to a random item"}
+        onClick={() => shuffleVisible(kind)}
+      >
+        <Dices size={13} />
+      </button>
 
       <div className="min-w-0 flex-1" />
 

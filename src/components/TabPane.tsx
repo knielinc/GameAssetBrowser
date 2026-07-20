@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
 import clsx from "clsx";
-import { Copy, FolderOpen, FolderTree as FolderTreeIcon, Loader2 } from "lucide-react";
+import {
+  BookmarkMinus,
+  BookmarkPlus,
+  Copy,
+  FolderOpen,
+  FolderTree as FolderTreeIcon,
+  Loader2,
+} from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { usePanelWidth } from "../hooks/usePanelWidth";
 import { usePanelPrefs } from "../stores/panelPrefs";
@@ -8,9 +15,12 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
 import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { useFavoritesStore } from "../stores/favoritesStore";
+import { publishShuffleSource } from "../stores/shuffle";
 import { showInExplorer } from "../ipc/commands";
 import { revealInNavigator } from "../stores/revealFolder";
 import type { AssetKind } from "../types";
+import CollectionPopup from "./CollectionPopup";
 import FileList, { selectionFilePaths } from "./FileList";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
@@ -69,7 +79,19 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   // exists — single selection keeps its classic look.
   const multiSelect = tab.selectedPaths.size > 1;
 
+  // Publish the rendered order for the toolbar's shuffle button — the dice
+  // lives outside this pane, and only the pane knows the visible list.
+  useEffect(() => {
+    publishShuffleSource(visibleKeys, visible);
+  }, [visibleKeys, visible]);
+
   const [preview, setPreview] = useState<LibFile | null>(null);
+  // Recents: opening a fullscreen texture/model preview is this pane's
+  // "used it" moment — the counterpart of playerStore's load-and-play choke
+  // point. The store throttles repeats (60 s per path).
+  useEffect(() => {
+    if (preview !== null) useFavoritesStore.getState().recordRecent(preview.path);
+  }, [preview]);
   // The shortcut hook resolves Space against the FLAT file list, but in the
   // grouped view the selection is keyed by the grouped item — a material's key
   // is no file path, and its index is a grouped index. Re-resolve here, where
@@ -108,6 +130,9 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     paths: string[];
     count: number;
   } | null>(null);
+  // "Add to collection…" chooser, anchored where the context menu was.
+  const [colPopup, setColPopup] = useState<{ x: number; y: number; paths: string[] } | null>(null);
+  const collectionScope = useLibraryStore((s) => s.collectionScope);
   // Inspector show/hide is shared with the TabBar toggle; its width is a
   // user-dragged right-anchored panel, just like the left sidebar.
   const inspectorOpen = usePanelPrefs((s) => s.right);
@@ -438,7 +463,37 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
                 });
               },
             },
+            {
+              // Whole selection, like Copy paths (materials expand to members).
+              label: menu.count > 1 ? `Add to collection… (${menu.count})` : "Add to collection…",
+              icon: BookmarkPlus,
+              onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
+            },
+            // Only while browsing a user collection — the one place "remove"
+            // has an unambiguous target. Favorites/Recent are not collections.
+            ...(collectionScope !== null && collectionScope.startsWith("col:")
+              ? [
+                  {
+                    label: menu.count > 1 ? `Remove from collection (${menu.count})` : "Remove from collection",
+                    icon: BookmarkMinus,
+                    onClick: () => {
+                      useFavoritesStore
+                        .getState()
+                        .removeFromCollection(collectionScope.slice(4), menu.paths);
+                    },
+                  },
+                ]
+              : []),
           ]}
+        />
+      )}
+
+      {colPopup !== null && (
+        <CollectionPopup
+          x={colPopup.x}
+          y={colPopup.y}
+          paths={colPopup.paths}
+          onClose={() => setColPopup(null)}
         />
       )}
     </>

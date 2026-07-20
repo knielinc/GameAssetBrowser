@@ -3,8 +3,10 @@ import clsx from "clsx";
 import { Image as ImageIcon } from "lucide-react";
 import { useThumbSrc } from "../../hooks/useThumbSrc";
 import { useRenderPrefs } from "../../stores/renderPrefs";
+import { useFavoritesStore } from "../../stores/favoritesStore";
 import { CHANNEL_CODE, CHANNEL_LABEL, STRIP_CHANNELS, type Channel } from "../../material/table";
 import type { Material } from "../../material/classify";
+import { CellStar } from "./AssetCell";
 
 export interface MaterialCellProps {
   material: Material;
@@ -52,6 +54,14 @@ export default function MaterialCell({
   const showCellInfo = useRenderPrefs((s) => s.showCellInfo);
   const packed = packedOf(material);
   const lowConfidence = material.confidence < 0.8;
+  // A material's key names nothing on disk, so its star favorites every member
+  // map — that way the maps travel together into the Favorites scope. Filled
+  // only when ALL members are starred; toggling from a partial state completes
+  // the set rather than clearing it.
+  const setFavorites = useFavoritesStore((s) => s.setFavorites);
+  const starred = useFavoritesStore((s) =>
+    material.members.every((m) => s.favorites.has(m.file.path)),
+  );
 
   return (
     // No margins here: AssetGrid computes row height from the cell box, so
@@ -73,6 +83,15 @@ export default function MaterialCell({
         )}
       >
         <div className="alpha-checker relative aspect-square w-full overflow-hidden">
+          <CellStar
+            starred={starred}
+            onToggle={() =>
+              setFavorites(
+                material.members.map((m) => m.file.path),
+                !starred,
+              )
+            }
+          />
           {src !== null ? (
             <img
               key={imgKey}

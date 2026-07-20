@@ -3,6 +3,7 @@ import { Image as ImageIcon } from "lucide-react";
 import type { LibFile } from "../../stores/libraryStore";
 import { useThumbSrc } from "../../hooks/useThumbSrc";
 import { useRenderPrefs } from "../../stores/renderPrefs";
+import { toggleFavoriteSmart, useFavoritesStore } from "../../stores/favoritesStore";
 import { humanSize } from "../FileRow";
 import AssetCell, { type Badge } from "./AssetCell";
 
@@ -26,6 +27,7 @@ export default function TextureCell({
   // no IPC round trip. `info` (badges) fills in when the stats request lands.
   const { src, cacheKey, imgKey, info, onError, onLoad } = useThumbSrc(file);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
+  const starred = useFavoritesStore((s) => s.favorites.has(file.path));
 
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];
   if (info != null) {
@@ -58,6 +60,8 @@ export default function TextureCell({
       focused={focused}
       checker
       thumbKey={gl === true ? cacheKey : undefined}
+      starred={starred}
+      onToggleStar={() => toggleFavoriteSmart(file.path)}
     >
       {src !== null ? (
         <img

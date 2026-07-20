@@ -1,6 +1,42 @@
 import { memo, type ReactElement, type ReactNode } from "react";
 import clsx from "clsx";
+import { Star } from "lucide-react";
 import { useRenderPrefs } from "../../stores/renderPrefs";
+
+/**
+ * Shared star button for grid cells (AssetCell chrome + MaterialCell's bespoke
+ * frame): hover-revealed until favorited, then always on in the amber kind hue.
+ * stopPropagation so a star click never doubles as a cell select.
+ */
+export function CellStar({
+  starred,
+  onToggle,
+}: {
+  starred: boolean;
+  onToggle: () => void;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      title={starred ? "Remove from favorites" : "Add to favorites (F)"}
+      className={clsx(
+        "absolute right-1 top-1 z-10 rounded-full p-1 transition-opacity duration-[120ms]",
+        // Drop shadow instead of a pill: legible on light thumbs without
+        // adding chrome to every cell corner.
+        "[filter:drop-shadow(0_1px_2px_rgb(0_0_0_/_0.7))]",
+        starred
+          ? "text-kind-model opacity-100"
+          : "text-white/85 opacity-0 hover:text-white group-hover:opacity-100",
+      )}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+    >
+      <Star size={14} fill={starred ? "currentColor" : "none"} />
+    </button>
+  );
+}
 
 export interface Badge {
   text: string;
@@ -32,6 +68,10 @@ export interface AssetCellProps {
   corner?: ReactNode;
   /** Pill pinned to the thumb's top-right — e.g. the file size. */
   topRight?: ReactNode;
+  /** Favorite state for the star button; the button renders only when
+   *  `onToggleStar` is provided (contexts with a real path behind the cell). */
+  starred?: boolean;
+  onToggleStar?: () => void;
 }
 
 function AssetCellInner({
@@ -45,6 +85,8 @@ function AssetCellInner({
   thumbKey,
   corner,
   topRight,
+  starred,
+  onToggleStar,
 }: AssetCellProps): ReactElement {
   const gl = thumbKey !== undefined;
   // The size/dimension/format pills are opt-out per the global setting.
@@ -79,6 +121,11 @@ function AssetCellInner({
         )}
       >
         {gl ? null : children}
+        {/* Chrome, like the pills — so it shows on GL cells whose children are
+            dropped. Above topRight (z-10) on the rare cell using both. */}
+        {onToggleStar !== undefined && (
+          <CellStar starred={starred === true} onToggle={onToggleStar} />
+        )}
         {showInfo && corner !== undefined && (
           <div className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-white">
             {corner}

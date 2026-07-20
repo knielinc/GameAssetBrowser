@@ -146,6 +146,14 @@ export interface LibraryState {
    * folder, even when an ancestor is scoped in (hidden always wins). Persisted.
    */
   hiddenFolders: string[];
+  /**
+   * Active collection scope narrowing the visible list ON TOP of the folder
+   * scopes: `"fav"` (favorites), `"recent"`, or `"col:<name>"` (a user
+   * collection — see favoritesStore). null = off. Session-only on purpose:
+   * a restart lands on the whole library, like selection. Shared across tabs
+   * for the same reason folderScopes is — a collection spans kinds.
+   */
+  collectionScope: string | null;
   activeTab: AssetKind;
 
   // ---- per-tab ----
@@ -178,6 +186,9 @@ export interface LibraryState {
   toggleScope: (path: string) => void;
   /** Clear the scope set (→ show the whole library). */
   clearScopes: () => void;
+  /** Set (or clear with null) the active collection scope. Toggling off an
+   *  active row is the caller's job — it knows which row was clicked. */
+  setCollectionScope: (scope: string | null) => void;
   /** Add/remove a folder from the hidden set (shift-click / eye / context). */
   toggleHidden: (path: string) => void;
   /** Un-hide a folder and every hidden folder beneath it (reset a subtree). */
@@ -293,6 +304,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   dimsVersion: 0,
   folderScopes: [],
   hiddenFolders: [],
+  collectionScope: null,
   activeTab: "audio",
   tabs: defaultTabs(),
 
@@ -459,6 +471,8 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
     }),
 
   clearScopes: () => set((s) => (s.folderScopes.length === 0 ? {} : { folderScopes: [] })),
+
+  setCollectionScope: (scope) => set({ collectionScope: scope }),
 
   toggleHidden: (path) =>
     set((s) => ({

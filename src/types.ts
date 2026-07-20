@@ -257,6 +257,18 @@ export interface AtlasChoiceSettings {
   flipY: boolean;
 }
 
+/** A user-named, ordered set of file paths (stores/favoritesStore.ts). */
+export interface CollectionSettings {
+  name: string;
+  paths: string[];
+}
+
+/** One recently-auditioned/previewed file. `ts` is unix seconds. */
+export interface RecentSettings {
+  path: string;
+  ts: number;
+}
+
 export interface Settings {
   version: 2;
   roots: string[];
@@ -273,4 +285,11 @@ export interface Settings {
   /** packDir (lowercased) -> chosen atlas. Persisted because re-picking the
    *  atlas on every launch would be worse than the bug it fixes. */
   atlases: Record<string, AtlasChoiceSettings>;
+  /** Starred file paths (the ★ button / F key). Absent pre-feature → empty. */
+  favorites: string[];
+  /** User-named collections, in creation order. */
+  collections: CollectionSettings[];
+  /** Recently played/previewed files, most-recent-first, capped (see
+   *  favoritesStore.RECENTS_CAP). */
+  recents: RecentSettings[];
 }

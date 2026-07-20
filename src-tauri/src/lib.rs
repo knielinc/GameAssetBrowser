@@ -1,4 +1,5 @@
 mod audio;
+mod dupes;
 mod explorer;
 mod index;
 mod metadata;
@@ -96,6 +97,7 @@ pub fn run() {
         .manage(scanner::ScanState::default())
         .manage(watcher::WatcherState::default())
         .manage(waveform::WaveformState::default())
+        .manage(dupes::DupeState::default())
         .manage(thumbs::ThumbState::default())
         .manage(thumbs::PreviewState::default())
         // Thumbnails are served as files over their own scheme rather than as
@@ -273,6 +275,8 @@ pub fn run() {
             modeltex::model_texture_hints,
             scanner::approve_texture,
             waveform::request_waveform,
+            dupes::find_duplicates,
+            dupes::cancel_duplicates,
             explorer::show_in_explorer,
             explorer::open_in_explorer,
             audio::commands::player_load,
