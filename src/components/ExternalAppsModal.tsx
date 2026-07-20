@@ -5,6 +5,7 @@ import { AudioLines, Box, FileSearch, Image as ImageIcon, Plus, X } from "lucide
 import { ASSET_KINDS, type AssetKind } from "../types";
 import { useExternalAppsStore } from "../stores/externalApps";
 import { useLibraryStore } from "../stores/libraryStore";
+import { IS_WINDOWS } from "../platform";
 
 /** Kind labels/icons for the picker chips and the per-entry badge. */
 const KIND_LABEL: Record<AssetKind, string> = { audio: "Audio", texture: "Texture", model: "Model" };
@@ -14,18 +15,19 @@ const KIND_ICON: Record<AssetKind, typeof AudioLines> = {
   model: Box,
 };
 
-/** Filename without directory or `.exe` — the default app name. */
+/** Filename without directory or a trailing `.exe`/`.app` — the default app
+ *  name. The suffixes are Windows/macOS-only; a bare Linux binary is unchanged. */
 function exeStem(path: string): string {
   const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
   const base = i < 0 ? path : path.slice(i + 1);
-  return base.replace(/\.exe$/i, "");
+  return base.replace(/\.(exe|app)$/i, "");
 }
 
 /**
  * "External apps…" (SettingsMenu): manage the per-kind "Open with <name>"
  * entries the file context menus offer. Add flow: pick a kind (defaults to
- * the current tab), pick an .exe via the native dialog, adjust the name
- * (defaults to the exe stem), Add. Same modal shell as DuplicatesModal.
+ * the current tab), pick an executable via the native dialog, adjust the name
+ * (defaults to the file stem), Add. Same modal shell as DuplicatesModal.
  */
 export default function ExternalAppsModal({ onClose }: { onClose: () => void }): ReactElement {
   const apps = useExternalAppsStore((s) => s.apps);
@@ -54,7 +56,10 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
     open({
       multiple: false,
       directory: false,
-      filters: [{ name: "Programs", extensions: ["exe"] }],
+      // Windows executables are .exe; on macOS/Linux there's no single
+      // extension (a Unix binary has none, a macOS .app is a bundle), so don't
+      // filter — the user picks the binary or app directly.
+      filters: IS_WINDOWS ? [{ name: "Programs", extensions: ["exe"] }] : undefined,
     })
       .then((picked) => {
         if (typeof picked !== "string") return;

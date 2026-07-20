@@ -1,5 +1,6 @@
-//! "Show in Explorer": open a Windows Explorer window with a file
-//! pre-selected, for the file-list context menu.
+//! "Show in file manager": reveal a file (or open a folder) in the OS file
+//! manager, for the file-list and folder-tree context menus. Windows Explorer
+//! (`/select`), macOS Finder (`open -R`), or the Linux desktop's xdg handler.
 
 use std::path::Path;
 
@@ -31,15 +32,34 @@ pub async fn show_in_explorer(path: String) -> Result<(), String> {
         Ok(())
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
-        Err(format!("show_in_explorer is Windows-only (path: {path})"))
+        // `open -R` reveals the file selected in a Finder window.
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("failed to launch Finder: {e}"))?;
+        Ok(())
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // No portable "select this file" across Linux file managers, so open
+        // its containing folder — every xdg-compliant desktop handles that.
+        let dir = Path::new(&path)
+            .parent()
+            .ok_or_else(|| format!("no parent directory for {path}"))?;
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| format!("failed to launch file manager: {e}"))?;
+        Ok(())
     }
 }
 
-/// Spawn `explorer.exe "<dir>"` to open a folder window directly, for the
-/// sidebar folder-tree context menu. Same spawn-and-forget and `async`
-/// rules as [`show_in_explorer`].
+/// Open a folder window directly, for the sidebar folder-tree context menu.
+/// Same spawn-and-forget and `async` rules as [`show_in_explorer`].
 #[tauri::command]
 pub async fn open_in_explorer(path: String) -> Result<(), String> {
     if !Path::new(&path).is_dir() {
@@ -56,8 +76,21 @@ pub async fn open_in_explorer(path: String) -> Result<(), String> {
         Ok(())
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
-        Err(format!("open_in_explorer is Windows-only (path: {path})"))
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("failed to launch Finder: {e}"))?;
+        Ok(())
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("failed to launch file manager: {e}"))?;
+        Ok(())
     }
 }

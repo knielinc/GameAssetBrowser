@@ -47,13 +47,15 @@ pub struct ScanState {
 }
 
 fn norm(path: &Path) -> Option<String> {
-    Some(
-        path.canonicalize()
-            .ok()?
-            .to_string_lossy()
-            .to_lowercase()
-            .replace('/', "\\"),
-    )
+    // Separators normalized to `\` so the boundary check in is_within_roots is
+    // uniform (the URL carries `/`). Case-folded only on Windows: canonicalize()
+    // already resolves to the real on-disk casing everywhere, so case-sensitive
+    // filesystems (Linux) match correctly without folding — and folding there
+    // would wrongly collapse two distinct files onto one path.
+    let s = path.canonicalize().ok()?.to_string_lossy().replace('/', "\\");
+    #[cfg(windows)]
+    let s = s.to_lowercase();
+    Some(s)
 }
 
 /// Allow a file the user explicitly browsed to as a model's atlas, so the
@@ -81,7 +83,11 @@ pub fn is_within_roots(app: &AppHandle, path: &Path) -> bool {
         let Ok(rc) = Path::new(r).canonicalize() else {
             return false;
         };
-        let root = rc.to_string_lossy().to_lowercase().replace('/', "\\");
+        // Same normalization as norm(): `\` separators everywhere, case-folded
+        // only on Windows.
+        let root = rc.to_string_lossy().replace('/', "\\");
+        #[cfg(windows)]
+        let root = root.to_lowercase();
         // Trailing-separator trim so the boundary test lands on the right char
         // (a drive root is "C:\"), then require a separator so `C:\AB` never
         // matches root `C:\A`.
