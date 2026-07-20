@@ -2,6 +2,7 @@
   "name": "game-asset-browser",
   "private": true,
   "version": "0.1.0",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "scripts": {
     "dev": "vite",

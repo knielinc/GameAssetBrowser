@@ -128,3 +128,10 @@ On Windows, `npm run export` also drops a standalone, portable `GameAssetBrowser
   dimensions, and thumbnails are probed lazily by capped worker pools. Filtering, sorting,
   the folder tree, and facet counts are all derived in the frontend from the in‑memory file
   list — no IPC round‑trips while you type or click.
+
+## License
+
+Source‑available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): free to
+use, modify, and share for **any noncommercial purpose** — personal, private, hobby,
+study, research — but **not for commercial use**. This is a source‑available license, not
+an OSI "open source" one (those permit commercial use).
