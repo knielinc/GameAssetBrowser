@@ -6,7 +6,6 @@ import {
   Blend,
   Check,
   ChevronDown,
-  Dices,
   Eye,
   EyeOff,
   Grid2x2,
@@ -16,6 +15,7 @@ import {
   PanelLeft,
   PanelRight,
   Search,
+  Shuffle,
   X,
 } from "lucide-react";
 import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
@@ -100,13 +100,17 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
       if (sortRef.current !== null && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setSortOpen(false);
+      if (e.key !== "Escape") return;
+      // Capture + stop: Escape closes THIS popup without also reaching the
+      // window-level shortcut handler, which would collapse a multi-selection.
+      e.stopPropagation();
+      setSortOpen(false);
     };
     window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     };
   }, [sortOpen]);
 
@@ -177,7 +181,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         title={kind === "audio" ? "Shuffle — play a random sample" : "Shuffle — jump to a random item"}
         onClick={() => shuffleVisible(kind)}
       >
-        <Dices size={13} />
+        <Shuffle size={13} />
       </button>
 
       <div className="min-w-0 flex-1" />

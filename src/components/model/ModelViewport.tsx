@@ -342,6 +342,15 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onUp);
       el.removeEventListener("wheel", onWheel);
+      // Restore swapped maps/flags BEFORE disposeModel, exactly like the
+      // load-on-change effect: mapOrigRef may point `.map` at the module-level
+      // shared checker, which disposeModel would otherwise walk and destroy
+      // (poisoning getCheckerTexture forever) while leaking the swapped-out
+      // originals. Unmount is the checker-on path the load effect never covers.
+      for (const [m, was] of wireOrigRef.current) m.wireframe = was;
+      wireOrigRef.current.clear();
+      for (const [m, was] of mapOrigRef.current) m.map = was;
+      mapOrigRef.current.clear();
       if (currentRef.current !== null) disposeModel(currentRef.current);
       const sil = silhouetteRef.current;
       if (sil !== null) {

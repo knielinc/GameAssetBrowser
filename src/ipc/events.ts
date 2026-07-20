@@ -130,8 +130,11 @@ export function initIpcEvents(): void {
 
   void listen<WaveformReady>(EVT.WAVEFORM_READY, (event) => {
     const { path, peaks } = event.payload;
-    // Stale guard: selection may have moved on while the decode ran.
-    if (path !== useLibraryStore.getState().tabs.audio.selectedPath) return;
+    // Guard on currentPath (not selectedPath): the waveform belongs to the
+    // LOADED track, which a hover preview can move without selecting — same
+    // reasoning as the spectrogram listener below. Selection-only would strand
+    // the flat fallback bar for the whole preview.
+    if (path !== usePlayerStore.getState().currentPath) return;
     usePlayerStore.setState({ peaks: new Float32Array(peaks) });
   });
 

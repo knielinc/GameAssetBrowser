@@ -18,7 +18,7 @@ import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
 import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { useFavoritesStore } from "../stores/favoritesStore";
-import { audioVisibleRef } from "../stores/playerStore";
+import { audioVisibleRef, useAudioListStore } from "../stores/playerStore";
 import { publishShuffleSource } from "../stores/shuffle";
 import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
 import { revealInNavigator } from "../stores/revealFolder";
@@ -94,7 +94,12 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   // audio keeps playing while the user browses another tab, and advancing
   // through the last-rendered audio order is exactly what they'd expect.
   useEffect(() => {
-    if (kind === "audio") audioVisibleRef.current = visible;
+    if (kind !== "audio") return;
+    audioVisibleRef.current = visible;
+    // Reactive twin for the transport's prev/next/shuffle enablement.
+    if (useAudioListStore.getState().count !== visible.length) {
+      useAudioListStore.setState({ count: visible.length });
+    }
   }, [kind, visible]);
 
   const [preview, setPreview] = useState<LibFile | null>(null);

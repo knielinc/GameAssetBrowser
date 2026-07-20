@@ -45,6 +45,9 @@ export interface TabFilters {
   audioChannels: Set<AudioChannelGroup>;
   /** Audio only — sample-rate buckets from the audio probe. */
   sampleRates: Set<SampleRateBucket>;
+  /** All kinds — on = only starred files. A view filter (ANDs with the folder
+   *  scope), distinct from the sidebar's whole-library Favorites scope. */
+  favorite: boolean;
 }
 
 export function defaultFilters(): TabFilters {
@@ -60,6 +63,7 @@ export function defaultFilters(): TabFilters {
     colors: new Set(),
     audioChannels: new Set(),
     sampleRates: new Set(),
+    favorite: false,
   };
 }
 

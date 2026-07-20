@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { scopePredicate, useLibraryStore } from "../stores/libraryStore";
+import { useFavoritesStore } from "../stores/favoritesStore";
 import { channelGroupOf } from "../material/classify";
 import {
   audioChannelGroupOf,
@@ -7,6 +8,7 @@ import {
   inRange,
   isPot,
   sampleRateBucketOf,
+  useCollectionMembers,
 } from "./useVisibleFiles";
 import { type MaterialMembership } from "./useMaterialMembership";
 import {
@@ -95,6 +97,8 @@ export interface FacetCounts {
   /** texture only; null otherwise. */
   shape: { square: ShapeRow; pot: ShapeRow } | null;
   size: RangeHistogram | null;                 // model only
+  /** All kinds — the single "Favorite" row (starred file), self-excluded. */
+  favorite: ShapeRow;
   /** All kinds — mtimes are always known, so `measured` = every file passing
    *  the other constraints. Linear bins (see histogram()). */
   modified: RangeHistogram;
@@ -119,7 +123,8 @@ const MOD = 256;
 const COLOR = 512;
 const ACHAN = 1024;
 const RATE = 2048;
-const FULL = 4095;
+const FAV = 4096;
+const FULL = 8191;
 
 function zeroRecord<K extends string>(keys: readonly K[]): Record<K, number> {
   const out = {} as Record<K, number>;
@@ -200,6 +205,11 @@ export function useFacetCounts(
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  // A collection scope replaces the folder scope (collection-as-folder), so the
+  // counts match useVisibleFiles. `favorites` also drives the Favorite facet
+  // row; the popup is open-only, so an unconditional subscription is fine.
+  const inCollection = useCollectionMembers();
+  const favorites = useFavoritesStore((s) => s.favorites);
   const query = useLibraryStore((s) => s.tabs[kind].query);
   const extFilter = useLibraryStore((s) => s.tabs[kind].extFilter);
   const filters = useLibraryStore((s) => s.tabs[kind].filters);
@@ -232,6 +242,7 @@ export function useFacetCounts(
     const colorActive = kind === "texture" && flt.colors.size > 0;
     const achanActive = kind === "audio" && flt.audioChannels.size > 0;
     const srActive = kind === "audio" && flt.sampleRates.size > 0;
+    const favActive = flt.favorite;
 
     // Size is stored in MB; compare in bytes, converted once outside the loop.
     const sizeBytes: RangeFilter = {
@@ -252,6 +263,7 @@ export function useFacetCounts(
     if (colorActive) base &= ~COLOR;
     if (achanActive) base &= ~ACHAN;
     if (srActive) base &= ~RATE;
+    if (favActive) base &= ~FAV;
 
     // Range facets collect self-excluded measured VALUES for the histogram;
     // multi-select facets keep small fixed count records.
@@ -273,6 +285,7 @@ export function useFacetCounts(
     const modDomain = newDomain();
     let sqCount = 0;
     let potCount = 0;
+    let favCount = 0;
 
     // Row sets are scope-only presence — stable under other facets and the
     // query, so rows never appear/disappear as the user narrows. The three
@@ -289,7 +302,10 @@ export function useFacetCounts(
 
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
-      if (!inScope(f.path)) continue;
+      // Collection scope replaces the folder scope, matching useVisibleFiles.
+      if (inCollection !== null) {
+        if (!inCollection.has(f.path)) continue;
+      } else if (!inScope(f.path)) continue;
       scoped++;
       presentExts.add(f.ext);
       // The classifier is total (name-cached), so compute once per file and
@@ -341,6 +357,7 @@ export function useFacetCounts(
       if (colorActive && (cb === null || flt.colors.has(cb))) mask |= COLOR;
       if (achanActive && (ag === null || flt.audioChannels.has(ag))) mask |= ACHAN;
       if (srActive && (rb === null || flt.sampleRates.has(rb))) mask |= RATE;
+      if (favActive && favorites.has(f.path)) mask |= FAV; // always known
 
       // Numerators are measured-only: an unmeasured file sits in no bucket
       // (while `visible` still keeps it — the documented discrepancy).
@@ -360,6 +377,7 @@ export function useFacetCounts(
       }
       if (kind === "model" && (mask | SIZE) === FULL) sizeValues.push(f.size / MIB);
       if (f.modified > 0 && (mask | MOD) === FULL) modValues.push(f.modified);
+      if (favorites.has(f.path) && (mask | FAV) === FULL) favCount++;
       if (mask === FULL) visible++;
     }
 
@@ -425,9 +443,10 @@ export function useFacetCounts(
               pot: { count: potCount, selected: flt.pot },
             },
       size: kind !== "model" ? null : histogram(sizeValues, true, asRangeDomain(sizeDomain)),
+      favorite: { count: favCount, selected: flt.favorite },
       modified: histogram(modValues, false, asRangeDomain(modDomain)),
       visible,
       scoped,
     };
-  }, [kind, allFiles, folderScopes, hiddenFolders, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, inCollection, favorites, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
 }

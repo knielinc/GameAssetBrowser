@@ -1,8 +1,15 @@
 import type { ReactElement } from "react";
 import clsx from "clsx";
-import { Pause, Play, Repeat, SkipForward, Square } from "lucide-react";
+import { ListEnd, Pause, Play, Repeat, Shuffle, SkipBack, SkipForward, Square } from "lucide-react";
 import { playerStop } from "../../ipc/commands";
-import { positionRef, usePlayerStore, usePositionStore } from "../../stores/playerStore";
+import {
+  playAdjacent,
+  positionRef,
+  shuffleAudio,
+  useAudioListStore,
+  usePlayerStore,
+  usePositionStore,
+} from "../../stores/playerStore";
 
 export default function TransportControls(): ReactElement {
   const playing = usePlayerStore((s) => s.playing);
@@ -14,6 +21,9 @@ export default function TransportControls(): ReactElement {
   const toggleLoop = usePlayerStore((s) => s.toggleLoop);
   const toggleAutoplay = usePlayerStore((s) => s.toggleAutoplay);
   const toggleAutoAdvance = usePlayerStore((s) => s.toggleAutoAdvance);
+  // Prev/next/shuffle step the visible audio list, so they light up as soon as
+  // one exists — even before a track is picked (next → first).
+  const hasList = useAudioListStore((s) => s.count > 0);
 
   const onStop = (): void => {
     if (!hasTrack) return;
@@ -26,6 +36,18 @@ export default function TransportControls(): ReactElement {
 
   return (
     <div className="flex shrink-0 items-center gap-1.5">
+      {/* Prev — play — next: the skip buttons flank Play so "back/forward one
+          track" reads at a glance, iPod-style. */}
+      <button
+        type="button"
+        className="icon-btn"
+        disabled={!hasList}
+        onClick={() => playAdjacent(-1)}
+        title="Previous track"
+      >
+        <SkipBack size={14} fill="currentColor" strokeWidth={0} />
+      </button>
+
       <button
         type="button"
         className="play-btn"
@@ -39,6 +61,28 @@ export default function TransportControls(): ReactElement {
           <Play size={15} fill="currentColor" strokeWidth={0} className="translate-x-px" />
         )}
       </button>
+
+      <button
+        type="button"
+        className="icon-btn"
+        disabled={!hasList}
+        onClick={() => playAdjacent(1)}
+        title="Next track"
+      >
+        <SkipForward size={14} fill="currentColor" strokeWidth={0} />
+      </button>
+
+      <button
+        type="button"
+        className="icon-btn"
+        disabled={!hasList}
+        onClick={shuffleAudio}
+        title="Shuffle — play a random track"
+      >
+        <Shuffle size={14} />
+      </button>
+
+      <div className="mx-0.5 h-5 w-px bg-bg" />
 
       <button
         type="button"
@@ -60,14 +104,15 @@ export default function TransportControls(): ReactElement {
       </button>
 
       {/* Loop and auto-advance are siblings on purpose: both answer "what
-          happens when the track ends?" — loop wins while both are lit. */}
+          happens when the track ends?" — loop wins while both are lit. Distinct
+          from the manual Next skip above: this is the automatic continue. */}
       <button
         type="button"
         className={clsx("icon-btn", autoAdvance && "icon-btn-active")}
         onClick={toggleAutoAdvance}
         title="Auto-advance: play the next file when a track ends"
       >
-        <SkipForward size={14} />
+        <ListEnd size={14} />
       </button>
 
       <button

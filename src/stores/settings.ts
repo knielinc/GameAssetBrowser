@@ -53,6 +53,7 @@ function defaultFilterSettings(): TabFilterSettings {
     colors: [],
     audioChannels: [],
     sampleRates: [],
+    favorite: false,
   };
 }
 
@@ -165,6 +166,7 @@ function sanitizeFilters(kind: AssetKind, raw: unknown): TabFilterSettings {
     colors: pick(raw.colors, COLOR_BUCKETS),
     audioChannels: pick(raw.audioChannels, AUDIO_CHANNEL_GROUPS),
     sampleRates: pick(raw.sampleRates, SAMPLE_RATE_BUCKETS),
+    favorite: bool(raw.favorite, false),
   };
   // The sortField gate, generalized: a texture-only facet that somehow landed
   // in the audio tab's settings degrades to off, never to an invisible

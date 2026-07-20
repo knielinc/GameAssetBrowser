@@ -230,10 +230,15 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
     // in-progress click) suppresses the preview outright.
     if (e.buttons !== 0) return;
     if (hoverTimerRef.current !== undefined) window.clearTimeout(hoverTimerRef.current);
+    // Capture the file NOW, not at fire time: the list can re-sort during the
+    // 350 ms dwell (a probe batch lands while sorted by Length, or a play
+    // reorders the Recent scope), and a stale index would audition a different
+    // row than the cursor was ever over — with no selection to explain it.
+    const file = filesRef.current[index];
+    if (file === undefined) return;
     hoverTimerRef.current = window.setTimeout(() => {
       hoverTimerRef.current = undefined;
-      const file = filesRef.current[index];
-      if (file !== undefined) hoverPlay(file);
+      hoverPlay(file);
     }, HOVER_PREVIEW_MS);
   }, []);
   const cancelHoverTimer = useCallback(() => {

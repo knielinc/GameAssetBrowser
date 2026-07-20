@@ -96,15 +96,23 @@ pub fn arm(app: &AppHandle, roots: &[String]) {
             return;
         }
     };
+    // Record ONLY the roots whose watch actually took. A per-root failure
+    // (unplugged drive, revoked share) must not kill the other roots' watches —
+    // but it also must not be remembered as watched, or the "already watching
+    // exactly this set" early return above would suppress every retry and the
+    // failed root would stay unwatched for the whole session. Dropping it from
+    // `roots` makes the next `finish_scan` re-arm re-attempt it.
+    let mut watched: Vec<String> = Vec::with_capacity(roots.len());
     for root in roots {
-        // Per-root failure (unplugged drive, revoked share) must not kill the
-        // other roots' watches.
         if let Err(e) = watcher.watch(Path::new(root), RecursiveMode::Recursive) {
             eprintln!("[watch] cannot watch {root}: {e}");
+            continue;
         }
+        watched.push(root.clone());
     }
+    watched.sort_unstable();
     inner.watcher = Some(watcher);
-    inner.roots = sorted;
+    inner.roots = watched;
 }
 
 /// Trailing-edge debounce: block for the first poke of a burst, absorb pokes
@@ -163,11 +171,19 @@ fn relevant_path(ev: &Event, p: &Path, roots: &[String]) -> bool {
 /// rescans of content the scanner would never list anyway. Components are
 /// checked BELOW the matching root (a root itself may be dot-named), and a
 /// plain file's own name is exempt like the scanner exempts files.
+///
+/// With OVERLAPPING roots one path is covered by several roots, and the scanner
+/// lists it as long as ONE covering root reaches it un-pruned (a nested root
+/// the user picked inside an outer root's dotted/`node_modules` subtree still
+/// scans). So a path counts as skipped only when EVERY covering root prunes it —
+/// a single covering root that reaches it means a real rescan is due.
 fn in_skipped_subtree(p: &Path, roots: &[String]) -> bool {
+    let mut covered = false;
     for root in roots {
         let Ok(rel) = p.strip_prefix(root) else {
             continue;
         };
+        covered = true;
         let comps: Vec<&std::ffi::OsStr> = rel
             .components()
             .filter_map(|c| match c {
@@ -176,7 +192,7 @@ fn in_skipped_subtree(p: &Path, roots: &[String]) -> bool {
             })
             .collect();
         let last = comps.len().saturating_sub(1);
-        return comps.iter().enumerate().any(|(i, name)| {
+        let skipped = comps.iter().enumerate().any(|(i, name)| {
             if i == last && !p.is_dir() {
                 return false; // files are never skipped by name — only dirs
             }
@@ -184,6 +200,9 @@ fn in_skipped_subtree(p: &Path, roots: &[String]) -> bool {
                 n.starts_with('.') || SKIP_DIRS.iter().any(|s| n.eq_ignore_ascii_case(s))
             })
         });
+        if !skipped {
+            return false; // reachable un-pruned from this root — not skipped
+        }
     }
-    false
+    covered // pruned by every covering root (false when none cover)
 }

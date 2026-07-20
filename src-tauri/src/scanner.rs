@@ -107,16 +107,46 @@ pub async fn start_scan(app: AppHandle, roots: Vec<String>) -> Result<u32, Strin
 /// can never drift apart.
 pub fn spawn_scan(app: &AppHandle, roots: Vec<String>) -> Result<u32, String> {
     let state = app.state::<ScanState>();
-    let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
-    // Record consent before the walk: the model:// scheme reads this, and a
-    // preview can be requested the moment the first batch lands.
-    *state.roots.lock() = roots.clone();
-    state.scanning.store(true, Ordering::SeqCst);
+    // Bump the generation, record consent, and raise the scanning flag as one
+    // step under the roots lock. Recording consent before the walk is required
+    // (the model:// scheme reads it, and a preview can be requested the moment
+    // the first batch lands); doing the bump+set atomically under the same lock
+    // `finish_scan` takes is what lets its generation-check-then-clear never
+    // interleave with this bump-and-set (see `finish_scan`).
+    let gen = {
+        let mut roots_guard = state.roots.lock();
+        let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        *roots_guard = roots.clone();
+        state.scanning.store(true, Ordering::SeqCst);
+        gen
+    };
+    // Arm the watcher at scan START, not only at `finish_scan`. A file created
+    // mid-walk fires no later event, so watching only after the walk leaves the
+    // cold first scan (and any freshly added root) blind to changes during it —
+    // and that gap bakes into the saved index, so index-served startups stay
+    // stale until some unrelated event forces a rescan. Events during the walk
+    // park in `rescan_pending` (scanning is true) and `finish_scan` drains them
+    // into one trailing rescan. `arm` is a no-op once the root set matches, so
+    // the trailing rescan and every watcher rescan don't churn OS handles.
+    if !roots.is_empty() {
+        watcher::arm(app, &roots);
+    }
     let app = app.clone();
-    std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name(format!("scanner-{gen}"))
         .spawn(move || scan_worker(app, roots, gen))
-        .map_err(|e| format!("failed to spawn scan thread: {e}"))?;
+    {
+        // Spawn failed: no worker will ever run `finish_scan` for this gen, so
+        // the scanning flag would stick true forever and every future watcher
+        // rescan would park in `rescan_pending` unserved. Roll it back — but
+        // only while we're still the current gen, so we can't clobber a newer
+        // scan that already claimed the flag (same guard `finish_scan` uses).
+        let _guard = state.roots.lock();
+        if state.generation.load(Ordering::SeqCst) == gen {
+            state.scanning.store(false, Ordering::SeqCst);
+        }
+        return Err(format!("failed to spawn scan thread: {e}"));
+    }
     Ok(gen)
 }
 
@@ -152,11 +182,22 @@ fn run_pending_rescan(app: &AppHandle) {
 /// clear the scanning flag, (re-)arm the watcher over the scanned roots, and
 /// run the trailing rescan the watcher may have parked while we walked.
 fn finish_scan(app: &AppHandle, gen: u32, roots: &[String]) {
-    if current_generation(app) != gen {
-        return; // a newer scan owns the flags now
-    }
     let state = app.state::<ScanState>();
-    state.scanning.store(false, Ordering::SeqCst);
+    // Check the generation and clear scanning under the roots lock, so a newer
+    // `spawn_scan` bumping the generation and re-raising the flag can't slip
+    // between the check and the clear — otherwise this finishing worker would
+    // wipe the NEW scan's scanning flag (and arm the watcher with the OLD root
+    // set below). Holding the lock across both makes bump-and-set vs
+    // check-and-clear mutually exclusive.
+    {
+        let _guard = state.roots.lock();
+        if state.generation.load(Ordering::SeqCst) != gen {
+            return; // a newer scan owns the flags now
+        }
+        state.scanning.store(false, Ordering::SeqCst);
+    }
+    // Arm and drain outside the lock: `run_pending_rescan` may re-enter
+    // `spawn_scan`, which takes the roots lock itself.
     watcher::arm(app, roots);
     run_pending_rescan(app);
 }

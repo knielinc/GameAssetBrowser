@@ -68,7 +68,7 @@ fn run(app: AppHandle, files: Vec<(String, u64)>, gen: u32) {
     }
     by_size.retain(|_, paths| paths.len() > 1);
 
-    let total: u32 = by_size.values().map(|p| p.len() as u32).sum();
+    let mut total: u32 = by_size.values().map(|p| p.len() as u32).sum();
     let mut done: u32 = 0;
     emit_progress(&app, done, total);
 
@@ -102,6 +102,13 @@ fn run(app: AppHandle, files: Vec<(String, u64)>, gen: u32) {
                 push_group(&mut groups, size, candidates);
                 continue;
             }
+            // The confirm pass streams entire (multi-GB) files, one at a time —
+            // minutes of work with no prefix-stage `done` bumps behind it. Count
+            // each confirmed file toward progress so the bar keeps moving; these
+            // are re-reads of candidates already tallied in `total`, so grow
+            // `total` to match and keep `done <= total`. A full-file read is far
+            // costlier than an emit, so emit per file for smooth motion.
+            total += candidates.len() as u32;
             let mut by_full: HashMap<u64, Vec<String>> = HashMap::new();
             for path in candidates {
                 match hash_full(&path, &is_stale) {
@@ -109,6 +116,8 @@ fn run(app: AppHandle, files: Vec<(String, u64)>, gen: u32) {
                     Ok(None) => {} // read failed — drop the file, keep the run
                     Err(()) => return, // superseded mid-file
                 }
+                done += 1;
+                emit_progress(&app, done, total);
             }
             for (_, confirmed) in by_full {
                 if confirmed.len() > 1 {

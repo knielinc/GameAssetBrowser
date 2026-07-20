@@ -278,6 +278,9 @@ export interface TabFilterSettings {
   colors: string[];            // ColorBucket[] — texture only
   audioChannels: string[];     // AudioChannelGroup[] — audio only
   sampleRates: string[];       // SampleRateBucket[] — audio only
+  favorite: boolean;           // all kinds — on = starred (favoritesStore). The
+                               // sidebar "Favorites" row is a whole-library
+                               // SCOPE; this facet narrows the CURRENT view.
 }
 
 /**
@@ -286,9 +289,9 @@ export interface TabFilterSettings {
  * shown nor restored.
  */
 export const FILTER_FACETS_BY_KIND = {
-  audio: ["duration", "audioChannels", "sampleRates", "modified"],
-  texture: ["channels", "material", "colors", "res", "square", "pot", "modified"],
-  model: ["size", "modified"],
+  audio: ["favorite", "duration", "audioChannels", "sampleRates", "modified"],
+  texture: ["favorite", "channels", "material", "colors", "res", "square", "pot", "modified"],
+  model: ["favorite", "size", "modified"],
 } as const satisfies Record<AssetKind, readonly (keyof TabFilterSettings)[]>;
 
 /** Per-tab persisted view state. */

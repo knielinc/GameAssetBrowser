@@ -32,6 +32,14 @@ interface PositionState {
 
 export const usePositionStore = create<PositionState>()(() => ({ seconds: 0 }));
 
+/** Reactive length of the visible audio list (published by TabPane alongside
+ *  audioVisibleRef), so the transport's prev/next/shuffle buttons disable when
+ *  there is nothing to step through. A plain ref can't re-render them. */
+interface AudioListState {
+  count: number;
+}
+export const useAudioListStore = create<AudioListState>()(() => ({ count: 0 }));
+
 /** One decoded spectrogram image (see SpectrogramReady in types.ts): row 0 is
  *  the top = highest frequency, `data` is width × height u8 magnitudes. */
 export interface Spectrogram {
@@ -148,6 +156,17 @@ export const audioVisibleRef: { current: readonly LibFile[] } = { current: [] };
 let hoverPath: string | null = null;
 
 /**
+ * A frozen running order (paths) for the current auto-advance chain. The
+ * Recent scope sorts the visible list by recency, and playing a track bumps it
+ * to the top — so advancing by "current index + 1" in the LIVE list would
+ * revisit already-heard tracks and never reach the end. Freezing the order
+ * when a chain begins makes "let the pack play" walk the list once, top to
+ * bottom, in every scope. Any deliberate/hover gesture clears it, so the next
+ * chain re-freezes from wherever the user landed.
+ */
+let advanceOrder: readonly string[] | null = null;
+
+/**
  * Select `file` in the library and load it into the audio engine.
  * `debounceMs > 0` delays only the invoke (trailing) — selection, waveform
  * reset, and playhead reset are applied immediately so the UI keeps up with
@@ -161,6 +180,10 @@ export function loadAndSelect(file: LibFile, index: number, debounceMs = 0, forc
   // it is no longer "just a hover" — mouseleave must not stop the track the
   // user explicitly chose (clicking the very row being hovered).
   hoverPath = null;
+  // A deliberate pick ends the current auto-advance chain; the next "ended"
+  // re-freezes the order from here. (maybeAutoAdvance restores it after its
+  // own loadAndSelect so the chain it drives keeps walking the frozen order.)
+  advanceOrder = null;
   // The player is audio-only by construction; other kinds never reach here.
   lib.select("audio", index, file.path);
 
@@ -222,6 +245,7 @@ export function replayCurrent(): void {
  */
 export function hoverPlay(file: LibFile): void {
   hoverPath = file.path;
+  advanceOrder = null; // a hover is not part of an auto-advance chain
   const lib = useLibraryStore.getState();
   if (usePlayerStore.getState().currentPath === file.path) {
     // Hovering the already-loaded track: restart it, but keep the peaks —
@@ -268,15 +292,58 @@ export function maybeAutoAdvance(): void {
   // Loop never emits "ended" (the engine restarts the track itself), but
   // guard anyway; a finished HOVER preview must not hijack the selection.
   if (!autoAdvance || loop || currentPath === null || hoverPath !== null) return;
+  // Walk the FROZEN order (see advanceOrder), freezing it on the first step of
+  // a chain, so the Recent scope's play-driven reshuffle can't make us revisit.
+  const order = advanceOrder ?? audioVisibleRef.current.map((f) => f.path);
+  const index = order.indexOf(currentPath);
+  if (index < 0 || index + 1 >= order.length) {
+    advanceOrder = null; // end of the frozen list (or fell out of it): stop
+    return;
+  }
+  const nextPath = order[index + 1]!;
+  // Resolve the frozen path to its slot in the LIVE list: recency may have
+  // reordered it since the freeze, and select/scroll need a current index.
   const files = audioVisibleRef.current;
-  const index = files.findIndex((f) => f.path === currentPath);
-  if (index < 0 || index + 1 >= files.length) return; // end of list: stop
-  const next = index + 1;
+  const nextIdx = files.findIndex((f) => f.path === nextPath);
+  if (nextIdx < 0) {
+    advanceOrder = null; // next track filtered out from under us: stop
+    return;
+  }
   // forcePlay: advancing exists to keep sound coming, autoplay pref or not.
-  loadAndSelect(files[next]!, next, 0, true);
+  loadAndSelect(files[nextIdx]!, nextIdx, 0, true); // clears advanceOrder...
+  advanceOrder = order; // ...so restore the frozen chain to keep walking it
   // The scroll ref belongs to the ACTIVE pane — only aim it on the audio tab
   // (its flat indices match; a texture grid's do not).
   if (useLibraryStore.getState().activeTab === "audio") {
-    scrollToIndexRef.current?.(next);
+    scrollToIndexRef.current?.(nextIdx);
   }
+}
+
+/**
+ * Manual prev/next track over the visible audio order — the transport skip
+ * buttons. Steps the selection by ±1 and plays it (forcePlay), stopping at
+ * either edge. Reads the published audio order (not the active pane), so it
+ * works while the user browses another tab, exactly like auto-advance.
+ */
+export function playAdjacent(delta: 1 | -1): void {
+  const files = audioVisibleRef.current;
+  if (files.length === 0) return;
+  const { currentPath } = usePlayerStore.getState();
+  const cur = currentPath === null ? -1 : files.findIndex((f) => f.path === currentPath);
+  // From no current track: next → first, prev → last.
+  const next = cur < 0 ? (delta > 0 ? 0 : files.length - 1) : cur + delta;
+  if (next < 0 || next >= files.length) return; // at an edge: stay put
+  loadAndSelect(files[next]!, next, 0, true);
+  if (useLibraryStore.getState().activeTab === "audio") scrollToIndexRef.current?.(next);
+}
+
+/** Transport shuffle: play a uniformly random track in the visible audio order.
+ *  The player bar is always shown, so this targets the audio list rather than
+ *  the active pane (the toolbar dice covers the active pane). */
+export function shuffleAudio(): void {
+  const files = audioVisibleRef.current;
+  if (files.length === 0) return;
+  const index = Math.floor(Math.random() * files.length);
+  loadAndSelect(files[index]!, index, 0, true);
+  if (useLibraryStore.getState().activeTab === "audio") scrollToIndexRef.current?.(index);
 }

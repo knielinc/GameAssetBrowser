@@ -165,9 +165,11 @@ pub struct SpectrogramReady {
     pub data: String,
 }
 
-/// Duplicate-hunt progress: `done` of `total` size-collision candidates
-/// prefix-hashed so far (the confirm pass rides inside the same count).
-/// Keyed by path, not file id, so no scan generation is needed.
+/// Duplicate-hunt progress: `done` of `total` files hashed so far. `total`
+/// starts as the size-collision candidate count (the prefix stage) and grows as
+/// the full-file confirm pass re-reads a subset, each of which also advances
+/// `done` — so `done <= total` holds throughout and the bar keeps moving during
+/// long confirms. Keyed by path, not file id, so no scan generation is needed.
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DupeProgress {

@@ -11,11 +11,21 @@ import {
   type AssetKind,
   type AudioChannelGroup,
   type ChannelGroup,
+  type CollectionSettings,
   type ColorBucket,
   type RangeFilter,
+  type RecentSettings,
   type SampleRateBucket,
   type SortField,
 } from "../types";
+
+// Stable empties returned by the collection-scope subscriptions when their
+// scope is inactive. Constant identity means the selector value never changes
+// while the scope is off, so favoriting/recording a play (a fresh Set/array in
+// the store) can't re-render — or re-sort — a list that doesn't depend on it.
+const EMPTY_FAVORITES: ReadonlySet<string> = new Set();
+const EMPTY_RECENTS: readonly RecentSettings[] = [];
+const EMPTY_COLLECTIONS: readonly CollectionSettings[] = [];
 
 function useDebounced<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -118,15 +128,53 @@ export function sampleRateBucketOf(rate: number): SampleRateBucket {
   return "hi";
 }
 
+/**
+ * The path set a collection scope resolves to — favorites, recents, or one user
+ * collection — or null when no collection scope is active. A collection behaves
+ * like a folder: its members are the WHOLE-LIBRARY set, so callers apply it
+ * INSTEAD of the folder scope, never intersected with it. Exported so the
+ * visible list, the facet counts, and the scope count all agree on membership.
+ */
+export function collectionMemberSet(
+  collectionScope: string | null,
+  favorites: ReadonlySet<string>,
+  recents: readonly RecentSettings[],
+  collections: readonly CollectionSettings[],
+): ReadonlySet<string> | null {
+  if (collectionScope === FAVORITES_SCOPE) return favorites;
+  if (collectionScope === RECENTS_SCOPE) return new Set(recents.map((r) => r.path));
+  if (collectionScope !== null) {
+    const col = collections.find((c) => `col:${c.name}` === collectionScope);
+    return new Set(col?.paths ?? []);
+  }
+  return null;
+}
+
 export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   const collectionScope = useLibraryStore((s) => s.collectionScope);
-  const favorites = useFavoritesStore((s) => s.favorites);
-  const collections = useFavoritesStore((s) => s.collections);
-  const recents = useFavoritesStore((s) => s.recents);
   const tab = useLibraryStore((s) => s.tabs[kind]);
+  const { query, extFilter, sortField, sortDir, filters } = tab;
+  // Collection-scope inputs are consumed ONLY when their scope is active, so
+  // subscribe to each conditionally: while off, the selector yields the stable
+  // empty and this hook ignores the store's per-play churn (recordRecent builds
+  // a fresh `recents` array on every audio load) instead of re-sorting 50k
+  // files on every keypress. collectionScope is subscribed above, so toggling a
+  // scope re-renders and flips the right subscription live.
+  const isUserCollection =
+    collectionScope !== null &&
+    collectionScope !== FAVORITES_SCOPE &&
+    collectionScope !== RECENTS_SCOPE;
+  // Favorites feed BOTH the Favorites scope and the favorite filter facet, so
+  // subscribe whenever either is live (still off for the common case).
+  const needFavorites = collectionScope === FAVORITES_SCOPE || filters.favorite;
+  const favorites = useFavoritesStore((s) => (needFavorites ? s.favorites : EMPTY_FAVORITES));
+  const recents = useFavoritesStore((s) =>
+    collectionScope === RECENTS_SCOPE ? s.recents : EMPTY_RECENTS,
+  );
+  const collections = useFavoritesStore((s) => (isUserCollection ? s.collections : EMPTY_COLLECTIONS));
   const durations = useLibraryStore((s) => s.durations);
   const durationsVersion = useLibraryStore((s) => s.durationsVersion);
   const dims = useLibraryStore((s) => s.dims);
@@ -134,8 +182,13 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const audioMeta = useLibraryStore((s) => s.audioMeta);
   const audioMetaVersion = useLibraryStore((s) => s.audioMetaVersion);
   const thumbs = useLibraryStore((s) => s.thumbs);
-  const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
-  const { query, extFilter, sortField, sortDir, filters } = tab;
+  // Only the color facet reads thumb pixels. `thumbs` itself is mutated in
+  // place (stable ref → no re-render), but thumbsVersion ticks on every batch;
+  // gate it to 0 unless the color facet is on, so the texture grid's own thumb
+  // stream can't feed a rebuild→re-render→re-request churn loop, and the audio
+  // and model tabs never rebuild for texture batches they can't use.
+  const colorFacetActive = kind === "texture" && filters.colors.size > 0;
+  const thumbsVersion = useLibraryStore((s) => (colorFacetActive ? s.thumbsVersion : 0));
   const debouncedQuery = useDebounced(query, 100);
   // The grouping pass runs only while the material facet is actually active —
   // idle browsing pays nothing.
@@ -149,21 +202,18 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     // filters apply.
     const inScope = scopePredicate(folderScopes, hiddenFolders);
 
-    // Collection scope: a plain path-membership filter layered on top of the
-    // folder scope — favorites, recents, or one user collection. Paths that
-    // fell out of the library (deleted files) simply never match; nothing to
-    // prune. `recentRank` doubles as the recency sort key below.
-    let inCollection: ReadonlySet<string> | null = null;
-    let recentRank: Map<string, number> | null = null;
-    if (collectionScope === FAVORITES_SCOPE) {
-      inCollection = favorites;
-    } else if (collectionScope === RECENTS_SCOPE) {
-      inCollection = new Set(recents.map((r) => r.path));
-      recentRank = new Map(recents.map((r) => [r.path, r.ts]));
-    } else if (collectionScope !== null) {
-      const col = collections.find((c) => `col:${c.name}` === collectionScope);
-      inCollection = new Set(col?.paths ?? []);
-    }
+    // Collection scope: favorites, recents, or one user collection. It acts
+    // like a FOLDER, not a filter on the selected folder — its members show
+    // across the whole library and it REPLACES the folder scope below (the
+    // sidebar's Favorites row is "show me all my favourites", not "favourites
+    // within this folder"; the favorite FILTER facet covers the latter). Paths
+    // that fell out of the library (deleted files) simply never match.
+    // `recentRank` doubles as the recency sort key below.
+    const inCollection = collectionMemberSet(collectionScope, favorites, recents, collections);
+    const recentRank =
+      collectionScope === RECENTS_SCOPE
+        ? new Map(recents.map((r) => [r.path, r.ts]))
+        : null;
 
     // Facet gates hoisted out of the loop; each per-file check is O(1).
     const flt = filters;
@@ -175,6 +225,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     const hasColor = kind === "texture" && flt.colors.size > 0;
     const hasAChan = kind === "audio" && flt.audioChannels.size > 0;
     const hasRate = kind === "audio" && flt.sampleRates.size > 0;
+    const hasFav = flt.favorite; // all kinds — membership is always "known"
     const hasSize = kind === "model" && rangeActive(flt.size);
     // Size is stored in MB; compare in bytes, converted once outside the loop.
     const sizeBytes: RangeFilter = {
@@ -188,8 +239,11 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     const files: LibFile[] = [];
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
-      if (!inScope(f.path)) continue;
-      if (inCollection !== null && !inCollection.has(f.path)) continue;
+      // A collection scope replaces the folder scope; otherwise apply it.
+      if (inCollection !== null) {
+        if (!inCollection.has(f.path)) continue;
+      } else if (!inScope(f.path)) continue;
+      if (hasFav && !favorites.has(f.path)) continue;
       if (hasExtFilter && !extFilter.has(f.ext)) continue;
       // Facets before the query: Map lookups beat the substring scan.
       if (hasMod && !inRange(f.modified, flt.modified)) continue; // always known
@@ -311,20 +365,50 @@ export function usePresentChannels(kind: AssetKind): { group: ChannelGroup; coun
   }, [kind, allFiles, folderScopes, hiddenFolders]);
 }
 
-/** Count of one kind inside the active folder scope — the status bar's
- *  denominator. Same scope rule as above, minus the query/ext filters. */
+/**
+ * Gated subscription to the active collection scope's member set (or null when
+ * off). Off-scope each selector yields a stable empty, so favoriting a file or
+ * recording a play can't re-render idle consumers (the status bar sits mounted
+ * for the whole session). Shared by useScopeCount and useFacetCounts so their
+ * denominators match useVisibleFiles' collection-as-folder behavior.
+ */
+export function useCollectionMembers(): ReadonlySet<string> | null {
+  const collectionScope = useLibraryStore((s) => s.collectionScope);
+  const isUser =
+    collectionScope !== null &&
+    collectionScope !== FAVORITES_SCOPE &&
+    collectionScope !== RECENTS_SCOPE;
+  const favorites = useFavoritesStore((s) =>
+    collectionScope === FAVORITES_SCOPE ? s.favorites : EMPTY_FAVORITES,
+  );
+  const recents = useFavoritesStore((s) =>
+    collectionScope === RECENTS_SCOPE ? s.recents : EMPTY_RECENTS,
+  );
+  const collections = useFavoritesStore((s) => (isUser ? s.collections : EMPTY_COLLECTIONS));
+  return useMemo(
+    () => collectionMemberSet(collectionScope, favorites, recents, collections),
+    [collectionScope, favorites, recents, collections],
+  );
+}
+
+/** Count of one kind inside the active scope — the status bar's denominator.
+ *  A collection scope replaces the folder scope (collection-as-folder), matching
+ *  the visible list; minus the query/ext filters. */
 export function useScopeCount(kind: AssetKind): number {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const inCollection = useCollectionMembers();
   return useMemo(() => {
     const inScope = scopePredicate(folderScopes, hiddenFolders);
     let n = 0;
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
-      if (!inScope(f.path)) continue;
+      if (inCollection !== null) {
+        if (!inCollection.has(f.path)) continue;
+      } else if (!inScope(f.path)) continue;
       n++;
     }
     return n;
-  }, [kind, allFiles, folderScopes, hiddenFolders]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, inCollection]);
 }

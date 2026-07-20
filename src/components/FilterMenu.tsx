@@ -23,13 +23,17 @@ export default function FilterMenu({ kind }: { kind: AssetKind }): ReactElement 
       if (ref.current !== null && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      // Capture + stop: Escape closes the filter popup without also reaching the
+      // window-level shortcut handler, which would collapse a multi-selection.
+      e.stopPropagation();
+      setOpen(false);
     };
     window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     };
   }, [open]);
 
@@ -37,6 +41,8 @@ export default function FilterMenu({ kind }: { kind: AssetKind }): ReactElement 
     switch (id) {
       case "format":
         return extFilter.size;
+      case "favorite":
+        return filters.favorite ? 1 : 0;
       case "duration":
         return rangeActive(filters.duration) ? 1 : 0;
       case "audioChannels":

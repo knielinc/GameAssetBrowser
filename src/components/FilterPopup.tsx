@@ -57,17 +57,18 @@ function parseDate(s: string, end: boolean): number | null {
 /** UI facet groups (not 1:1 with store keys — `shape` spans square+pot, and
  *  `material` hosts both the membership toggle and the channel rows). */
 export type FacetId =
-  | "format" | "duration" | "audioChannels" | "sampleRate" | "material"
+  | "format" | "favorite" | "duration" | "audioChannels" | "sampleRate" | "material"
   | "color" | "res" | "shape" | "size" | "modified";
 
 export const FACET_ORDER: Record<AssetKind, readonly FacetId[]> = {
-  audio: ["format", "duration", "audioChannels", "sampleRate", "modified"],
-  texture: ["format", "material", "color", "res", "shape", "modified"],
-  model: ["format", "size", "modified"],
+  audio: ["format", "favorite", "duration", "audioChannels", "sampleRate", "modified"],
+  texture: ["format", "favorite", "material", "color", "res", "shape", "modified"],
+  model: ["format", "favorite", "size", "modified"],
 };
 
 const FACET_LABEL: Record<FacetId, string> = {
   format: "Format",
+  favorite: "Favorite",
   duration: "Length",
   audioChannels: "Channels",
   sampleRate: "Sample rate",
@@ -588,6 +589,15 @@ export default function FilterPopup({
           }
         }
         break;
+      case "favorite":
+        if (filters.favorite) {
+          tokens.push({
+            key: "favorite",
+            label: "Favorite",
+            remove: () => apply({ favorite: false }),
+          });
+        }
+        break;
       case "duration":
         if (rangeActive(filters.duration)) {
           tokens.push({
@@ -711,6 +721,17 @@ export default function FilterPopup({
           />
         ));
       }
+      case "favorite":
+        return (
+          <OptionRow
+            kind={kind}
+            label="Favorite"
+            count={counts.favorite.count}
+            max={counts.favorite.count}
+            selected={counts.favorite.selected}
+            onClick={() => apply({ favorite: !filters.favorite })}
+          />
+        );
       case "audioChannels": {
         const max = maxCount(counts.audioChannels);
         return counts.audioChannels.map((o) => (
