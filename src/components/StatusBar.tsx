@@ -5,7 +5,15 @@ import { usePlayerStore } from "../stores/playerStore";
 import { useThumbProgress } from "../stores/thumbProgress";
 import { useScopeCount } from "../hooks/useVisibleFiles";
 import { humanSize } from "./FileRow";
+import { FAVORITES_SCOPE, RECENTS_SCOPE } from "../stores/favoritesStore";
 import { FILTER_FACETS_BY_KIND, NOUN, type AssetKind, type TabFilterSettings } from "../types";
+
+/** Display name for a collection scope key in the status bar. */
+function collectionScopeLabel(key: string): string {
+  if (key === FAVORITES_SCOPE) return "Favorites";
+  if (key === RECENTS_SCOPE) return "Recent";
+  return key.slice(4); // "col:<name>"
+}
 
 const FACET_LABEL: Record<keyof TabFilterSettings, string> = {
   duration: "Length",
@@ -20,6 +28,7 @@ const FACET_LABEL: Record<keyof TabFilterSettings, string> = {
   audioChannels: "Channels",
   sampleRates: "Sample rate",
   favorite: "Favorite",
+  collections: "Collections",
 };
 
 /** Comma-joined active facet names for the "· filtered" tooltip. */
@@ -38,6 +47,7 @@ export interface StatusBarProps {
 
 export default function StatusBar({ kind, visibleCount }: StatusBarProps): ReactElement {
   const folderScopes = useLibraryStore((s) => s.folderScopes);
+  const collectionScopes = useLibraryStore((s) => s.collectionScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   const scanning = useLibraryStore((s) => s.scanning);
   const filters = useLibraryStore((s) => s.tabs[kind].filters);
@@ -85,14 +95,24 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
   // must survive a tab switch.)
   const scopeCount = useScopeCount(kind);
 
-  // "in …": name the single scoped folder, else how many. A trailing hidden
-  // count reminds the user why some content is missing from the list.
+  // "in …": name the single scope (folder or collection), else how many. When
+  // the selection is all folders or all collections, use that precise noun; a
+  // mix uses the neutral "scopes". A trailing hidden count reminds the user why
+  // some content is missing from the list.
+  const scopeParts = [
+    ...folderScopes.map(basename),
+    ...collectionScopes.map(collectionScopeLabel),
+  ];
   const scopeLabel =
-    folderScopes.length === 0
+    scopeParts.length === 0
       ? null
-      : folderScopes.length === 1
-        ? `in ${basename(folderScopes[0]!)}`
-        : `in ${folderScopes.length} folders`;
+      : scopeParts.length === 1
+        ? `in ${scopeParts[0]}`
+        : collectionScopes.length === 0
+          ? `in ${folderScopes.length} folders`
+          : folderScopes.length === 0
+            ? `in ${collectionScopes.length} collections`
+            : `in ${scopeParts.length} scopes`;
 
   return (
     <div className="flex h-7 shrink-0 items-center gap-3 border-x border-bg bg-panel px-3 text-[11px] text-dim">
@@ -110,7 +130,7 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
         </span>
       )}
       {scopeLabel !== null && (
-        <span className="max-w-[30%] truncate" title={folderScopes.join("\n")}>
+        <span className="max-w-[30%] truncate" title={scopeParts.join("\n")}>
           {scopeLabel}
         </span>
       )}

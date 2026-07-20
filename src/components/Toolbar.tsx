@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
 import clsx from "clsx";
 import {
   ArrowDown,
@@ -16,6 +23,7 @@ import {
   PanelRight,
   Search,
   Shuffle,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
@@ -54,9 +62,78 @@ function PanelToggle({
   );
 }
 
+/**
+ * A labelled toggle pill (Smooth, Group materials, Info). Renders as a rounded
+ * pill on the bar, or a full-width row when it lives inside the overflow popup
+ * — same behaviour, so the two layouts share one component.
+ */
+function PillToggle({
+  active,
+  icon: Icon,
+  label,
+  title,
+  onClick,
+  menu = false,
+}: {
+  active: boolean;
+  icon: typeof Layers;
+  label: string;
+  title: string;
+  onClick: () => void;
+  menu?: boolean;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={active}
+      className={clsx(
+        "flex items-center gap-1.5 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
+        menu ? "h-9 w-full justify-start rounded-lg px-3" : "h-8 rounded-full px-3",
+        active
+          ? "bg-accent-fill text-accent-fg shadow-e1"
+          : clsx("bg-bg text-dim hover:bg-overlay hover:text-text", !menu && "hover:-translate-y-px"),
+      )}
+      onClick={onClick}
+    >
+      <Icon size={12} />
+      {label}
+    </button>
+  );
+}
+
+/** The cell-size slider — inline on the bar, or stacked in the popup. */
+function CellSizeControl({
+  cellSize,
+  onChange,
+  menu = false,
+}: {
+  cellSize: number;
+  onChange: (v: number) => void;
+  menu?: boolean;
+}): ReactElement {
+  return (
+    <div className={menu ? "flex flex-col gap-1.5 px-1 py-1" : "flex items-center gap-2"}>
+      <span className="text-[10px] font-medium uppercase tracking-wide text-faint">Cell size</span>
+      <input
+        type="range"
+        aria-label="Cell size"
+        title={`Thumbnail size — ${cellSize}px`}
+        min={MIN_CELL}
+        max={MAX_CELL}
+        step={4}
+        value={cellSize}
+        className={clsx("volume", menu ? "w-full" : "w-20")}
+        style={{ ["--fill" as string]: `${((cellSize - MIN_CELL) / (MAX_CELL - MIN_CELL)) * 100}%` }}
+        onChange={(e) => onChange(Number(e.currentTarget.value))}
+      />
+    </div>
+  );
+}
+
 const SORT_LABELS: Record<SortField, string> = {
   name: "Name",
-  ext: "Type",
+  ext: "Format",
   size: "Size",
   modified: "Modified",
   duration: "Length",
@@ -67,6 +144,72 @@ const PLACEHOLDER: Record<AssetKind, string> = {
   texture: "Search textures…",
   model: "Search models…",
 };
+
+/** Close a popup on outside-click or Escape. Escape is captured + stopped so it
+ *  doesn't also reach the window shortcut handler (which clears selection). */
+function useDismiss(open: boolean, close: () => void, ref: React.RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current !== null && !ref.current.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close();
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open, close, ref]);
+}
+
+/**
+ * Flip to `compact` when the toolbar's inline controls no longer fit, and back
+ * when there's room again. Detection is genuine overflow (scrollWidth vs
+ * clientWidth) rather than a guessed pixel breakpoint, so it adapts to whichever
+ * controls a given tab actually shows. A hysteresis margin on the way back out
+ * stops it oscillating around the threshold.
+ */
+function useOverflowCollapse(): { ref: React.RefObject<HTMLDivElement | null>; compact: boolean } {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [compact, setCompact] = useState(false);
+  const compactRef = useRef(false);
+  const collapseWidthRef = useRef(0);
+  compactRef.current = compact;
+
+  const measure = useCallback((): void => {
+    const el = ref.current;
+    if (el === null) return;
+    if (!compactRef.current) {
+      // Expanded: collapse once the controls spill past the available width.
+      if (el.scrollWidth > el.clientWidth + 1) {
+        collapseWidthRef.current = el.clientWidth;
+        setCompact(true);
+      }
+    } else if (el.clientWidth > collapseWidthRef.current + 64) {
+      // Compact: expand again once we've clearly grown past where we collapsed.
+      setCompact(false);
+    }
+  }, []);
+
+  // Re-measure after every commit — an expand that still overflows re-collapses
+  // on the next pass and settles (collapseWidth only ratchets up, so it converges).
+  useLayoutEffect(measure);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure]);
+
+  return { ref, compact };
+}
 
 export interface ToolbarProps {
   kind: AssetKind;
@@ -94,32 +237,62 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   // themed in WebView2, so it never matched the rest of the app.
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!sortOpen) return;
-    const onDown = (e: MouseEvent): void => {
-      if (sortRef.current !== null && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
-      // Capture + stop: Escape closes THIS popup without also reaching the
-      // window-level shortcut handler, which would collapse a multi-selection.
-      e.stopPropagation();
-      setSortOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [sortOpen]);
+  const closeSort = useCallback(() => setSortOpen(false), []);
+  useDismiss(sortOpen, closeSort, sortRef);
+
+  // When the bar is too narrow, the presentation controls fold into this popup.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  const closeMore = useCallback(() => setMoreOpen(false), []);
+  useDismiss(moreOpen, closeMore, moreRef);
+
+  const { ref: barRef, compact } = useOverflowCollapse();
 
   const { query, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
   // Audio has no grid implementation — never render a control that does nothing.
   const canGrid = kind !== "audio";
+  const showInfo = canGrid && viewMode === "grid";
+
+  const smoothPill = (menu: boolean): ReactElement => (
+    <PillToggle
+      menu={menu}
+      active={pixelArt}
+      icon={pixelArt ? Grid2x2 : Blend}
+      label={pixelArt ? "Pixel" : "Smooth"}
+      title={
+        pixelArt
+          ? "Pixel — nearest-neighbour scaling (crisp). Click for smooth. Applies to every thumbnail and preview."
+          : "Smooth — bilinear scaling. Click for pixel. Applies to every thumbnail and preview."
+      }
+      onClick={togglePixelArt}
+    />
+  );
+  const groupPill = (menu: boolean): ReactElement => (
+    <PillToggle
+      menu={menu}
+      active={groupMaterials}
+      icon={Layers}
+      label="Group materials"
+      title="Collapse loose files that form one PBR material into a single row/cell"
+      onClick={() => patchTab(kind, { groupMaterials: !groupMaterials })}
+    />
+  );
+  const infoPill = (menu: boolean): ReactElement => (
+    <PillToggle
+      menu={menu}
+      active={showCellInfo}
+      icon={showCellInfo ? Eye : EyeOff}
+      label="Info"
+      title={showCellInfo ? "Hide info pills on cells" : "Show info pills on cells"}
+      onClick={toggleCellInfo}
+    />
+  );
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3 border-y border-bg bg-panel px-3">
+    <div
+      ref={barRef}
+      className="flex h-12 shrink-0 items-center gap-3 border-y border-bg bg-panel px-3"
+    >
       <PanelToggle
         on={leftOpen}
         onClick={toggleLeft}
@@ -187,129 +360,133 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
       <div className="min-w-0 flex-1" />
 
       <div className="flex shrink-0 items-center gap-1.5">
-        {kind === "texture" && (
-          <button
-            type="button"
-            title={
-              pixelArt
-                ? "Pixel — nearest-neighbour scaling (crisp). Click for smooth. Applies to every thumbnail and preview."
-                : "Smooth — bilinear scaling. Click for pixel. Applies to every thumbnail and preview."
-            }
-            className={clsx(
-              "flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
-              pixelArt
-                ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-                : "bg-bg text-dim hover:-translate-y-px hover:bg-overlay hover:text-text",
+        {/* Full inline cluster. When it overflows the bar it folds into the
+            popup below; the collapse hook remembers the width it gave up at and
+            re-expands once the window grows clearly past it. */}
+        {!compact && (
+          <>
+            {kind === "texture" && smoothPill(false)}
+            {kind === "texture" && groupPill(false)}
+            {showInfo && infoPill(false)}
+            {showInfo && (
+              <CellSizeControl
+                cellSize={cellSize}
+                onChange={(v) => patchTab(kind, { cellSize: v })}
+              />
             )}
-            onClick={togglePixelArt}
-          >
-            {pixelArt ? <Grid2x2 size={12} /> : <Blend size={12} />}
-            {pixelArt ? "Pixel" : "Smooth"}
-          </button>
-        )}
 
-        {kind === "texture" && (
-          <button
-            type="button"
-            title="Collapse loose files that form one PBR material into a single row/cell"
-            className={clsx(
-              "flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
-              groupMaterials
-                ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-                : "bg-bg text-dim hover:-translate-y-px hover:bg-overlay hover:text-text",
-            )}
-            onClick={() => patchTab(kind, { groupMaterials: !groupMaterials })}
-          >
-            <Layers size={12} />
-            Group materials
-          </button>
-        )}
-
-        {canGrid && viewMode === "grid" && (
-          <button
-            type="button"
-            title={showCellInfo ? "Hide info pills on cells" : "Show info pills on cells"}
-            className={clsx(
-              "flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
-              showCellInfo
-                ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-                : "bg-bg text-dim hover:-translate-y-px hover:bg-overlay hover:text-text",
-            )}
-            onClick={toggleCellInfo}
-          >
-            {showCellInfo ? <Eye size={12} /> : <EyeOff size={12} />}
-            Info
-          </button>
-        )}
-
-        {canGrid && viewMode === "grid" && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-faint">Cell size</span>
-            <input
-              type="range"
-              aria-label="Cell size"
-              title={`Thumbnail size — ${cellSize}px`}
-              min={MIN_CELL}
-              max={MAX_CELL}
-              step={4}
-              value={cellSize}
-              className="volume w-20"
-              style={{ ["--fill" as string]: `${((cellSize - MIN_CELL) / (MAX_CELL - MIN_CELL)) * 100}%` }}
-              onChange={(e) => patchTab(kind, { cellSize: Number(e.currentTarget.value) })}
-            />
-          </div>
-        )}
-
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-faint">Sort by</span>
-          <div ref={sortRef} className="relative">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-faint">Sort by</span>
+              <div ref={sortRef} className="relative">
+                <button
+                  type="button"
+                  aria-label="Sort by"
+                  aria-expanded={sortOpen}
+                  title={`Sort by — ${SORT_LABELS[sortField]}`}
+                  className="flex h-[30px] items-center gap-2 rounded-full bg-bg pl-3 pr-2 text-[12px] text-text transition-colors duration-[120ms] hover:bg-overlay"
+                  onClick={() => setSortOpen((o) => !o)}
+                >
+                  {SORT_LABELS[sortField]}
+                  <ChevronDown
+                    size={12}
+                    className={clsx("text-faint transition-transform duration-[120ms]", sortOpen && "rotate-180")}
+                  />
+                </button>
+                {sortOpen && (
+                  <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[136px] rounded-xl bg-raised p-1 shadow-e2">
+                    {SORT_FIELDS_BY_KIND[kind].map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className={clsx(
+                          "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
+                          f === sortField
+                            ? "bg-accent-fill text-accent-fg"
+                            : "text-dim hover:bg-overlay hover:text-text",
+                        )}
+                        onClick={() => {
+                          setSort(kind, f);
+                          setSortOpen(false);
+                        }}
+                      >
+                        {SORT_LABELS[f]}
+                        {f === sortField && <Check size={13} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <button
               type="button"
-              aria-label="Sort by"
-              aria-expanded={sortOpen}
-              title={`Sort by — ${SORT_LABELS[sortField]}`}
-              className="flex h-[30px] items-center gap-2 rounded-full bg-bg pl-3 pr-2 text-[12px] text-text transition-colors duration-[120ms] hover:bg-overlay"
-              onClick={() => setSortOpen((o) => !o)}
+              className="icon-btn"
+              title={sortDir === "asc" ? "Ascending — click for descending" : "Descending — click for ascending"}
+              onClick={() => toggleSortDir(kind)}
             >
-              {SORT_LABELS[sortField]}
-              <ChevronDown
-                size={12}
-                className={clsx("text-faint transition-transform duration-[120ms]", sortOpen && "rotate-180")}
-              />
+              {sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
             </button>
-            {sortOpen && (
-              <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[136px] rounded-xl bg-raised p-1 shadow-e2">
-                {SORT_FIELDS_BY_KIND[kind].map((f) => (
+          </>
+        )}
+
+        {/* Overflow popup — same controls, stacked, when the bar is too narrow. */}
+        {compact && (
+          <div ref={moreRef} className="relative">
+            <button
+              type="button"
+              aria-label="View options"
+              aria-expanded={moreOpen}
+              title="View options"
+              className={clsx("icon-btn", moreOpen && "icon-btn-active")}
+              onClick={() => setMoreOpen((o) => !o)}
+            >
+              <SlidersHorizontal size={14} />
+            </button>
+            {moreOpen && (
+              <div className="absolute right-0 top-[calc(100%+6px)] z-50 flex w-60 flex-col gap-1 rounded-xl bg-raised p-2 shadow-e2">
+                {kind === "texture" && smoothPill(true)}
+                {kind === "texture" && groupPill(true)}
+                {showInfo && infoPill(true)}
+                {showInfo && (
+                  <CellSizeControl
+                    menu
+                    cellSize={cellSize}
+                    onChange={(v) => patchTab(kind, { cellSize: v })}
+                  />
+                )}
+
+                <div className="mt-1 border-t border-bg pt-2">
+                  <div className="px-1 pb-1 text-[10px] font-medium uppercase tracking-wide text-faint">
+                    Sort by
+                  </div>
+                  {SORT_FIELDS_BY_KIND[kind].map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={clsx(
+                        "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
+                        f === sortField
+                          ? "bg-accent-fill text-accent-fg"
+                          : "text-dim hover:bg-overlay hover:text-text",
+                      )}
+                      onClick={() => setSort(kind, f)}
+                    >
+                      {SORT_LABELS[f]}
+                      {f === sortField && <Check size={13} />}
+                    </button>
+                  ))}
                   <button
-                    key={f}
                     type="button"
-                    className={clsx(
-                      "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
-                      f === sortField
-                        ? "bg-accent-fill text-accent-fg"
-                        : "text-dim hover:bg-overlay hover:text-text",
-                    )}
-                    onClick={() => {
-                      setSort(kind, f);
-                      setSortOpen(false);
-                    }}
+                    className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+                    onClick={() => toggleSortDir(kind)}
                   >
-                    {SORT_LABELS[f]}
-                    {f === sortField && <Check size={13} />}
+                    {sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+                    {sortDir === "asc" ? "Ascending" : "Descending"}
                   </button>
-                ))}
+                </div>
               </div>
             )}
           </div>
-        </div>
-        <button
-          type="button"
-          className="icon-btn"
-          title={sortDir === "asc" ? "Ascending — click for descending" : "Descending — click for ascending"}
-          onClick={() => toggleSortDir(kind)}
-        >
-          {sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
-        </button>
+        )}
 
         {canGrid && (
           <div className="ml-1 flex items-center gap-0.5 rounded-full bg-bg p-0.5">

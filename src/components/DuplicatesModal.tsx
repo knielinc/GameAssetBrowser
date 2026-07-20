@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Copy, FolderOpen, X } from "lucide-react";
+import clsx from "clsx";
+import { Copy, FolderOpen, FolderTree, Image as ImageIcon, Pause, Play, X } from "lucide-react";
 import { cancelDuplicates, findDuplicates, showInExplorer } from "../ipc/commands";
 import {
   DUPES_DONE,
@@ -9,8 +10,77 @@ import {
   type DupeProgress,
   type DupesDone,
 } from "../ipc/events";
-import { useLibraryStore } from "../stores/libraryStore";
+import { useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { audioVisibleRef, loadAndSelect, usePlayerStore } from "../stores/playerStore";
+import { revealInNavigator } from "../stores/revealFolder";
+import { useThumbSrc } from "../hooks/useThumbSrc";
 import { humanSize } from "./FileRow";
+
+/**
+ * A duplicate row's thumbnail. Reuses the shared instant-thumbnail path
+ * (`useThumbSrc`), so on a warm cache the image shows straight off disk with
+ * no IPC. Needs a real LibFile (path + size + mtime derive the cache key); a
+ * dupe path missing from the current library falls back to the icon below.
+ */
+function DupeThumb({ file }: { file: LibFile }): ReactElement {
+  const { src, imgKey, onError, onLoad } = useThumbSrc(file);
+  return (
+    <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-bg">
+      {src !== null ? (
+        <img
+          key={imgKey}
+          src={src}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          onError={onError}
+          onLoad={onLoad}
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <ImageIcon size={16} className="text-faint opacity-40" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Audio rows have no image to show, so their thumbnail slot doubles as a
+ * play/pause toggle that auditions the file through the shared player (so the
+ * transport bar and waveform sync too). Loading needs the file's index in the
+ * visible audio order for library selection; a dupe filtered out of that list
+ * resolves to -1, which still loads and plays — it just isn't row-selected.
+ */
+function DupePreviewButton({ file }: { file: LibFile }): ReactElement {
+  const isCurrent = usePlayerStore((s) => s.currentPath === file.path);
+  const playing = usePlayerStore((s) => s.playing && s.currentPath === file.path);
+  return (
+    <button
+      type="button"
+      title={playing ? "Pause preview" : "Play preview"}
+      onClick={() => {
+        if (usePlayerStore.getState().currentPath === file.path) {
+          usePlayerStore.getState().togglePlay();
+        } else {
+          const idx = audioVisibleRef.current.findIndex((f) => f.path === file.path);
+          loadAndSelect(file, idx, 0, true);
+        }
+      }}
+      className={clsx(
+        "flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors duration-[120ms]",
+        isCurrent ? "bg-accent/20 text-accent" : "bg-bg text-faint hover:text-text",
+      )}
+    >
+      {playing ? (
+        <Pause size={16} fill="currentColor" strokeWidth={0} />
+      ) : (
+        <Play size={16} fill="currentColor" strokeWidth={0} className="translate-x-px" />
+      )}
+    </button>
+  );
+}
 
 /** Directory containing `path` (Windows or POSIX separators). */
 function dirOf(path: string): string {
@@ -89,6 +159,20 @@ export default function DuplicatesModal({ onClose }: { onClose: () => void }): R
     [groups],
   );
 
+  // Resolve each duplicate path back to its LibFile for the thumbnail key.
+  // Only the paths in the report are wanted, so this is a single pass over the
+  // (stable) file list, recomputed once when the hunt lands.
+  const byPath = useMemo(() => {
+    const m = new Map<string, LibFile>();
+    if (groups === null) return m;
+    const wanted = new Set<string>();
+    for (const g of groups) for (const p of g.paths) wanted.add(p);
+    for (const f of useLibraryStore.getState().allFiles) {
+      if (wanted.has(f.path)) m.set(f.path, f);
+    }
+    return m;
+  }, [groups]);
+
   const pct =
     progress === null || progress.total === 0
       ? 0
@@ -145,17 +229,39 @@ export default function DuplicatesModal({ onClose }: { onClose: () => void }): R
                     {humanSize(g.size * (g.paths.length - 1))} wasted
                   </span>
                 </div>
-                {g.paths.map((p) => (
+                {g.paths.map((p) => {
+                  const lf = byPath.get(p);
+                  return (
                   <div
                     key={p}
                     className="group flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-[120ms] hover:bg-overlay"
                   >
+                    {lf === undefined ? (
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-bg">
+                        <ImageIcon size={16} className="text-faint opacity-40" />
+                      </div>
+                    ) : lf.kind === "audio" ? (
+                      <DupePreviewButton file={lf} />
+                    ) : (
+                      <DupeThumb file={lf} />
+                    )}
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12px] text-text" title={p}>
                         {nameOf(p)}
                       </div>
                       <div className="truncate font-mono text-[10px] text-faint">{dirOf(p)}</div>
                     </div>
+                    <button
+                      type="button"
+                      className="icon-btn shrink-0 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"
+                      title="Show in navigator"
+                      onClick={() => {
+                        revealInNavigator(p);
+                        onClose();
+                      }}
+                    >
+                      <FolderTree size={13} />
+                    </button>
                     <button
                       type="button"
                       className="icon-btn shrink-0 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"
@@ -181,7 +287,8 @@ export default function DuplicatesModal({ onClose }: { onClose: () => void }): R
                       <Copy size={13} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
           </div>

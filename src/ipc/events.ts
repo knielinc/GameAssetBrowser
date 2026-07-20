@@ -131,9 +131,7 @@ export function initIpcEvents(): void {
   void listen<WaveformReady>(EVT.WAVEFORM_READY, (event) => {
     const { path, peaks } = event.payload;
     // Guard on currentPath (not selectedPath): the waveform belongs to the
-    // LOADED track, which a hover preview can move without selecting — same
-    // reasoning as the spectrogram listener below. Selection-only would strand
-    // the flat fallback bar for the whole preview.
+    // LOADED track. Selection-only would strand the flat fallback bar.
     if (path !== usePlayerStore.getState().currentPath) return;
     usePlayerStore.setState({ peaks: new Float32Array(peaks) });
   });
@@ -141,7 +139,7 @@ export function initIpcEvents(): void {
   void listen<SpectrogramReady>(EVT.SPECTROGRAM_READY, (event) => {
     const { path, width, height, data } = event.payload;
     // Guard on currentPath (not selectedPath): the spectrogram belongs to the
-    // LOADED track, which a hover preview can move without selecting.
+    // LOADED track.
     if (path !== usePlayerStore.getState().currentPath) return;
     // Base64 → bytes. atob is fine at this size (≤ 128 KB decoded).
     const bin = atob(data);
@@ -183,7 +181,7 @@ export function initIpcEvents(): void {
         positionRef.seconds = 0;
         usePositionStore.setState({ seconds: 0 });
         // After the reset, not instead of it: if auto-advance declines (off,
-        // end of list, hover preview), the rewound-and-paused state stands.
+        // end of list), the rewound-and-paused state stands.
         maybeAutoAdvance();
         break;
       case "stopped":

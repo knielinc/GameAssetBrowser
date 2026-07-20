@@ -54,6 +54,7 @@ function defaultFilterSettings(): TabFilterSettings {
     audioChannels: [],
     sampleRates: [],
     favorite: false,
+    collections: [],
   };
 }
 
@@ -76,7 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
   loop: false,
   autoplay: true,
   autoAdvance: false,
-  hoverPreview: false,
+  shuffle: false,
   activeTab: "audio",
   tabs: {
     audio: defaultTabSettings("audio"),
@@ -167,6 +168,11 @@ function sanitizeFilters(kind: AssetKind, raw: unknown): TabFilterSettings {
     audioChannels: pick(raw.audioChannels, AUDIO_CHANNEL_GROUPS),
     sampleRates: pick(raw.sampleRates, SAMPLE_RATE_BUCKETS),
     favorite: bool(raw.favorite, false),
+    // Dynamic vocabulary (collection names) — no table to validate against, so
+    // just take the strings, deduped. A name whose collection no longer exists
+    // simply matches nothing until it's cleared; onCollectionRenamed prunes the
+    // live ones on rename/delete.
+    collections: [...new Set(strArray(raw.collections, []))],
   };
   // The sortField gate, generalized: a texture-only facet that somehow landed
   // in the audio tab's settings degrades to off, never to an invisible
@@ -234,9 +240,9 @@ export function sanitize(raw: unknown): Settings {
     volume: clampNum(v2.volume, 0, 1, d.volume),
     loop: bool(v2.loop, d.loop),
     autoplay: bool(v2.autoplay, d.autoplay),
-    // Absent pre-feature → both off, the no-migration path.
+    // Absent pre-feature → off, the no-migration path.
     autoAdvance: bool(v2.autoAdvance, d.autoAdvance),
-    hoverPreview: bool(v2.hoverPreview, d.hoverPreview),
+    shuffle: bool(v2.shuffle, d.shuffle),
     activeTab: oneOf<AssetKind>(v2.activeTab, ASSET_KINDS, d.activeTab),
     tabs: {
       audio: sanitizeTab("audio", tabs.audio),
@@ -339,6 +345,7 @@ function tabToSettings(t: TabState): TabSettings {
       colors: [...t.filters.colors],
       audioChannels: [...t.filters.audioChannels],
       sampleRates: [...t.filters.sampleRates],
+      collections: [...t.filters.collections],
     },
   };
 }
@@ -354,7 +361,7 @@ function currentSettings(): Settings {
     loop: player.loop,
     autoplay: player.autoplay,
     autoAdvance: player.autoAdvance,
-    hoverPreview: player.hoverPreview,
+    shuffle: player.shuffle,
     activeTab: lib.activeTab,
     tabs: {
       audio: tabToSettings(lib.tabs.audio),
@@ -438,7 +445,7 @@ function installSubscriptions(): void {
       state.loop !== prev.loop ||
       state.autoplay !== prev.autoplay ||
       state.autoAdvance !== prev.autoAdvance ||
-      state.hoverPreview !== prev.hoverPreview
+      state.shuffle !== prev.shuffle
     ) {
       saveSettings();
     }
@@ -495,6 +502,7 @@ function applySettings(settings: Settings): void {
         colors: new Set(p.filters.colors as ColorBucket[]),
         audioChannels: new Set(p.filters.audioChannels as AudioChannelGroup[]),
         sampleRates: new Set(p.filters.sampleRates as SampleRateBucket[]),
+        collections: new Set(p.filters.collections),
       },
     };
   }
@@ -505,7 +513,7 @@ function applySettings(settings: Settings): void {
     folderScopes: settings.folderScopes,
     hiddenFolders: settings.hiddenFolders,
     // Session-only; an import may drop the collection it referenced.
-    collectionScope: null,
+    collectionScopes: [],
   });
   useAtlasStore.getState().hydrate(settings.atlases);
   useFavoritesStore
@@ -517,7 +525,7 @@ function applySettings(settings: Settings): void {
     loop: settings.loop,
     autoplay: settings.autoplay,
     autoAdvance: settings.autoAdvance,
-    hoverPreview: settings.hoverPreview,
+    shuffle: settings.shuffle,
   });
 
   // Bring the audio engine in line with the preferences.

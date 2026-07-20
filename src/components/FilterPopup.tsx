@@ -57,18 +57,19 @@ function parseDate(s: string, end: boolean): number | null {
 /** UI facet groups (not 1:1 with store keys — `shape` spans square+pot, and
  *  `material` hosts both the membership toggle and the channel rows). */
 export type FacetId =
-  | "format" | "favorite" | "duration" | "audioChannels" | "sampleRate" | "material"
-  | "color" | "res" | "shape" | "size" | "modified";
+  | "format" | "favorite" | "collections" | "duration" | "audioChannels" | "sampleRate"
+  | "material" | "color" | "res" | "shape" | "size" | "modified";
 
 export const FACET_ORDER: Record<AssetKind, readonly FacetId[]> = {
-  audio: ["format", "favorite", "duration", "audioChannels", "sampleRate", "modified"],
-  texture: ["format", "favorite", "material", "color", "res", "shape", "modified"],
-  model: ["format", "favorite", "size", "modified"],
+  audio: ["format", "favorite", "collections", "duration", "audioChannels", "sampleRate", "modified"],
+  texture: ["format", "favorite", "collections", "material", "color", "res", "shape", "modified"],
+  model: ["format", "favorite", "collections", "size", "modified"],
 };
 
 const FACET_LABEL: Record<FacetId, string> = {
   format: "Format",
   favorite: "Favorite",
+  collections: "Collections",
   duration: "Length",
   audioChannels: "Channels",
   sampleRate: "Sample rate",
@@ -598,6 +599,17 @@ export default function FilterPopup({
           });
         }
         break;
+      case "collections":
+        for (const o of counts.collections) {
+          if (o.selected) {
+            tokens.push({
+              key: `collections:${o.value}`,
+              label: o.value,
+              remove: () => apply({ collections: toggled(filters.collections, o.value) }),
+            });
+          }
+        }
+        break;
       case "duration":
         if (rangeActive(filters.duration)) {
           tokens.push({
@@ -732,6 +744,27 @@ export default function FilterPopup({
             onClick={() => apply({ favorite: !filters.favorite })}
           />
         );
+      case "collections": {
+        if (counts.collections.length === 0) {
+          return (
+            <div className="px-2.5 pb-1.5 pt-0.5 text-[10px] leading-snug text-faint">
+              No collections in scope
+            </div>
+          );
+        }
+        const max = maxCount(counts.collections);
+        return counts.collections.map((o) => (
+          <OptionRow
+            key={o.value}
+            kind={kind}
+            label={o.value}
+            count={o.count}
+            max={max}
+            selected={o.selected}
+            onClick={() => apply({ collections: toggled(filters.collections, o.value) })}
+          />
+        ));
+      }
       case "audioChannels": {
         const max = maxCount(counts.audioChannels);
         return counts.audioChannels.map((o) => (

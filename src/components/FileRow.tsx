@@ -100,10 +100,6 @@ export interface FileRowProps {
   /** Mousedown that may become a native drag-out (see dragOut.armDragOut) —
    *  under the movement threshold the press stays a plain click. */
   onDragOut?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
-  /** Hover-preview dwell (audio list, only when the setting is on). The enter
-   *  handler gets the event so the pane can ignore hovers mid-drag. */
-  onHoverStart?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
-  onHoverEnd?: (index: number) => void;
 }
 
 function FileRowInner({
@@ -123,8 +119,6 @@ function FileRowInner({
   onSelect,
   onContextMenu,
   onDragOut,
-  onHoverStart,
-  onHoverEnd,
 }: FileRowProps): ReactElement {
   return (
     <div
@@ -140,8 +134,6 @@ function FileRowInner({
         e.preventDefault();
         onContextMenu(index, e);
       }}
-      onMouseEnter={onHoverStart === undefined ? undefined : (e) => onHoverStart(index, e)}
-      onMouseLeave={onHoverEnd === undefined ? undefined : () => onHoverEnd(index)}
     >
       <div className="flex min-w-0 items-center gap-2">
         {/* Fixed slot (not hover-inserted) so names never shift; invisible

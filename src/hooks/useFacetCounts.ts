@@ -99,6 +99,9 @@ export interface FacetCounts {
   size: RangeHistogram | null;                 // model only
   /** All kinds — the single "Favorite" row (starred file), self-excluded. */
   favorite: ShapeRow;
+  /** All kinds — one row per collection present in scope ∪ selected, in the
+   *  user's collection order; self-excluded counts. */
+  collections: FacetOption<string>[];
   /** All kinds — mtimes are always known, so `measured` = every file passing
    *  the other constraints. Linear bins (see histogram()). */
   modified: RangeHistogram;
@@ -124,7 +127,8 @@ const COLOR = 512;
 const ACHAN = 1024;
 const RATE = 2048;
 const FAV = 4096;
-const FULL = 8191;
+const COL = 8192;
+const FULL = 16383;
 
 function zeroRecord<K extends string>(keys: readonly K[]): Record<K, number> {
   const out = {} as Record<K, number>;
@@ -205,11 +209,12 @@ export function useFacetCounts(
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
-  // A collection scope replaces the folder scope (collection-as-folder), so the
-  // counts match useVisibleFiles. `favorites` also drives the Favorite facet
-  // row; the popup is open-only, so an unconditional subscription is fine.
-  const inCollection = useCollectionMembers();
+  // Scope = union of the selected folders and collections, matching
+  // useVisibleFiles. `favorites`/`collections` also drive their filter facet
+  // rows; the popup is open-only, so unconditional subscriptions are fine.
+  const collMembers = useCollectionMembers();
   const favorites = useFavoritesStore((s) => s.favorites);
+  const collections = useFavoritesStore((s) => s.collections);
   const query = useLibraryStore((s) => s.tabs[kind].query);
   const extFilter = useLibraryStore((s) => s.tabs[kind].extFilter);
   const filters = useLibraryStore((s) => s.tabs[kind].filters);
@@ -243,6 +248,10 @@ export function useFacetCounts(
     const achanActive = kind === "audio" && flt.audioChannels.size > 0;
     const srActive = kind === "audio" && flt.sampleRates.size > 0;
     const favActive = flt.favorite;
+    const colActive = flt.collections.size > 0;
+    // Per-collection path sets, built once for the O(files × collections)
+    // membership scan (collections are few; the popup is open-only).
+    const colSets = collections.map((c) => ({ name: c.name, set: new Set(c.paths) }));
 
     // Size is stored in MB; compare in bytes, converted once outside the loop.
     const sizeBytes: RangeFilter = {
@@ -264,6 +273,7 @@ export function useFacetCounts(
     if (achanActive) base &= ~ACHAN;
     if (srActive) base &= ~RATE;
     if (favActive) base &= ~FAV;
+    if (colActive) base &= ~COL;
 
     // Range facets collect self-excluded measured VALUES for the histogram;
     // multi-select facets keep small fixed count records.
@@ -286,6 +296,7 @@ export function useFacetCounts(
     let sqCount = 0;
     let potCount = 0;
     let favCount = 0;
+    const colCount = new Map<string, number>();
 
     // Row sets are scope-only presence — stable under other facets and the
     // query, so rows never appear/disappear as the user narrows. The three
@@ -296,18 +307,35 @@ export function useFacetCounts(
     const presentColors = new Set<ColorBucket>();
     const presentAChans = new Set<AudioChannelGroup>();
     const presentRates = new Set<SampleRateBucket>();
+    const presentCols = new Set<string>();
 
     let scoped = 0;
     let visible = 0;
 
+    const hasFolderScope = folderScopes.length > 0;
+    const hasCollScope = collMembers !== null;
+    const anyScope = hasFolderScope || hasCollScope;
+
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
-      // Collection scope replaces the folder scope, matching useVisibleFiles.
-      if (inCollection !== null) {
-        if (!inCollection.has(f.path)) continue;
+      // Scope = union of the selected folders and collections, matching
+      // useVisibleFiles.
+      if (anyScope) {
+        const inFolders = hasFolderScope && inScope(f.path);
+        const inColls = hasCollScope && collMembers.has(f.path);
+        if (!inFolders && !inColls) continue;
       } else if (!inScope(f.path)) continue;
       scoped++;
       presentExts.add(f.ext);
+      // Collection memberships (scope-only presence + faceted counts below).
+      // Computed here so presence is stable under the query and other facets.
+      const memberCols: string[] = [];
+      for (const cs of colSets) {
+        if (cs.set.has(f.path)) {
+          memberCols.push(cs.name);
+          presentCols.add(cs.name);
+        }
+      }
       // The classifier is total (name-cached), so compute once per file and
       // reuse for presence, predicate, and histogram.
       const g = kind === "texture" ? channelGroupOf(f) : null;
@@ -358,6 +386,7 @@ export function useFacetCounts(
       if (achanActive && (ag === null || flt.audioChannels.has(ag))) mask |= ACHAN;
       if (srActive && (rb === null || flt.sampleRates.has(rb))) mask |= RATE;
       if (favActive && favorites.has(f.path)) mask |= FAV; // always known
+      if (colActive && memberCols.some((n) => flt.collections.has(n))) mask |= COL; // always known
 
       // Numerators are measured-only: an unmeasured file sits in no bucket
       // (while `visible` still keeps it — the documented discrepancy).
@@ -378,6 +407,9 @@ export function useFacetCounts(
       if (kind === "model" && (mask | SIZE) === FULL) sizeValues.push(f.size / MIB);
       if (f.modified > 0 && (mask | MOD) === FULL) modValues.push(f.modified);
       if (favorites.has(f.path) && (mask | FAV) === FULL) favCount++;
+      if ((mask | COL) === FULL) {
+        for (const n of memberCols) colCount.set(n, (colCount.get(n) ?? 0) + 1);
+      }
       if (mask === FULL) visible++;
     }
 
@@ -423,8 +455,19 @@ export function useFacetCounts(
             }),
           );
 
+    // Rows in the user's collection order; present-in-scope ∪ selected keeps an
+    // active row visible (and clearable) at count 0 even after it leaves scope.
+    const collectionRows = collections
+      .filter((c) => presentCols.has(c.name) || flt.collections.has(c.name))
+      .map((c) => ({
+        value: c.name,
+        count: colCount.get(c.name) ?? 0,
+        selected: flt.collections.has(c.name),
+      }));
+
     return {
       format,
+      collections: collectionRows,
       duration: kind !== "audio" ? null : histogram(durValues, true, asRangeDomain(durDomain)),
       channels,
       colors,
@@ -448,5 +491,5 @@ export function useFacetCounts(
       visible,
       scoped,
     };
-  }, [kind, allFiles, folderScopes, hiddenFolders, inCollection, favorites, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, collMembers, favorites, collections, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
 }

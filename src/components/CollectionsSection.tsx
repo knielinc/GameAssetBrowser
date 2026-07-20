@@ -18,12 +18,13 @@ interface RowProps {
   label: string;
   count: number;
   active: boolean;
-  onClick: () => void;
+  onClick: (e: ReactMouseEvent) => void;
   onContextMenu?: (e: ReactMouseEvent) => void;
 }
 
-/** One scope row — the tree-row idiom so Collections reads as a sibling of
- *  the folder tree above it. Click toggles the scope on/off. */
+/** One scope row — the tree-row idiom so Collections reads as a sibling of the
+ *  folder tree above it, and selecting one behaves like selecting a folder:
+ *  plain click solos it, Ctrl+click adds/removes (see the click handler). */
 function ScopeRow({ icon, label, count, active, onClick, onContextMenu }: RowProps): ReactElement {
   return (
     <div
@@ -48,11 +49,12 @@ function ScopeRow({ icon, label, count, active, onClick, onContextMenu }: RowPro
 
 /**
  * Sidebar "Collections" section, below the folder tree: the two pinned scopes
- * (Favorites, Recent), then the user's collections. Clicking a row toggles it
- * as the active collection scope (libraryStore.collectionScope) — a membership
- * filter layered on top of the folder scopes, see useVisibleFiles. Rename and
- * delete live in each collection row's context menu; rename swaps the row for
- * an inline input rather than opening a dialog.
+ * (Favorites, Recent), then the user's collections. Each row is a scope PEER of
+ * the folder tree — a plain click solos it (clearing folder selection), a
+ * Ctrl+click adds/removes it from the union (libraryStore.collectionScopes, see
+ * useVisibleFiles). Rename and delete live in each collection row's context
+ * menu; the store cascades those into the scope keys and filter facets. Rename
+ * swaps the row for an inline input rather than opening a dialog.
  */
 export default function CollectionsSection(): ReactElement {
   const collections = useFavoritesStore((s) => s.collections);
@@ -60,11 +62,15 @@ export default function CollectionsSection(): ReactElement {
   const recentsCount = useFavoritesStore((s) => s.recents.length);
   const renameCollection = useFavoritesStore((s) => s.renameCollection);
   const deleteCollection = useFavoritesStore((s) => s.deleteCollection);
-  const scope = useLibraryStore((s) => s.collectionScope);
-  const setCollectionScope = useLibraryStore((s) => s.setCollectionScope);
+  const scopes = useLibraryStore((s) => s.collectionScopes);
+  const soloCollectionScope = useLibraryStore((s) => s.soloCollectionScope);
+  const toggleCollectionScope = useLibraryStore((s) => s.toggleCollectionScope);
 
-  const toggle = (key: string): void => {
-    setCollectionScope(scope === key ? null : key);
+  // Plain click solos this collection (clears folders); Ctrl/Cmd+click adds or
+  // removes it from the scope union — the folder-tree row idiom.
+  const onScopeClick = (key: string) => (e: ReactMouseEvent): void => {
+    if (e.ctrlKey || e.metaKey) toggleCollectionScope(key);
+    else soloCollectionScope(key);
   };
 
   const [menu, setMenu] = useState<{ x: number; y: number; name: string } | null>(null);
@@ -74,23 +80,10 @@ export default function CollectionsSection(): ReactElement {
   const commitRename = (): void => {
     if (renaming === null) return;
     const { name, draft } = renaming;
-    const trimmed = draft.trim();
     setRenaming(null);
-    if (trimmed === "" || trimmed === name) return;
-    // The store no-ops on a taken name — check first so the active scope only
-    // follows a rename that actually happened.
-    if (useFavoritesStore.getState().collections.some((c) => c.name === trimmed)) return;
-    renameCollection(name, trimmed);
-    if (useLibraryStore.getState().collectionScope === collectionScopeKey(name)) {
-      setCollectionScope(collectionScopeKey(trimmed));
-    }
-  };
-
-  const onDelete = (name: string): void => {
-    deleteCollection(name);
-    if (useLibraryStore.getState().collectionScope === collectionScopeKey(name)) {
-      setCollectionScope(null);
-    }
+    // The store validates (empty/taken/missing are no-ops) and cascades the
+    // rename into any live scope key and the collection filter facets.
+    renameCollection(name, draft.trim());
   };
 
   return (
@@ -105,18 +98,18 @@ export default function CollectionsSection(): ReactElement {
       </div>
 
       <ScopeRow
-        icon={<Star size={14} className={clsx("shrink-0", scope === FAVORITES_SCOPE ? "text-accent" : "text-kind-model")} />}
+        icon={<Star size={14} className={clsx("shrink-0", scopes.includes(FAVORITES_SCOPE) ? "text-accent" : "text-kind-model")} />}
         label="Favorites"
         count={favoritesCount}
-        active={scope === FAVORITES_SCOPE}
-        onClick={() => toggle(FAVORITES_SCOPE)}
+        active={scopes.includes(FAVORITES_SCOPE)}
+        onClick={onScopeClick(FAVORITES_SCOPE)}
       />
       <ScopeRow
-        icon={<Clock size={14} className={clsx("shrink-0", scope === RECENTS_SCOPE ? "text-accent" : "text-dim")} />}
+        icon={<Clock size={14} className={clsx("shrink-0", scopes.includes(RECENTS_SCOPE) ? "text-accent" : "text-dim")} />}
         label="Recent"
         count={recentsCount}
-        active={scope === RECENTS_SCOPE}
-        onClick={() => toggle(RECENTS_SCOPE)}
+        active={scopes.includes(RECENTS_SCOPE)}
+        onClick={onScopeClick(RECENTS_SCOPE)}
       />
 
       {collections.map((c) => {
@@ -153,11 +146,11 @@ export default function CollectionsSection(): ReactElement {
         return (
           <ScopeRow
             key={c.name}
-            icon={<Bookmark size={14} className={clsx("shrink-0", scope === key ? "text-accent" : "text-dim")} />}
+            icon={<Bookmark size={14} className={clsx("shrink-0", scopes.includes(key) ? "text-accent" : "text-dim")} />}
             label={c.name}
             count={c.paths.length}
-            active={scope === key}
-            onClick={() => toggle(key)}
+            active={scopes.includes(key)}
+            onClick={onScopeClick(key)}
             onContextMenu={(e) => {
               e.preventDefault();
               setMenu({ x: e.clientX, y: e.clientY, name: c.name });
@@ -178,10 +171,11 @@ export default function CollectionsSection(): ReactElement {
               onClick: () => setRenaming({ name: menu.name, draft: menu.name }),
             },
             {
-              // Deletes the collection only — never the files in it.
+              // Deletes the collection only — never the files in it. The store
+              // cascades the removal into any live scope key and filter facets.
               label: "Delete",
               icon: Trash2,
-              onClick: () => onDelete(menu.name),
+              onClick: () => deleteCollection(menu.name),
             },
           ]}
         />

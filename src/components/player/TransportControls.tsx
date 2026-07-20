@@ -5,7 +5,6 @@ import { playerStop } from "../../ipc/commands";
 import {
   playAdjacent,
   positionRef,
-  shuffleAudio,
   useAudioListStore,
   usePlayerStore,
   usePositionStore,
@@ -16,11 +15,13 @@ export default function TransportControls(): ReactElement {
   const loop = usePlayerStore((s) => s.loop);
   const autoplay = usePlayerStore((s) => s.autoplay);
   const autoAdvance = usePlayerStore((s) => s.autoAdvance);
+  const shuffle = usePlayerStore((s) => s.shuffle);
   const hasTrack = usePlayerStore((s) => s.currentPath !== null);
   const togglePlay = usePlayerStore((s) => s.togglePlay);
   const toggleLoop = usePlayerStore((s) => s.toggleLoop);
   const toggleAutoplay = usePlayerStore((s) => s.toggleAutoplay);
   const toggleAutoAdvance = usePlayerStore((s) => s.toggleAutoAdvance);
+  const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
   // Prev/next/shuffle step the visible audio list, so they light up as soon as
   // one exists — even before a track is picked (next → first).
   const hasList = useAudioListStore((s) => s.count > 0);
@@ -72,16 +73,6 @@ export default function TransportControls(): ReactElement {
         <SkipForward size={14} />
       </button>
 
-      <button
-        type="button"
-        className="icon-btn"
-        disabled={!hasList}
-        onClick={shuffleAudio}
-        title="Shuffle — play a random track"
-      >
-        <Shuffle size={14} />
-      </button>
-
       <div className="mx-0.5 h-5 w-px bg-bg" />
 
       <button
@@ -113,6 +104,19 @@ export default function TransportControls(): ReactElement {
         title="Auto-advance: play the next file when a track ends"
       >
         <ListEnd size={14} />
+      </button>
+
+      {/* Shuffle rides on auto-advance: it only changes the ORDER of the
+          automatic continue (random permutation, each sample once), so it sits
+          beside it and greys out when auto-advance is off. */}
+      <button
+        type="button"
+        className={clsx("icon-btn", shuffle && "icon-btn-active")}
+        disabled={!autoAdvance}
+        onClick={toggleShuffle}
+        title="Shuffle auto-advance: play the queue in a random order"
+      >
+        <Shuffle size={14} />
       </button>
 
       <button

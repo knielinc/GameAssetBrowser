@@ -328,7 +328,11 @@ export default function FolderTree(): ReactElement {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const activeTab = useLibraryStore((s) => s.activeTab);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
-  const scopeIsAll = useLibraryStore((s) => s.folderScopes.length === 0);
+  // "All Files" is the master switch across BOTH scope kinds — lit only when no
+  // folder AND no collection is selected (a collection scope is a folder peer).
+  const scopeIsAll = useLibraryStore(
+    (s) => s.folderScopes.length === 0 && s.collectionScopes.length === 0,
+  );
   const clearScopes = useLibraryStore((s) => s.clearScopes);
   const toggleHidden = useLibraryStore((s) => s.toggleHidden);
   const resetHidden = useLibraryStore((s) => s.resetHidden);

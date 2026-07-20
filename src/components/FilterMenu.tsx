@@ -43,6 +43,8 @@ export default function FilterMenu({ kind }: { kind: AssetKind }): ReactElement 
         return extFilter.size;
       case "favorite":
         return filters.favorite ? 1 : 0;
+      case "collections":
+        return filters.collections.size;
       case "duration":
         return rangeActive(filters.duration) ? 1 : 0;
       case "audioChannels":

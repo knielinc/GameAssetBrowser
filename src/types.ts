@@ -281,6 +281,12 @@ export interface TabFilterSettings {
   favorite: boolean;           // all kinds — on = starred (favoritesStore). The
                                // sidebar "Favorites" row is a whole-library
                                // SCOPE; this facet narrows the CURRENT view.
+  collections: string[];       // all kinds — collection names (favoritesStore).
+                               // The sidebar collection rows are whole-library
+                               // SCOPES; this facet narrows the CURRENT view to
+                               // members of ANY selected collection (OR within
+                               // the facet, AND across facets). Dynamic
+                               // vocabulary — validated by dedupe, not a table.
 }
 
 /**
@@ -289,9 +295,9 @@ export interface TabFilterSettings {
  * shown nor restored.
  */
 export const FILTER_FACETS_BY_KIND = {
-  audio: ["favorite", "duration", "audioChannels", "sampleRates", "modified"],
-  texture: ["favorite", "channels", "material", "colors", "res", "square", "pot", "modified"],
-  model: ["favorite", "size", "modified"],
+  audio: ["favorite", "collections", "duration", "audioChannels", "sampleRates", "modified"],
+  texture: ["favorite", "collections", "channels", "material", "colors", "res", "square", "pot", "modified"],
+  model: ["favorite", "collections", "size", "modified"],
 } as const satisfies Record<AssetKind, readonly (keyof TabFilterSettings)[]>;
 
 /** Per-tab persisted view state. */
@@ -347,8 +353,8 @@ export interface Settings {
   /** When a track ends (loop off), advance to the next visible audio file and
    *  play it — the player-bar toggle next to loop. */
   autoAdvance: boolean;
-  /** Hovering an audio row for ~350 ms auditions it without selecting it. */
-  hoverPreview: boolean;
+  /** Auto-advance in a random (Spotify-style) order rather than list order. */
+  shuffle: boolean;
   activeTab: AssetKind;
   tabs: Record<AssetKind, TabSettings>;
   /** Selected parent folders scoping the file list; empty = whole library.

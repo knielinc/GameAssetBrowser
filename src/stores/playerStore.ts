@@ -6,7 +6,6 @@ import {
   playerSetLoop,
   playerSetSpeed,
   playerSetVolume,
-  playerStop,
 } from "../ipc/commands";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import { useLibraryStore, type LibFile } from "./libraryStore";
@@ -60,8 +59,10 @@ export interface PlayerState {
   autoplay: boolean;
   /** On track end (loop off): advance to the next visible audio file. Persisted. */
   autoAdvance: boolean;
-  /** Hovering an audio row auditions it without selecting. Persisted. */
-  hoverPreview: boolean;
+  /** Auto-advance in a random (Spotify-style) order instead of list order: a
+   *  frozen permutation plays each visible track once before any repeat.
+   *  Persisted. */
+  shuffle: boolean;
   /** Playback rate 0.25–2 (rodio resamples, so pitch shifts too). Session-only:
    *  survives track changes (the engine re-applies it per sink) but resets on
    *  app restart — deliberately not in Settings. */
@@ -79,7 +80,7 @@ export interface PlayerState {
   toggleLoop: () => void;
   toggleAutoplay: () => void;
   toggleAutoAdvance: () => void;
-  toggleHoverPreview: () => void;
+  toggleShuffle: () => void;
   setSpeed: (speed: number) => void;
   setViz: (viz: "wave" | "spec") => void;
   togglePlay: () => void;
@@ -93,7 +94,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   loop: false,
   autoplay: true,
   autoAdvance: false,
-  hoverPreview: false,
+  shuffle: false,
   speed: 1,
   viz: "wave",
   peaks: null,
@@ -115,7 +116,12 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
 
   toggleAutoAdvance: () => set((s) => ({ autoAdvance: !s.autoAdvance })),
 
-  toggleHoverPreview: () => set((s) => ({ hoverPreview: !s.hoverPreview })),
+  // Drop any frozen chain so the mode change takes effect on the very next
+  // "ended" rather than trailing the rest of the current order.
+  toggleShuffle: () => {
+    clearAdvanceOrder();
+    set((s) => ({ shuffle: !s.shuffle }));
+  },
 
   setSpeed: (speed) => {
     // Mirror the engine's clamp so the button label never disagrees with what
@@ -150,36 +156,49 @@ let loadTimer: number | undefined;
  */
 export const audioVisibleRef: { current: readonly LibFile[] } = { current: [] };
 
-/** Path currently playing as a HOVER preview (null = none). Module-level, not
- *  store state: only the hover handlers and the choke points below care, and
- *  it must never re-render anything. */
-let hoverPath: string | null = null;
-
 /**
  * A frozen running order (paths) for the current auto-advance chain. The
  * Recent scope sorts the visible list by recency, and playing a track bumps it
  * to the top — so advancing by "current index + 1" in the LIVE list would
  * revisit already-heard tracks and never reach the end. Freezing the order
  * when a chain begins makes "let the pack play" walk the list once, top to
- * bottom, in every scope. Any deliberate/hover gesture clears it, so the next
- * chain re-freezes from wherever the user landed.
+ * bottom, in every scope. Any deliberate gesture clears it, so the next chain
+ * re-freezes from wherever the user landed. With shuffle on it is frozen as a
+ * random permutation instead of list order (see shuffledOrder).
  */
 let advanceOrder: readonly string[] | null = null;
+
+/** Drop the frozen auto-advance order so the next "ended" re-freezes fresh. */
+function clearAdvanceOrder(): void {
+  advanceOrder = null;
+}
+
+/**
+ * A Fisher–Yates permutation of `paths` with `first` pulled to the front, so a
+ * shuffled auto-advance chain never repeats the just-ended track and plays every
+ * visible sample once before the order is exhausted (Spotify-style shuffle).
+ */
+function shuffledOrder(paths: readonly string[], first: string): string[] {
+  const arr = paths.slice();
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i]!, arr[j]!] = [arr[j]!, arr[i]!];
+  }
+  const at = arr.indexOf(first);
+  if (at > 0) [arr[0]!, arr[at]!] = [arr[at]!, arr[0]!];
+  return arr;
+}
 
 /**
  * Select `file` in the library and load it into the audio engine.
  * `debounceMs > 0` delays only the invoke (trailing) — selection, waveform
  * reset, and playhead reset are applied immediately so the UI keeps up with
  * rapid arrow-key scrubbing without spamming the backend.
- * `forcePlay` starts playback even with autoplay off (the shuffle button —
- * a deliberate "play me something" gesture, unlike passive selection).
+ * `forcePlay` starts playback even with autoplay off (transport skip / auto-
+ * advance — a deliberate "keep sound coming" gesture, unlike passive selection).
  */
 export function loadAndSelect(file: LibFile, index: number, debounceMs = 0, forcePlay = false): void {
   const lib = useLibraryStore.getState();
-  // Any deliberate load claims the player: if a hover preview was sounding,
-  // it is no longer "just a hover" — mouseleave must not stop the track the
-  // user explicitly chose (clicking the very row being hovered).
-  hoverPath = null;
   // A deliberate pick ends the current auto-advance chain; the next "ended"
   // re-freezes the order from here. (maybeAutoAdvance restores it after its
   // own loadAndSelect so the chain it drives keeps walking the frozen order.)
@@ -230,7 +249,6 @@ export function loadAndSelect(file: LibFile, index: number, debounceMs = 0, forc
 export function replayCurrent(): void {
   const { currentPath } = usePlayerStore.getState();
   if (currentPath === null) return;
-  hoverPath = null; // deliberate gesture — see loadAndSelect
   usePlayerStore.setState({ playing: true });
   positionRef.seconds = 0;
   positionRef.playing = true;
@@ -239,62 +257,19 @@ export function replayCurrent(): void {
 }
 
 /**
- * Hover preview (FileRow's 350 ms dwell): load + play WITHOUT touching the
- * selection — the row under the cursor sounds, but focus, keyboard position
- * and the recents log (a hover is not a "use") all stay where they were.
- */
-export function hoverPlay(file: LibFile): void {
-  hoverPath = file.path;
-  advanceOrder = null; // a hover is not part of an auto-advance chain
-  const lib = useLibraryStore.getState();
-  if (usePlayerStore.getState().currentPath === file.path) {
-    // Hovering the already-loaded track: restart it, but keep the peaks —
-    // WaveformCanvas only re-requests them when currentPath changes, so
-    // nulling them here would strand the flat fallback bar (the same reason
-    // loadAndSelect bails on a same-path re-select).
-    usePlayerStore.setState({ playing: true });
-  } else {
-    usePlayerStore.setState({
-      currentPath: file.path,
-      peaks: null,
-      duration: lib.durations.get(file.id) ?? 0,
-      playing: true,
-    });
-  }
-  positionRef.seconds = 0;
-  positionRef.playing = true;
-  positionRef.path = file.path;
-  usePositionStore.setState({ seconds: 0 });
-  void playerLoad(file.path, true);
-}
-
-/** Mouseleave after a hover preview fired: stop it. No-op if a deliberate
- *  gesture (click/arrow/Enter) claimed playback in the meantime. */
-export function hoverStop(): void {
-  if (hoverPath === null) return;
-  const path = hoverPath;
-  hoverPath = null;
-  if (usePlayerStore.getState().currentPath !== path) return;
-  usePlayerStore.setState({ playing: false });
-  positionRef.playing = false;
-  positionRef.seconds = 0;
-  usePositionStore.setState({ seconds: 0 });
-  void playerStop();
-}
-
-/**
  * `playback:state` = "ended" hook (events.ts): with auto-advance on and loop
  * off, move to the NEXT file in the visible audio order and play it — the
  * "just let the pack play" mode. Stops quietly at the end of the list.
  */
 export function maybeAutoAdvance(): void {
-  const { autoAdvance, loop, currentPath } = usePlayerStore.getState();
-  // Loop never emits "ended" (the engine restarts the track itself), but
-  // guard anyway; a finished HOVER preview must not hijack the selection.
-  if (!autoAdvance || loop || currentPath === null || hoverPath !== null) return;
+  const { autoAdvance, loop, currentPath, shuffle } = usePlayerStore.getState();
+  // Loop never emits "ended" (the engine restarts the track itself), but guard.
+  if (!autoAdvance || loop || currentPath === null) return;
   // Walk the FROZEN order (see advanceOrder), freezing it on the first step of
   // a chain, so the Recent scope's play-driven reshuffle can't make us revisit.
-  const order = advanceOrder ?? audioVisibleRef.current.map((f) => f.path);
+  // With shuffle on the freeze is a random permutation (current track first).
+  const paths = audioVisibleRef.current.map((f) => f.path);
+  const order = advanceOrder ?? (shuffle ? shuffledOrder(paths, currentPath) : paths);
   const index = order.indexOf(currentPath);
   if (index < 0 || index + 1 >= order.length) {
     advanceOrder = null; // end of the frozen list (or fell out of it): stop
@@ -335,15 +310,4 @@ export function playAdjacent(delta: 1 | -1): void {
   if (next < 0 || next >= files.length) return; // at an edge: stay put
   loadAndSelect(files[next]!, next, 0, true);
   if (useLibraryStore.getState().activeTab === "audio") scrollToIndexRef.current?.(next);
-}
-
-/** Transport shuffle: play a uniformly random track in the visible audio order.
- *  The player bar is always shown, so this targets the audio list rather than
- *  the active pane (the toolbar dice covers the active pane). */
-export function shuffleAudio(): void {
-  const files = audioVisibleRef.current;
-  if (files.length === 0) return;
-  const index = Math.floor(Math.random() * files.length);
-  loadAndSelect(files[index]!, index, 0, true);
-  if (useLibraryStore.getState().activeTab === "audio") scrollToIndexRef.current?.(index);
 }

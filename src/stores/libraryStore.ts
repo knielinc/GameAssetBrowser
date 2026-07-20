@@ -48,6 +48,10 @@ export interface TabFilters {
   /** All kinds — on = only starred files. A view filter (ANDs with the folder
    *  scope), distinct from the sidebar's whole-library Favorites scope. */
   favorite: boolean;
+  /** All kinds — collection names. A view filter (ANDs with the scope; OR
+   *  within the set), distinct from the sidebar's whole-library collection
+   *  scopes. Empty = off. */
+  collections: Set<string>;
 }
 
 export function defaultFilters(): TabFilters {
@@ -64,6 +68,7 @@ export function defaultFilters(): TabFilters {
     audioChannels: new Set(),
     sampleRates: new Set(),
     favorite: false,
+    collections: new Set(),
   };
 }
 
@@ -122,11 +127,30 @@ export interface TabState {
   filters: TabFilters;
 }
 
+/**
+ * A re-scan's results, buffered off-screen. When a scan starts over an
+ * already-populated library we accumulate the new files + per-id metadata here
+ * instead of wiping the live state, so the shown list (scroll, selection,
+ * thumbnails) stays put until `finishScan` swaps this in atomically — no empty
+ * frame to reset the scroll or flash the pane. null except during such a
+ * re-scan; the first/empty scan streams straight into `allFiles` so a big
+ * library still fills in progressively.
+ */
+interface ScanBuffer {
+  gen: number;
+  files: LibFile[];
+  durations: Map<number, number>;
+  audioMeta: Map<number, readonly [rate: number, channels: number, bits: number]>;
+  dims: Map<number, readonly [w: number, h: number]>;
+}
+
 export interface LibraryState {
   // ---- shared: one library, three lenses ----
   roots: string[];
   /** Every scanned file of every kind. Filtered per tab by `kind`. */
   allFiles: LibFile[];
+  /** Off-screen buffer for a re-scan; see ScanBuffer. null when not re-scanning. */
+  pending: ScanBuffer | null;
   /** Generation id of the scan we accept batches from. */
   scanGen: number;
   scanning: boolean;
@@ -163,13 +187,16 @@ export interface LibraryState {
    */
   hiddenFolders: string[];
   /**
-   * Active collection scope narrowing the visible list ON TOP of the folder
-   * scopes: `"fav"` (favorites), `"recent"`, or `"col:<name>"` (a user
-   * collection — see favoritesStore). null = off. Session-only on purpose:
-   * a restart lands on the whole library, like selection. Shared across tabs
-   * for the same reason folderScopes is — a collection spans kinds.
+   * Active collection scopes, peers of the folder scopes: each is `"fav"`
+   * (favorites), `"recent"`, or `"col:<name>"` (a user collection — see
+   * favoritesStore). Selecting one behaves like selecting a folder — a plain
+   * click SOLOS it (clearing folder scopes), Ctrl+click adds/removes, and the
+   * visible list is the UNION of every selected folder subtree and collection
+   * member set (see useVisibleFiles). Empty = off. Session-only on purpose: a
+   * restart lands on the whole library, like selection. Shared across tabs for
+   * the same reason folderScopes is — a collection spans kinds.
    */
-  collectionScope: string | null;
+  collectionScopes: string[];
   activeTab: AssetKind;
 
   // ---- per-tab ----
@@ -195,16 +222,26 @@ export interface LibraryState {
   /** Header-click semantics: same field toggles direction, new field resets to asc. */
   setSort: (kind: AssetKind, field: SortField) => void;
   toggleSortDir: (kind: AssetKind) => void;
-  /** Focus the shown set on exactly this folder (click). Clicking the already-
-   *  soloed folder clears back to "show everything". Also un-hides it. */
+  /** Focus the shown set on exactly this folder (click). Clears any collection
+   *  scope too — a plain click solos. Clicking the already-soloed folder clears
+   *  back to "show everything". Also un-hides it. */
   soloScope: (path: string) => void;
-  /** Add/remove a folder from the shown set (ctrl-click). Adding un-hides it. */
+  /** Add/remove a folder from the shown set (ctrl-click). Keeps collection
+   *  scopes (union). Adding un-hides it. */
   toggleScope: (path: string) => void;
-  /** Clear the scope set (→ show the whole library). */
+  /** Clear both scope sets (→ show the whole library). */
   clearScopes: () => void;
-  /** Set (or clear with null) the active collection scope. Toggling off an
-   *  active row is the caller's job — it knows which row was clicked. */
-  setCollectionScope: (scope: string | null) => void;
+  /** Focus the shown set on exactly this collection (plain click). Clears folder
+   *  scopes too — the mirror of soloScope. Clicking the already-soloed
+   *  collection clears back to "show everything". */
+  soloCollectionScope: (key: string) => void;
+  /** Add/remove a collection from the shown set (ctrl-click). Keeps folder
+   *  scopes (union). */
+  toggleCollectionScope: (key: string) => void;
+  /** Cascade a collection rename (newName) or delete (newName = null) into the
+   *  session scope keys AND the persisted per-tab collection filter facets, so
+   *  neither is left pointing at a name that no longer exists. */
+  onCollectionRenamed: (oldName: string, newName: string | null) => void;
   /** Add/remove a folder from the hidden set (shift-click / eye / context). */
   toggleHidden: (path: string) => void;
   /** Un-hide a folder and every hidden folder beneath it (reset a subtree). */
@@ -307,6 +344,7 @@ function pruneFolders(
 export const useLibraryStore = create<LibraryState>()((set) => ({
   roots: [],
   allFiles: [],
+  pending: null,
   scanGen: 0,
   scanning: false,
   total: 0,
@@ -320,57 +358,123 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   dimsVersion: 0,
   folderScopes: [],
   hiddenFolders: [],
-  collectionScope: null,
+  collectionScopes: [],
   activeTab: "audio",
   tabs: defaultTabs(),
 
   setRoots: (roots) => set({ roots }),
 
   beginScan: (gen) =>
-    set((s) => ({
-      scanGen: gen,
-      scanning: true,
-      allFiles: [],
-      total: 0,
-      durations: new Map<number, number>(),
-      durationsVersion: s.durationsVersion + 1,
-      audioMeta: new Map<number, readonly [number, number, number]>(),
-      audioMetaVersion: s.audioMetaVersion + 1,
-      // File ids are per-scan, so a stale id would index the wrong texture.
-      thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
-      thumbsVersion: s.thumbsVersion + 1,
-      dims: new Map<number, readonly [number, number]>(),
-      dimsVersion: s.dimsVersion + 1,
-    })),
+    set((s) => {
+      // Re-scan over an already-populated library: buffer the new scan
+      // off-screen (see ScanBuffer) and leave the live state untouched, so the
+      // shown list stays stable — no empty frame to reset scroll/selection or
+      // flash the pane. finishScan swaps it in atomically.
+      if (s.allFiles.length > 0) {
+        return {
+          scanGen: gen,
+          scanning: true,
+          pending: {
+            gen,
+            files: [],
+            durations: new Map<number, number>(),
+            audioMeta: new Map<number, readonly [number, number, number]>(),
+            dims: new Map<number, readonly [number, number]>(),
+          },
+        };
+      }
+      // First / empty scan: nothing is shown, so stream straight in — a big
+      // library filling in progressively beats holding it all for the end.
+      return {
+        scanGen: gen,
+        scanning: true,
+        pending: null,
+        allFiles: [],
+        total: 0,
+        durations: new Map<number, number>(),
+        durationsVersion: s.durationsVersion + 1,
+        audioMeta: new Map<number, readonly [number, number, number]>(),
+        audioMetaVersion: s.audioMetaVersion + 1,
+        // File ids are per-scan, so a stale id would index the wrong texture.
+        thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
+        thumbsVersion: s.thumbsVersion + 1,
+        dims: new Map<number, readonly [number, number]>(),
+        dimsVersion: s.dimsVersion + 1,
+      };
+    }),
 
   appendFiles: (files) =>
-    set((s) => ({
-      allFiles: s.allFiles.concat(
-        files.map((f) => ({ ...f, nameLower: f.name.toLowerCase() })),
-      ),
-    })),
+    set((s) => {
+      if (s.pending !== null) {
+        // Buffered re-scan: accumulate off-screen with no re-render (the live
+        // list keeps showing). Mutated in place like the meta maps below —
+        // nothing subscribes to `pending`.
+        for (const f of files) {
+          s.pending.files.push({ ...f, nameLower: f.name.toLowerCase() });
+        }
+        return {};
+      }
+      return {
+        allFiles: s.allFiles.concat(
+          files.map((f) => ({ ...f, nameLower: f.name.toLowerCase() })),
+        ),
+      };
+    }),
 
   // A rescan may have removed a scoped/hidden folder from disk (or the roots
   // may have changed) — once the full file set is in, drop any that no longer
   // exist in the tree.
   finishScan: (done) =>
-    set((s) => ({
-      scanning: false,
-      total: done.total,
-      // Drop any scoped/hidden folder that no longer exists in the tree.
-      folderScopes: pruneFolders(s.folderScopes, s),
-      hiddenFolders: pruneFolders(s.hiddenFolders, s),
-    })),
+    set((s) => {
+      const p = s.pending;
+      if (p === null) {
+        // Streaming scan already filled allFiles in place.
+        return {
+          scanning: false,
+          total: done.total,
+          // Drop any scoped/hidden folder that no longer exists in the tree.
+          folderScopes: pruneFolders(s.folderScopes, s),
+          hiddenFolders: pruneFolders(s.hiddenFolders, s),
+        };
+      }
+      // Re-scan: swap the buffered scan in atomically. durations/audioMeta/dims
+      // were buffered by the new ids, so they land ready — no re-probe. Thumbs
+      // are keyed by per-scan id and can't carry over, so clear them; the new
+      // list's visible cells re-request and the warm on-disk cache (same
+      // path+mtime → same key) serves them near-instantly.
+      const next = { roots: s.roots, allFiles: p.files };
+      return {
+        scanning: false,
+        total: done.total,
+        pending: null,
+        allFiles: p.files,
+        durations: p.durations,
+        durationsVersion: s.durationsVersion + 1,
+        audioMeta: p.audioMeta,
+        audioMetaVersion: s.audioMetaVersion + 1,
+        dims: p.dims,
+        dimsVersion: s.dimsVersion + 1,
+        thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
+        thumbsVersion: s.thumbsVersion + 1,
+        folderScopes: pruneFolders(s.folderScopes, next),
+        hiddenFolders: pruneFolders(s.hiddenFolders, next),
+      };
+    }),
 
   mergeAudioMeta: (entries) =>
     set((s) => {
+      // During a buffered re-scan the probe streams meta for the NEW ids —
+      // route it to the buffer so it can't collide with the live (old-id) maps.
+      const durs = s.pending !== null ? s.pending.durations : s.durations;
+      const meta = s.pending !== null ? s.pending.audioMeta : s.audioMeta;
       for (const [id, seconds, rate, channels, bits] of entries) {
         // 0 = unmeasured. Keep `durations` holding only real values, so the
         // duration sort/filter's unknown-handling (absent = keep / sort last)
         // stays exactly as it was.
-        if (seconds > 0) s.durations.set(id, seconds);
-        if (rate > 0 || channels > 0 || bits > 0) s.audioMeta.set(id, [rate, channels, bits]);
+        if (seconds > 0) durs.set(id, seconds);
+        if (rate > 0 || channels > 0 || bits > 0) meta.set(id, [rate, channels, bits]);
       }
+      if (s.pending !== null) return {}; // buffered; live view unaffected
       // Map identity is stable on purpose — the version counters are the signal.
       return {
         durationsVersion: s.durationsVersion + 1,
@@ -380,9 +484,11 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
 
   mergeDims: (entries) =>
     set((s) => {
+      const target = s.pending !== null ? s.pending.dims : s.dims;
       for (const [id, w, h] of entries) {
-        s.dims.set(id, [w, h]);
+        target.set(id, [w, h]);
       }
+      if (s.pending !== null) return {}; // buffered until the swap
       return { dimsVersion: s.dimsVersion + 1 };
     }),
 
@@ -466,16 +572,27 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
 
   soloScope: (path) =>
     set((s) => {
-      // Click the already-soloed folder to clear back to the whole library.
-      if (s.folderScopes.length === 1 && s.folderScopes[0] === path) {
+      // Click the already-soloed folder (no collections either) to clear back to
+      // the whole library.
+      if (
+        s.folderScopes.length === 1 &&
+        s.folderScopes[0] === path &&
+        s.collectionScopes.length === 0
+      ) {
         return { folderScopes: [] };
       }
-      // Only-show-this: also drop it from hidden so it actually shows.
-      return { folderScopes: [path], hiddenFolders: s.hiddenFolders.filter((p) => p !== path) };
+      // Only-show-this: clear collection scopes (plain click solos across BOTH
+      // folder and collection rows) and drop it from hidden so it actually shows.
+      return {
+        folderScopes: [path],
+        collectionScopes: [],
+        hiddenFolders: s.hiddenFolders.filter((p) => p !== path),
+      };
     }),
 
   toggleScope: (path) =>
     set((s) => {
+      // Ctrl+click keeps collection scopes — folders and collections union.
       if (s.folderScopes.includes(path)) {
         return { folderScopes: s.folderScopes.filter((p) => p !== path) };
       }
@@ -486,9 +603,70 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       };
     }),
 
-  clearScopes: () => set((s) => (s.folderScopes.length === 0 ? {} : { folderScopes: [] })),
+  clearScopes: () =>
+    set((s) =>
+      s.folderScopes.length === 0 && s.collectionScopes.length === 0
+        ? {}
+        : { folderScopes: [], collectionScopes: [] },
+    ),
 
-  setCollectionScope: (scope) => set({ collectionScope: scope }),
+  soloCollectionScope: (key) =>
+    set((s) => {
+      // Mirror of soloScope: click the already-soloed collection (no folders
+      // either) to clear back to the whole library.
+      if (
+        s.collectionScopes.length === 1 &&
+        s.collectionScopes[0] === key &&
+        s.folderScopes.length === 0
+      ) {
+        return { collectionScopes: [] };
+      }
+      return { collectionScopes: [key], folderScopes: [] };
+    }),
+
+  toggleCollectionScope: (key) =>
+    set((s) => ({
+      // Ctrl+click keeps folder scopes — collections and folders union.
+      collectionScopes: s.collectionScopes.includes(key)
+        ? s.collectionScopes.filter((k) => k !== key)
+        : [...s.collectionScopes, key],
+    })),
+
+  onCollectionRenamed: (oldName, newName) =>
+    set((s) => {
+      const oldKey = `col:${oldName}`;
+      const newKey = newName === null ? null : `col:${newName}`;
+      // 1. Session scope keys (the sidebar collection rows).
+      let collectionScopes = s.collectionScopes;
+      if (collectionScopes.includes(oldKey)) {
+        collectionScopes =
+          newKey === null
+            ? collectionScopes.filter((k) => k !== oldKey)
+            : collectionScopes.map((k) => (k === oldKey ? newKey : k));
+      }
+      // 2. The persisted collection filter facet on every tab.
+      let tabs = s.tabs;
+      let tabsTouched = false;
+      for (const kind of ASSET_KINDS) {
+        const names = s.tabs[kind].filters.collections;
+        if (!names.has(oldName)) continue;
+        const next = new Set(names);
+        next.delete(oldName);
+        if (newName !== null) next.add(newName);
+        if (!tabsTouched) {
+          tabs = { ...s.tabs };
+          tabsTouched = true;
+        }
+        tabs[kind] = {
+          ...s.tabs[kind],
+          filters: { ...s.tabs[kind].filters, collections: next },
+        };
+      }
+      const patch: Partial<LibraryState> = {};
+      if (collectionScopes !== s.collectionScopes) patch.collectionScopes = collectionScopes;
+      if (tabsTouched) patch.tabs = tabs;
+      return patch;
+    }),
 
   toggleHidden: (path) =>
     set((s) => ({

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
-import { AppWindow, BarChart3, Check, CopyCheck, MousePointer2, Settings } from "lucide-react";
+import { AppWindow, BarChart3, Check, CopyCheck, Settings } from "lucide-react";
 import { MAX_SCALE, MIN_SCALE, THEMES, useThemeStore } from "../stores/theme";
-import { usePlayerStore } from "../stores/playerStore";
 import DuplicatesModal from "./DuplicatesModal";
 import ExternalAppsModal from "./ExternalAppsModal";
 import StatsModal from "./StatsModal";
@@ -28,8 +27,6 @@ export default function SettingsMenu(): ReactElement {
   const setTheme = useThemeStore((s) => s.setTheme);
   const uiScale = useThemeStore((s) => s.uiScale);
   const setUiScale = useThemeStore((s) => s.setUiScale);
-  const hoverPreview = usePlayerStore((s) => s.hoverPreview);
-  const toggleHoverPreview = usePlayerStore((s) => s.toggleHoverPreview);
 
   // Live preview value; the committed scale (uiScale) only changes on release.
   const [pending, setPending] = useState(uiScale);
@@ -123,22 +120,6 @@ export default function SettingsMenu(): ReactElement {
           <div className="mt-1.5 text-[10px] leading-snug text-faint">
             Scales the whole interface on release — 100% is the 16px base.
           </div>
-
-          <div className="mb-1.5 mt-4 text-[10px] font-medium uppercase tracking-wide text-faint">
-            Playback
-          </div>
-          {/* Persisted in Settings (see playerStore.hoverPreview); the dwell
-              behavior itself lives in FileList's row hover handlers. */}
-          <button
-            type="button"
-            aria-pressed={hoverPreview}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
-            onClick={toggleHoverPreview}
-          >
-            <MousePointer2 size={13} className="shrink-0 text-faint" />
-            <span className="flex-1">Hover to preview (audio)</span>
-            {hoverPreview && <Check size={13} className="shrink-0 text-accent" />}
-          </button>
 
           <div className="mb-1.5 mt-4 text-[10px] font-medium uppercase tracking-wide text-faint">
             Library

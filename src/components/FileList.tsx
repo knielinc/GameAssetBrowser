@@ -24,10 +24,10 @@ import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
 import { activeFilterCount, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { revealInNavigator } from "../stores/revealFolder";
-import { toggleFavoriteSmart, useFavoritesStore } from "../stores/favoritesStore";
+import { soleUserCollectionName, toggleFavoriteSmart, useFavoritesStore } from "../stores/favoritesStore";
 import { appsForKind, useExternalAppsStore } from "../stores/externalApps";
 import { armDragOut } from "../dragOut";
-import { hoverPlay, hoverStop, loadAndSelect, usePlayerStore } from "../stores/playerStore";
+import { loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import type { TextureItem } from "../material/classify";
 import ContextMenu from "./ContextMenu";
@@ -35,9 +35,6 @@ import CollectionPopup from "./CollectionPopup";
 import FileRow, { MaterialRow, rowGrid } from "./FileRow";
 
 const ROW_HEIGHT = 28;
-/** Hover-preview dwell before a row auditions — long enough that mousing
- *  across the list to the scrollbar doesn't fire a stray play. */
-const HOVER_PREVIEW_MS = 350;
 
 interface HeaderSpec {
   field: SortField;
@@ -161,7 +158,10 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   const playing = usePlayerStore((s) => s.playing);
   // Fresh Set identity per toggle, so the row props (plain booleans) recompute.
   const favorites = useFavoritesStore((s) => s.favorites);
-  const collectionScope = useLibraryStore((s) => s.collectionScope);
+  const collectionScopes = useLibraryStore((s) => s.collectionScopes);
+  // "Remove from collection" only has an unambiguous target when exactly one
+  // user collection is scoped (see soleUserCollectionName).
+  const removeColName = soleUserCollectionName(collectionScopes);
   // "Open with…" targets for this kind (SettingsMenu → External apps…).
   const externalApps = useExternalAppsStore((s) => s.apps);
   const headers = headersFor(kind);
@@ -218,48 +218,6 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
     }
     loadAndSelect(filesRef.current[index]!, index);
   }, []);
-
-  // Hover preview (audio only, opt-in): a 350 ms dwell on a row auditions it
-  // without selecting; leaving cancels the pending timer or stops a fired
-  // preview. hoverStop() is a no-op once a deliberate gesture (click/arrow)
-  // claims playback, so click-then-leave never cuts the chosen track.
-  const hoverPreview = usePlayerStore((s) => s.hoverPreview);
-  const hoverTimerRef = useRef<number | undefined>(undefined);
-  const onRowHoverStart = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
-    // Any held button (drag-select, scrollbar drag passing over rows, an
-    // in-progress click) suppresses the preview outright.
-    if (e.buttons !== 0) return;
-    if (hoverTimerRef.current !== undefined) window.clearTimeout(hoverTimerRef.current);
-    // Capture the file NOW, not at fire time: the list can re-sort during the
-    // 350 ms dwell (a probe batch lands while sorted by Length, or a play
-    // reorders the Recent scope), and a stale index would audition a different
-    // row than the cursor was ever over — with no selection to explain it.
-    const file = filesRef.current[index];
-    if (file === undefined) return;
-    hoverTimerRef.current = window.setTimeout(() => {
-      hoverTimerRef.current = undefined;
-      hoverPlay(file);
-    }, HOVER_PREVIEW_MS);
-  }, []);
-  const cancelHoverTimer = useCallback(() => {
-    if (hoverTimerRef.current !== undefined) {
-      window.clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = undefined;
-    }
-  }, []);
-  const onRowHoverEnd = useCallback(() => {
-    cancelHoverTimer();
-    hoverStop();
-  }, [cancelHoverTimer]);
-  // Keyboard tab switches unmount the pane with no mouseleave — don't leave a
-  // timer armed or a preview sounding.
-  useEffect(
-    () => () => {
-      if (hoverTimerRef.current !== undefined) window.clearTimeout(hoverTimerRef.current);
-      hoverStop();
-    },
-    [],
-  );
 
   // Drag-out (stable like onSelect, resolved through the same refs): a press
   // that travels past the threshold becomes a native OS file drag. Paths are
@@ -387,10 +345,6 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
         <div
           ref={parentRef}
           className="min-h-0 flex-1 overflow-x-hidden overflow-y-scroll"
-          // A press anywhere in the list (click, drag, scrollbar) kills any
-          // pending hover-preview dwell — enter-time e.buttons only catches
-          // buttons held BEFORE the row was entered. No-op on non-audio.
-          onMouseDownCapture={cancelHoverTimer}
         >
           <div
             style={{
@@ -460,8 +414,6 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                       onSelect={onSelect}
                       onContextMenu={onRowContextMenu}
                       onDragOut={onRowDragOut}
-                      onHoverStart={kind === "audio" && hoverPreview ? onRowHoverStart : undefined}
-                      onHoverEnd={kind === "audio" && hoverPreview ? onRowHoverEnd : undefined}
                     />
                   )}
                 </div>
@@ -534,9 +486,10 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                 });
               },
             })),
-            // Only while browsing a user collection — the one place "remove"
-            // has an unambiguous target. Favorites/Recent are not collections.
-            ...(collectionScope !== null && collectionScope.startsWith("col:")
+            // Only while browsing a single user collection — the one place
+            // "remove" has an unambiguous target. Favorites/Recent are not
+            // collections, and a multi-scope union names no single one.
+            ...(removeColName !== null
               ? [
                   {
                     label: menu.count > 1 ? `Remove from collection (${menu.count})` : "Remove from collection",
@@ -544,7 +497,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                     onClick: () => {
                       useFavoritesStore
                         .getState()
-                        .removeFromCollection(collectionScope.slice(4), menu.paths);
+                        .removeFromCollection(removeColName, menu.paths);
                     },
                   },
                 ]

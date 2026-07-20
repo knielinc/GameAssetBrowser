@@ -17,7 +17,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
 import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
-import { useFavoritesStore } from "../stores/favoritesStore";
+import { soleUserCollectionName, useFavoritesStore } from "../stores/favoritesStore";
 import { audioVisibleRef, useAudioListStore } from "../stores/playerStore";
 import { publishShuffleSource } from "../stores/shuffle";
 import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
@@ -149,7 +149,10 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   } | null>(null);
   // "Add to collection…" chooser, anchored where the context menu was.
   const [colPopup, setColPopup] = useState<{ x: number; y: number; paths: string[] } | null>(null);
-  const collectionScope = useLibraryStore((s) => s.collectionScope);
+  const collectionScopes = useLibraryStore((s) => s.collectionScopes);
+  // "Remove from collection" only has an unambiguous target when exactly one
+  // user collection is scoped (see soleUserCollectionName).
+  const removeColName = soleUserCollectionName(collectionScopes);
   // "Open with…" targets for this kind (SettingsMenu → External apps…).
   const externalApps = useExternalAppsStore((s) => s.apps);
   // Inspector show/hide is shared with the TabBar toggle; its width is a
@@ -553,9 +556,10 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
                 });
               },
             })),
-            // Only while browsing a user collection — the one place "remove"
-            // has an unambiguous target. Favorites/Recent are not collections.
-            ...(collectionScope !== null && collectionScope.startsWith("col:")
+            // Only while browsing a single user collection — the one place
+            // "remove" has an unambiguous target. Favorites/Recent are not
+            // collections, and a multi-scope union names no single one.
+            ...(removeColName !== null
               ? [
                   {
                     label: menu.count > 1 ? `Remove from collection (${menu.count})` : "Remove from collection",
@@ -563,7 +567,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
                     onClick: () => {
                       useFavoritesStore
                         .getState()
-                        .removeFromCollection(collectionScope.slice(4), menu.paths);
+                        .removeFromCollection(removeColName, menu.paths);
                     },
                   },
                 ]

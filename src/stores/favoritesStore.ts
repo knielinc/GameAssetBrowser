@@ -9,11 +9,23 @@ export const RECENTS_CAP = 200;
  *  scrubbing through the audio list doesn't churn the order (or the save). */
 const RECENT_THROTTLE_SECONDS = 60;
 
-/** Collection-scope keys as libraryStore.collectionScope stores them: the two
+/** Collection-scope keys as libraryStore.collectionScopes stores them: the two
  *  pinned rows get fixed ids, user collections are keyed by name. */
 export const FAVORITES_SCOPE = "fav";
 export const RECENTS_SCOPE = "recent";
 export const collectionScopeKey = (name: string): string => `col:${name}`;
+/** True for a user-collection scope key (not the pinned Favorites/Recent rows). */
+export const isUserCollectionKey = (key: string): boolean => key.startsWith("col:");
+
+/** The single user collection currently scoped, or null when the scope isn't
+ *  exactly one user collection. "Remove from collection" only has an
+ *  unambiguous target in that case (Favorites/Recent aren't collections, and a
+ *  multi-scope union names no single collection to remove from). */
+export function soleUserCollectionName(scopes: readonly string[]): string | null {
+  if (scopes.length !== 1) return null;
+  const key = scopes[0]!;
+  return isUserCollectionKey(key) ? key.slice(4) : null;
+}
 
 export interface FavoritesState {
   /** Starred file paths. Membership is O(1) for the 50k filter loop. */
@@ -93,19 +105,24 @@ export const useFavoritesStore = create<FavoritesState>()((set) => ({
       return { collections: [...s.collections, { name: trimmed, paths: [] }] };
     }),
 
-  renameCollection: (name, nextName) =>
-    set((s) => {
-      const trimmed = nextName.trim();
-      if (trimmed === "" || trimmed === name) return {};
-      if (s.collections.some((c) => c.name === trimmed)) return {};
-      if (!s.collections.some((c) => c.name === name)) return {};
-      return {
-        collections: s.collections.map((c) => (c.name === name ? { ...c, name: trimmed } : c)),
-      };
-    }),
+  renameCollection: (name, nextName) => {
+    const trimmed = nextName.trim();
+    const s = useFavoritesStore.getState();
+    if (trimmed === "" || trimmed === name) return;
+    if (s.collections.some((c) => c.name === trimmed)) return;
+    if (!s.collections.some((c) => c.name === name)) return;
+    set({
+      collections: s.collections.map((c) => (c.name === name ? { ...c, name: trimmed } : c)),
+    });
+    // Follow the rename in any live scope key and the collection filter facets.
+    useLibraryStore.getState().onCollectionRenamed(name, trimmed);
+  },
 
-  deleteCollection: (name) =>
-    set((s) => ({ collections: s.collections.filter((c) => c.name !== name) })),
+  deleteCollection: (name) => {
+    set((s) => ({ collections: s.collections.filter((c) => c.name !== name) }));
+    // Drop the now-dangling scope key and any filter-facet reference to it.
+    useLibraryStore.getState().onCollectionRenamed(name, null);
+  },
 
   addToCollection: (name, paths) =>
     set((s) => ({
