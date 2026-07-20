@@ -45,7 +45,7 @@ export default function TransportControls(): ReactElement {
         onClick={() => playAdjacent(-1)}
         title="Previous track"
       >
-        <SkipBack size={14} fill="currentColor" strokeWidth={0} />
+        <SkipBack size={14} />
       </button>
 
       <button
@@ -69,7 +69,7 @@ export default function TransportControls(): ReactElement {
         onClick={() => playAdjacent(1)}
         title="Next track"
       >
-        <SkipForward size={14} fill="currentColor" strokeWidth={0} />
+        <SkipForward size={14} />
       </button>
 
       <button
