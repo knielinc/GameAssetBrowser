@@ -1,11 +1,14 @@
 import { create } from "zustand";
 import { open } from "@tauri-apps/plugin-dialog";
 import { startScan } from "../ipc/commands";
-import { ASSET_KINDS } from "../types";
+import { ASSET_KINDS, FILTER_FACETS_BY_KIND, emptyRange, rangeActive } from "../types";
 import type {
   AssetKind,
+  ChannelGroup,
+  DimensionBatch,
   DurationBatch,
   FileEntry,
+  RangeFilter,
   ScanDone,
   SortDir,
   SortField,
@@ -17,6 +20,60 @@ import type {
 /** A scanned file plus the precomputed lowercase name used for filtering. */
 export interface LibFile extends FileEntry {
   nameLower: string;
+}
+
+/** Session shape of one tab's filters: Sets for O(1) membership in the 50k
+ *  loop; ranges as plain {min,max} in UI units. Persisted twin is
+ *  TabFilterSettings. */
+export interface TabFilters {
+  duration: RangeFilter;
+  /** Unix seconds, day-granular from the UI. */
+  modified: RangeFilter;
+  channels: Set<ChannelGroup>;
+  /** On = only files that are members of a derived material group. */
+  material: boolean;
+  res: RangeFilter;
+  square: boolean;
+  pot: boolean;
+  size: RangeFilter;
+}
+
+export function defaultFilters(): TabFilters {
+  return {
+    duration: emptyRange(),
+    modified: emptyRange(),
+    channels: new Set(),
+    material: false,
+    res: emptyRange(),
+    square: false,
+    pot: false,
+    size: emptyRange(),
+  };
+}
+
+/** Is one facet's value an active constraint? Total over every value shape in
+ *  TabFilters: Set (multi-select), boolean (shape/material), RangeFilter. */
+export function facetActive(v: TabFilters[keyof TabFilters]): boolean {
+  if (v instanceof Set) return v.size > 0;
+  if (typeof v === "boolean") return v;
+  return rangeActive(v);
+}
+
+/** Active-facet count for kind — "how many kinds of constraint must I undo",
+ *  not how many chips are lit. Drives the button pill, StatusBar, Clear-all
+ *  visibility, and the empty-state action. Format (extFilter) counts as one
+ *  facet: its chips live in the filter popup, so it must be undone there. An
+ *  active range counts as ONE facet whether one or both ends are set — it is
+ *  one token, one undo. */
+export function activeFilterCount(
+  kind: AssetKind,
+  t: Pick<TabState, "filters" | "extFilter">,
+): number {
+  let n = t.extFilter.size > 0 ? 1 : 0;
+  for (const facet of FILTER_FACETS_BY_KIND[kind]) {
+    if (facetActive(t.filters[facet])) n++;
+  }
+  return n;
 }
 
 /** View state owned by one tab. Never shared — switching tabs must not carry
@@ -35,6 +92,8 @@ export interface TabState {
   cellSize: number;
   /** Textures only: collapse loose files into materials. */
   groupMaterials: boolean;
+  /** ANDs with query/ext/scope; values within one facet OR. */
+  filters: TabFilters;
 }
 
 export interface LibraryState {
@@ -54,13 +113,23 @@ export interface LibraryState {
    *  version-counter idiom as `durations`. */
   thumbs: Map<number, { key: string; info: ThumbInfo | null }>;
   thumbsVersion: number;
+  /** file id → source [w, h] from the texture dimension probe. Same idiom. */
+  dims: Map<number, readonly [w: number, h: number]>;
+  dimsVersion: number;
   /**
-   * Folder subtree the file list is scoped to (a root or any subfolder);
-   * null = whole library. Session-only — deliberately not persisted.
-   * SHARED across tabs on purpose: scoping to one pack and flipping tabs to
-   * see its audio/textures/models is the core interaction.
+   * Selected parent folders the file list is scoped to (roots or any
+   * subfolders); empty = whole library. A file is in scope if it lives inside
+   * ANY selected folder. Persisted so a working set of packs survives a
+   * restart. SHARED across tabs on purpose: scoping to one pack and flipping
+   * tabs to see its audio/textures/models is the core interaction.
    */
-  folderScope: string | null;
+  folderScopes: string[];
+  /**
+   * Folders whose content is excluded from the list, ext chips, and counts —
+   * the eye-toggle in the tree. A file is dropped if it lives inside ANY hidden
+   * folder, even when an ancestor is scoped in (hidden always wins). Persisted.
+   */
+  hiddenFolders: string[];
   activeTab: AssetKind;
 
   // ---- per-tab ----
@@ -71,6 +140,7 @@ export interface LibraryState {
   appendFiles: (files: FileEntry[]) => void;
   finishScan: (done: ScanDone) => void;
   mergeDurations: (entries: DurationBatch["entries"]) => void;
+  mergeDims: (entries: DimensionBatch["entries"]) => void;
   mergeThumbs: (entries: ThumbBatch["entries"]) => void;
   /** Model thumbnails: rendered in the webview, so they arrive as a bare key
    *  with no image statistics (those are a texture-decode by-product). */
@@ -79,11 +149,23 @@ export interface LibraryState {
   patchTab: (kind: AssetKind, patch: Partial<TabState>) => void;
   setQuery: (kind: AssetKind, query: string) => void;
   toggleExt: (kind: AssetKind, ext: string) => void;
-  clearExts: (kind: AssetKind) => void;
+  /** Reset every filter facet of one tab, format included — the toolbar X,
+   *  the popup's "Clear all", and the empty-state chip all route here. */
+  clearFilters: (kind: AssetKind) => void;
   /** Header-click semantics: same field toggles direction, new field resets to asc. */
   setSort: (kind: AssetKind, field: SortField) => void;
   toggleSortDir: (kind: AssetKind) => void;
-  setFolderScope: (scope: string | null) => void;
+  /** Focus the shown set on exactly this folder (click). Clicking the already-
+   *  soloed folder clears back to "show everything". Also un-hides it. */
+  soloScope: (path: string) => void;
+  /** Add/remove a folder from the shown set (ctrl-click). Adding un-hides it. */
+  toggleScope: (path: string) => void;
+  /** Clear the scope set (→ show the whole library). */
+  clearScopes: () => void;
+  /** Add/remove a folder from the hidden set (shift-click / eye / context). */
+  toggleHidden: (path: string) => void;
+  /** Un-hide a folder and every hidden folder beneath it (reset a subtree). */
+  resetHidden: (path: string) => void;
   select: (kind: AssetKind, index: number, path: string | null) => void;
 }
 
@@ -100,6 +182,8 @@ function defaultTab(kind: AssetKind): TabState {
     viewMode: kind === "audio" ? "list" : "grid",
     cellSize: 132,
     groupMaterials: true,
+    // Fresh Sets per tab — a shared mutable default would alias across tabs.
+    filters: defaultFilters(),
   };
 }
 
@@ -129,19 +213,40 @@ export function folderMatcher(folder: string): (path: string) => boolean {
 }
 
 /**
- * A folder scope survives a scan only if it still exists in the derived tree:
- * it is one of the roots (roots always render, even when empty), or at least
- * one scanned file lives inside it. Returns the scope to keep, or null.
+ * Build the combined scope filter: keep a path only if it is inside one of the
+ * selected `scopes` (empty = no scope restriction, keep everything) AND inside
+ * none of the `hidden` folders (hidden always wins). Shared by every consumer
+ * — the file list, ext chips, and all the counts — so they can never disagree
+ * about what "in scope" means.
  */
-function validScope(s: Pick<LibraryState, "folderScope" | "roots" | "allFiles">): string | null {
-  const scope = s.folderScope;
-  if (scope === null) return null;
-  if (s.roots.includes(scope)) return scope;
-  const inside = folderMatcher(scope);
-  for (const f of s.allFiles) {
-    if (inside(f.path)) return scope;
-  }
-  return null;
+export function scopePredicate(
+  scopes: readonly string[],
+  hidden: readonly string[],
+): (path: string) => boolean {
+  const scopeMatchers = scopes.map(folderMatcher);
+  const hiddenMatchers = hidden.map(folderMatcher);
+  return (path) => {
+    if (scopeMatchers.length > 0 && !scopeMatchers.some((m) => m(path))) return false;
+    for (const m of hiddenMatchers) if (m(path)) return false;
+    return true;
+  };
+}
+
+/**
+ * A scoped/hidden folder survives a scan only if it still exists in the derived
+ * tree: it is one of the roots (roots always render, even when empty), or at
+ * least one scanned file lives inside it. Drops the rest so a folder deleted on
+ * disk (or under a removed root) doesn't linger in the persisted set.
+ */
+function pruneFolders(
+  folders: readonly string[],
+  s: Pick<LibraryState, "roots" | "allFiles">,
+): string[] {
+  return folders.filter((folder) => {
+    if (s.roots.includes(folder)) return true;
+    const inside = folderMatcher(folder);
+    return s.allFiles.some((f) => inside(f.path));
+  });
 }
 
 export const useLibraryStore = create<LibraryState>()((set) => ({
@@ -154,7 +259,10 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   durationsVersion: 0,
   thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
   thumbsVersion: 0,
-  folderScope: null,
+  dims: new Map<number, readonly [number, number]>(),
+  dimsVersion: 0,
+  folderScopes: [],
+  hiddenFolders: [],
   activeTab: "audio",
   tabs: defaultTabs(),
 
@@ -171,6 +279,8 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       // File ids are per-scan, so a stale id would index the wrong texture.
       thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
       thumbsVersion: s.thumbsVersion + 1,
+      dims: new Map<number, readonly [number, number]>(),
+      dimsVersion: s.dimsVersion + 1,
     })),
 
   appendFiles: (files) =>
@@ -180,11 +290,17 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       ),
     })),
 
-  // A rescan may have removed the scoped folder from disk (or the roots may
-  // have changed) — once the full file set is in, drop a scope that no longer
-  // exists in the tree.
+  // A rescan may have removed a scoped/hidden folder from disk (or the roots
+  // may have changed) — once the full file set is in, drop any that no longer
+  // exist in the tree.
   finishScan: (done) =>
-    set((s) => ({ scanning: false, total: done.total, folderScope: validScope(s) })),
+    set((s) => ({
+      scanning: false,
+      total: done.total,
+      // Drop any scoped/hidden folder that no longer exists in the tree.
+      folderScopes: pruneFolders(s.folderScopes, s),
+      hiddenFolders: pruneFolders(s.hiddenFolders, s),
+    })),
 
   mergeDurations: (entries) =>
     set((s) => {
@@ -195,12 +311,31 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       return { durationsVersion: s.durationsVersion + 1 };
     }),
 
+  mergeDims: (entries) =>
+    set((s) => {
+      for (const [id, w, h] of entries) {
+        s.dims.set(id, [w, h]);
+      }
+      return { dimsVersion: s.dimsVersion + 1 };
+    }),
+
   mergeThumbs: (entries) =>
     set((s) => {
+      let dimsAdded = false;
       for (const [id, info, key] of entries) {
         s.thumbs.set(id, { key, info });
+        // Backfill dims for formats the header probe can't parse — the thumb
+        // decode had to learn the real size anyway. The probe stays primary;
+        // never overwrite it.
+        if (info !== null && info.sourceWidth > 0 && !s.dims.has(id)) {
+          s.dims.set(id, [info.sourceWidth, info.sourceHeight]);
+          dimsAdded = true;
+        }
       }
-      return { thumbsVersion: s.thumbsVersion + 1 };
+      return {
+        thumbsVersion: s.thumbsVersion + 1,
+        ...(dimsAdded ? { dimsVersion: s.dimsVersion + 1 } : {}),
+      };
     }),
 
   setModelThumbs: (entries) =>
@@ -233,9 +368,15 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       return { tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], extFilter: next } } };
     }),
 
-  clearExts: (kind) =>
+  // Fresh filters object → fresh `tabs` identity → the settings save
+  // subscription fires; zero new persistence plumbing. Format is one of the
+  // popup's facets, so "clear filters" clears it with the rest.
+  clearFilters: (kind) =>
     set((s) => ({
-      tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], extFilter: new Set<string>() } },
+      tabs: {
+        ...s.tabs,
+        [kind]: { ...s.tabs[kind], filters: defaultFilters(), extFilter: new Set<string>() },
+      },
     })),
 
   setSort: (kind, field) =>
@@ -256,7 +397,43 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       },
     })),
 
-  setFolderScope: (scope) => set({ folderScope: scope }),
+  soloScope: (path) =>
+    set((s) => {
+      // Click the already-soloed folder to clear back to the whole library.
+      if (s.folderScopes.length === 1 && s.folderScopes[0] === path) {
+        return { folderScopes: [] };
+      }
+      // Only-show-this: also drop it from hidden so it actually shows.
+      return { folderScopes: [path], hiddenFolders: s.hiddenFolders.filter((p) => p !== path) };
+    }),
+
+  toggleScope: (path) =>
+    set((s) => {
+      if (s.folderScopes.includes(path)) {
+        return { folderScopes: s.folderScopes.filter((p) => p !== path) };
+      }
+      // "Also show this" — adding to the shown set un-hides it too.
+      return {
+        folderScopes: [...s.folderScopes, path],
+        hiddenFolders: s.hiddenFolders.filter((p) => p !== path),
+      };
+    }),
+
+  clearScopes: () => set((s) => (s.folderScopes.length === 0 ? {} : { folderScopes: [] })),
+
+  toggleHidden: (path) =>
+    set((s) => ({
+      hiddenFolders: s.hiddenFolders.includes(path)
+        ? s.hiddenFolders.filter((p) => p !== path)
+        : [...s.hiddenFolders, path],
+    })),
+
+  resetHidden: (path) =>
+    set((s) => {
+      const under = folderMatcher(path);
+      const next = s.hiddenFolders.filter((p) => p !== path && !under(p));
+      return next.length === s.hiddenFolders.length ? {} : { hiddenFolders: next };
+    }),
 
   select: (kind, index, path) =>
     set((s) => ({
@@ -336,16 +513,20 @@ export function removeRoot(path: string): void {
   const state = useLibraryStore.getState();
   const next = state.roots.filter((r) => r !== path);
   if (next.length === state.roots.length) return;
-  // A scope at or under the removed root goes with it — clear it now rather
-  // than showing a stale empty list until finishScan's guard runs. Keep it
-  // only if a *remaining* root still covers it (nested roots).
-  const scope = state.folderScope;
+  // Scoped/hidden folders at or under the removed root go with it — drop them
+  // now rather than showing a stale list until finishScan's guard runs. Keep a
+  // folder only if a *remaining* root still covers it (nested roots).
+  const underRemoved = folderMatcher(path);
+  const orphaned = (folder: string): boolean =>
+    (folder === path || underRemoved(folder)) &&
+    !next.some((r) => folder === r || folderMatcher(r)(folder));
+  const folderScopes = state.folderScopes.filter((f) => !orphaned(f));
+  const hiddenFolders = state.hiddenFolders.filter((f) => !orphaned(f));
   if (
-    scope !== null &&
-    (scope === path || folderMatcher(path)(scope)) &&
-    !next.some((r) => scope === r || folderMatcher(r)(scope))
+    folderScopes.length !== state.folderScopes.length ||
+    hiddenFolders.length !== state.hiddenFolders.length
   ) {
-    useLibraryStore.setState({ folderScope: null });
+    useLibraryStore.setState({ folderScopes, hiddenFolders });
   }
   state.setRoots(next);
   void rescanRoots(next);

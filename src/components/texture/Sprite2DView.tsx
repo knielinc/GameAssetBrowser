@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
-import { modelUrl } from "../../model/loadModel";
+import { BROWSER_DECODABLE, modelUrl, previewUrl } from "../../model/loadModel";
 import { useRenderPrefs } from "../../stores/renderPrefs";
-import { thumbUrl } from "../../types";
-
-/** Formats the browser decodes natively — served as the ORIGINAL file so a
- *  GIF animates and a sprite sheet is full-resolution, not the 256px thumb. */
-const BROWSER_DECODABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
 
 export interface SpriteConfig {
   enabled: boolean;
@@ -19,8 +14,6 @@ export interface SpriteConfig {
 export interface Sprite2DViewProps {
   path: string;
   ext: string;
-  /** Thumbnail cache key — the only viewable form for DDS/TGA/EXR. */
-  thumbKey?: string;
   sprite: SpriteConfig;
   /** Scale the image to fill the available space (upscaling small textures).
    *  When false, show it at `zoomPct` of native size and scroll if it
@@ -39,17 +32,17 @@ export interface Sprite2DViewProps {
  * that blits one cell per tick.
  *
  * Browser-decodable formats load the ORIGINAL over model:// (so the GIF
- * animates and the sheet is crisp); DDS/TGA/EXR fall back to the decoded
- * thumbnail, which is the only thing that exists for them.
+ * animates and the sheet is crisp); DDS/TGA/EXR/HDR are decoded to a full-res
+ * PNG in Rust over preview://, the only viewable form the browser can take.
  */
-export default function Sprite2DView({ path, ext, thumbKey, sprite, zoomFit, zoomPct }: Sprite2DViewProps): ReactElement {
+export default function Sprite2DView({ path, ext, sprite, zoomFit, zoomPct }: Sprite2DViewProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
   // Natural pixel size of the loaded image — the base the zoom percent scales.
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   const usable = BROWSER_DECODABLE.has(ext.toLowerCase());
-  const src = usable ? modelUrl(path) : thumbKey !== undefined ? thumbUrl(thumbKey) : null;
+  const src = usable ? modelUrl(path) : previewUrl(path);
   const isGif = ext.toLowerCase() === "gif";
 
   // The image changed — drop the old size until the new one loads.
@@ -59,7 +52,7 @@ export default function Sprite2DView({ path, ext, thumbKey, sprite, zoomFit, zoo
   // frame. Cropping a GIF sheet loses its animation, but a GIF *is* the
   // animation — you would not sheet one — so this only runs on still images.
   useEffect(() => {
-    if (!sprite.enabled || src === null) return;
+    if (!sprite.enabled) return;
     const canvas = canvasRef.current;
     if (canvas === null) return;
     const ctx = canvas.getContext("2d");
@@ -104,14 +97,6 @@ export default function Sprite2DView({ path, ext, thumbKey, sprite, zoomFit, zoo
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
   }, [src, sprite.enabled, sprite.cols, sprite.rows, sprite.fps, sprite.playing]);
-
-  if (src === null) {
-    return (
-      <div className="flex h-full w-full items-center justify-center text-[11px] text-dim">
-        No preview available.
-      </div>
-    );
-  }
 
   // Zoom applies only to the still image — a sprite sheet plays at frame size.
   const fit = zoomFit || sprite.enabled;

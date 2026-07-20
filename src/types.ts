@@ -18,6 +18,14 @@
 export type AssetKind = "audio" | "texture" | "model";
 export const ASSET_KINDS = ["audio", "texture", "model"] as const;
 
+/** Count-readout noun per kind ("623 of 11,501 files"). Shared by StatusBar
+ *  and the filter popup so the two readouts can never disagree. */
+export const NOUN: Record<AssetKind, string> = {
+  audio: "files",
+  texture: "textures",
+  model: "models",
+};
+
 export interface FileEntry {
   id: number;
   path: string;
@@ -45,6 +53,14 @@ export interface DurationBatch {
   entries: [id: number, seconds: number][];
 }
 
+/** Batched [file id, width, height] triples from the texture dimension probe.
+ *  Carries the scan generation: ids restart at 0 every scan, so a late batch
+ *  from a superseded scan would land on the wrong files. */
+export interface DimensionBatch {
+  gen: number;
+  entries: [id: number, w: number, h: number][];
+}
+
 /** `peaks` is interleaved [min0, max0, min1, max1, ...], 2 * bins floats in [-1, 1]. */
 export interface WaveformReady {
   path: string;
@@ -70,6 +86,7 @@ export const EVT = {
   SCAN_BATCH: "scan:batch",
   SCAN_DONE: "scan:done",
   META_DURATIONS: "meta:durations",
+  META_DIMENSIONS: "meta:dimensions",
   WAVEFORM_READY: "waveform:ready",
   PLAYBACK_POSITION: "playback:position",
   PLAYBACK_STATE: "playback:state",
@@ -149,6 +166,69 @@ export const SORT_FIELDS_BY_KIND: Record<AssetKind, readonly SortField[]> = {
   model: ["name", "ext", "size", "modified"],
 };
 
+// ---- filter facets ----
+//
+// Ranges are typed min/max in UI units; the invariant everywhere is still
+// unknown = keep — a filter may only remove files it has positively measured,
+// so a restored filter on a cold library shows everything and narrows as
+// probe batches land — never a flash-of-empty.
+
+/** Half-open-ended numeric constraint in the facet's UI unit (s / px / MB).
+ *  null = unbounded on that side. Active ⇔ either end is set. */
+export interface RangeFilter {
+  min: number | null;
+  max: number | null;
+}
+
+export const rangeActive = (r: RangeFilter): boolean => r.min !== null || r.max !== null;
+
+export const emptyRange = (): RangeFilter => ({ min: null, max: null });
+
+/** 1 MB as the size facet's unit (binary MiB; matches humanSize). */
+export const MIB = 1_048_576;
+
+
+/** Seconds per day — the Modified range facet works in whole local days. */
+export const DAY_SECONDS = 86_400;
+
+/**
+ * The filter vocabulary of 10 groups over table.ts's 23 channels — a chip row
+ * of 23 would be unusable, and nobody filters for "Cavity vs Curvature".
+ * Canonical order; chips render in it so they never reshuffle.
+ */
+export const CHANNEL_GROUPS = ["baseColor", "normal", "roughness", "metallic", "ao",
+  "height", "emissive", "opacity", "packed", "other"] as const;
+export type ChannelGroup = (typeof CHANNEL_GROUPS)[number];
+export const CHANNEL_GROUP_LABEL: Record<ChannelGroup, string> = {
+  baseColor: "Base Color", normal: "Normal", roughness: "Roughness", metallic: "Metallic",
+  ao: "AO", height: "Height", emissive: "Emissive", opacity: "Opacity",
+  packed: "Packed", other: "Other",
+};
+
+/** Persisted twin of TabState.filters (Sets → arrays; RangeFilter is already
+ *  plain JSON and persists as-is). */
+export interface TabFilterSettings {
+  duration: RangeFilter;       // audio only — seconds, decimals allowed
+  modified: RangeFilter;       // all kinds — unix seconds, day-granular from the UI
+  channels: string[];          // ChannelGroup[] — texture only
+  material: boolean;           // texture only — on = member of a material group
+  res: RangeFilter;            // texture only — px, applied to max(w, h), integers
+  square: boolean;             // texture only
+  pot: boolean;                // texture only
+  size: RangeFilter;           // model only — MB (× MIB internally)
+}
+
+/**
+ * One shape for every kind, gated per kind by the sanitizer + the popup —
+ * the SORT_FIELDS_BY_KIND idiom, so an inapplicable facet can neither be
+ * shown nor restored.
+ */
+export const FILTER_FACETS_BY_KIND = {
+  audio: ["duration", "modified"],
+  texture: ["channels", "material", "res", "square", "pot", "modified"],
+  model: ["size", "modified"],
+} as const satisfies Record<AssetKind, readonly (keyof TabFilterSettings)[]>;
+
 /** Per-tab persisted view state. */
 export interface TabSettings {
   sortField: SortField;
@@ -157,6 +237,7 @@ export interface TabSettings {
   viewMode: ViewMode;
   cellSize: number;
   groupMaterials: boolean;
+  filters: TabFilterSettings;
 }
 
 /**
@@ -180,6 +261,11 @@ export interface Settings {
   autoplay: boolean;
   activeTab: AssetKind;
   tabs: Record<AssetKind, TabSettings>;
+  /** Selected parent folders scoping the file list; empty = whole library.
+   *  Shared across tabs (see libraryStore). */
+  folderScopes: string[];
+  /** Folders whose content is excluded from the query (the tree's eye-toggle). */
+  hiddenFolders: string[];
   /** packDir (lowercased) -> chosen atlas. Persisted because re-picking the
    *  atlas on every launch would be worse than the bug it fixes. */
   atlases: Record<string, AtlasChoiceSettings>;

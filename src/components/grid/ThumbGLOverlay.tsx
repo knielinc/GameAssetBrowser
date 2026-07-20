@@ -38,8 +38,11 @@ export interface ThumbGLOverlayProps {
  * DOM on top.
  *
  * Alignment is by DOM measurement: each frame we read the slots' rects and draw
- * there, so the canvas can never drift from the cells. The rAF loop self-stops
- * once every visible thumbnail is uploaded, and restarts on scroll/resize/data.
+ * there, so the canvas can never drift from the cells. Compositor scrolling
+ * moves the DOM before JS runs, so the repaint is inherently ≥1 frame late —
+ * scroll events bridge the gap by translating the canvas by the scroll delta
+ * until the next paint lands. The rAF loop stays hot through recent movement
+ * and pending uploads, then self-stops; scroll/resize/data restart it.
  */
 export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayProps): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -66,9 +69,25 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
     host.appendChild(gl.canvas);
 
     let raf: number | null = null;
+    /** scrollTop the canvas was last PAINTED for — the reference the scroll
+     *  compensation shifts against. */
+    let drawnTop = 0;
+    /** Consecutive frames without scroll movement; the loop stays hot until
+     *  this passes IDLE_FRAMES (see below). */
+    let idle = 0;
+    /** Compositor scrolling moves the DOM before any JS runs, so a repaint is
+     *  always ≥1 frame late. Keep the loop alive briefly after the last
+     *  movement instead of waiting for the next scroll EVENT — events lag the
+     *  compositor too, and re-arming from them alone reintroduces the trail. */
+    const IDLE_FRAMES = 30;
+
     const draw = (): void => {
       raf = null;
-      const canvasRect = gl.canvas.getBoundingClientRect();
+      const top = scroll.scrollTop;
+      const moved = top !== drawnTop;
+      // Measure against the HOST, not the canvas: the compensation transform
+      // below shifts the canvas's own rect, and rects must be transform-free.
+      const canvasRect = host.getBoundingClientRect();
       const cells: DrawCell[] = [];
       let missing = false;
       const slots = scroll.querySelectorAll<HTMLElement>("[data-thumb-key]");
@@ -86,7 +105,12 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
         cells.push({ x: r.left - canvasRect.left, y: r.top - canvasRect.top, w: r.width, h: r.height, slot });
       }
       gl.draw(cells, canvasRect.width, canvasRect.height, Math.min(window.devicePixelRatio, 2));
-      if (missing && raf === null) raf = requestAnimationFrame(draw); // keep polling until uploads land
+      // The fresh paint is at true positions — drop the interim shift in the
+      // same frame, so compensation and repaint land atomically.
+      gl.canvas.style.transform = "";
+      drawnTop = top;
+      idle = moved ? 0 : idle + 1;
+      if (missing || idle < IDLE_FRAMES) schedule();
     };
 
     const schedule = (): void => {
@@ -94,13 +118,24 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
     };
     scheduleRef.current = schedule;
 
-    scroll.addEventListener("scroll", schedule, { passive: true });
+    const onScroll = (): void => {
+      // Instant compensation: the DOM has already moved compositor-side, so
+      // shift the last-painted pixels by the same delta NOW (a cheap style
+      // write, no redraw) and let the next draw normalize. Absolute against
+      // drawnTop, so stacked events before a slow frame can't drift it.
+      const delta = scroll.scrollTop - drawnTop;
+      gl.canvas.style.transform = delta === 0 ? "" : `translateY(${-delta}px)`;
+      idle = 0;
+      schedule();
+    };
+
+    scroll.addEventListener("scroll", onScroll, { passive: true });
     const ro = new ResizeObserver(schedule);
     ro.observe(host);
     schedule();
 
     return () => {
-      scroll.removeEventListener("scroll", schedule);
+      scroll.removeEventListener("scroll", onScroll);
       ro.disconnect();
       if (raf !== null) cancelAnimationFrame(raf);
       scheduleRef.current = null;

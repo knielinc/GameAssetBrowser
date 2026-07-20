@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
 use crate::metadata;
+use crate::texmeta;
 use crate::types::{
     events, AssetKind, FileEntry, ScanBatch, ScanDone, AUDIO_EXTENSIONS, MODEL_EXTENSIONS,
     SKIP_DIRS, TEXTURE_EXTENSIONS,
@@ -109,6 +110,8 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
     let mut batch: Vec<FileEntry> = Vec::with_capacity(BATCH_SIZE);
     // (id, path) list handed to the duration-probe worker after the walk.
     let mut meta_queue: Vec<(u32, String)> = Vec::new();
+    // (id, path) list handed to the dimension-probe worker after the walk.
+    let mut tex_queue: Vec<(u32, String)> = Vec::new();
     // Paths already emitted, so a file reachable from two OVERLAPPING roots
     // (e.g. `Documents` and `Documents\git\3d-test`) is listed once. Without
     // this it appears twice, and since selection is keyed by path, clicking one
@@ -130,7 +133,16 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
-                    eprintln!("[scan] walk error: {e}");
+                    // Broad roots (a whole drive, C:\, a folder above
+                    // C:\Windows) inevitably cross system directories like
+                    // C:\Windows\WUModels that deny listing. That's expected —
+                    // skip the unreadable subtree quietly. Only genuinely
+                    // unexpected walk errors are worth logging.
+                    if e.io_error().map(std::io::Error::kind)
+                        != Some(std::io::ErrorKind::PermissionDenied)
+                    {
+                        eprintln!("[scan] walk error: {e}");
+                    }
                     continue;
                 }
             };
@@ -163,6 +175,9 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             if matches!(kind, AssetKind::Audio) {
                 meta_queue.push((id, path.clone()));
             }
+            if matches!(kind, AssetKind::Texture) {
+                tex_queue.push((id, path.clone()));
+            }
             batch.push(FileEntry {
                 id,
                 path,
@@ -192,6 +207,20 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
     };
     if let Err(e) = app.emit(events::SCAN_DONE, done) {
         eprintln!("[scan] failed to emit scan:done: {e}");
+    }
+
+    // Dimension probing gets its OWN thread rather than running after
+    // probe_durations below: an audio-heavy library would otherwise hold
+    // texture dims — and the Resolution/Shape filters — hostage to the
+    // duration probe.
+    {
+        let app = app.clone();
+        if let Err(e) = std::thread::Builder::new()
+            .name("tex-meta".into())
+            .spawn(move || texmeta::probe_dimensions(app, tex_queue, gen))
+        {
+            eprintln!("[scan] failed to spawn tex-meta thread: {e}");
+        }
     }
 
     // Lazy duration probing runs on this (already background) thread until

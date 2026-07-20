@@ -1112,6 +1112,7 @@ dependencies = [
  "tauri-plugin-store",
  "walkdir",
  "webp",
+ "windows 0.61.3",
 ]
 
 [[package]]

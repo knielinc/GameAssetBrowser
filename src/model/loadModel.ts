@@ -20,6 +20,23 @@ export function modelUrl(path: string): string {
   return `http://model.localhost/${encodeURI(path.replace(/\\/g, "/"))}`;
 }
 
+/** Full-resolution preview of a texture the browser can't decode (HDR/EXR/DDS/
+ *  TGA/…), decoded + tone-mapped to a PNG in Rust. Same URL shape as modelUrl;
+ *  browser-decodable formats should use modelUrl (native res, no re-encode). */
+export function previewUrl(path: string): string {
+  return `http://preview.localhost/${encodeURI(path.replace(/\\/g, "/"))}`;
+}
+
+/** Formats the browser decodes natively — served as the ORIGINAL file at full
+ *  resolution rather than round-tripped through Rust. */
+export const BROWSER_DECODABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
+
+/** Best source-quality URL for a texture: the original for browser-decodable
+ *  formats, a Rust-decoded full-res PNG otherwise. */
+export function sourceUrl(path: string, ext: string): string {
+  return BROWSER_DECODABLE.has(ext.toLowerCase()) ? modelUrl(path) : previewUrl(path);
+}
+
 export interface LoadedModel {
   root: Object3D;
   /** Loader-reported animation clips, if any. */

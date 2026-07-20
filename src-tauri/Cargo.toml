@@ -106,3 +106,11 @@ image = { version = "0.25", default-features = false, features = [
 # libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
 # animated WebP (launcher assets, etc.); libwebp reads them.
 webp = "0.3"
+
+# Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs).
+# Same 0.61 tauri/tao already use, so no new crate in the tree.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }

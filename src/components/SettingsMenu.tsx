@@ -43,7 +43,7 @@ export default function SettingsMenu(): ReactElement {
   const commit = (): void => setUiScale(pending);
 
   return (
-    <div ref={ref} className="relative flex h-full items-center pr-1">
+    <div ref={ref} className="relative flex h-full items-center">
       <button
         type="button"
         title="Settings"
@@ -57,8 +57,11 @@ export default function SettingsMenu(): ReactElement {
         <Settings size={14} />
       </button>
 
+      {/* Left-anchored: the button lives on the left side of the header
+          (between branding and the lens tabs), so a right-anchored popup
+          would hang off the window edge. */}
       {open && (
-        <div className="absolute right-0 top-[calc(100%+4px)] z-50 w-64 rounded-xl bg-raised p-3 shadow-e2">
+        <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-64 rounded-xl bg-raised p-3 shadow-e2">
           <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-faint">Theme</div>
           <div className="grid grid-cols-5 gap-1.5">
             {THEMES.map((t) => {

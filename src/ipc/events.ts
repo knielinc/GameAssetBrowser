@@ -4,6 +4,7 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   EVT,
+  type DimensionBatch,
   type DurationBatch,
   type PositionPayload,
   type ScanBatch,
@@ -73,9 +74,20 @@ export function initIpcEvents(): void {
     }
   });
 
-  // No generation guard here: the backend already drops stale results before
-  // emitting, and file ids are reset by beginScan, so a late batch from a
-  // superseded scan can only carry ids that no longer exist — harmless.
+  // Drop-only, never adopt: ids RESTART AT 0 each scan, so a late batch from
+  // a superseded scan would land on the wrong files — and a poisoned dims
+  // entry sticks, because the mergeThumbs backfill defers to existing entries.
+  // (Adopting a newer gen here would be wrong too: dims must never arrive
+  // before the files themselves.)
+  void listen<DimensionBatch>(EVT.META_DIMENSIONS, (event) => {
+    if (event.payload.gen !== useLibraryStore.getState().scanGen) return;
+    useLibraryStore.getState().mergeDims(event.payload.entries);
+  });
+
+  // No generation on this payload: the thumb queue is frontend-driven and
+  // request_thumbs drains it on every range change, so at most one in-flight
+  // decode chunk can outlive a rescan — an accepted race that predates the
+  // dims feature (see the no-staleness-gate note in thumbs.rs).
   void listen<ThumbBatch>(EVT.THUMB_READY, (event) => {
     useLibraryStore.getState().mergeThumbs(event.payload.entries);
   });

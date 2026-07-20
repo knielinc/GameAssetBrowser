@@ -7,11 +7,12 @@ import {
   type ReactElement,
 } from "react";
 import clsx from "clsx";
-import { ChevronDown, ChevronUp, Copy, FolderOpen } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, FolderOpen, FolderTree as FolderTreeIcon } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
 import { showInExplorer } from "../ipc/commands";
-import { useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { activeFilterCount, useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { revealInNavigator } from "../stores/revealFolder";
 import { loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import type { TextureItem } from "../material/classify";
@@ -70,8 +71,10 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   const { selectedPath, sortField, sortDir } = tab;
   const durations = useLibraryStore((s) => s.durations);
   const setSort = useLibraryStore((s) => s.setSort);
+  const clearFilters = useLibraryStore((s) => s.clearFilters);
   const anyFiles = useLibraryStore((s) => s.allFiles.length > 0);
-  const folderScope = useLibraryStore((s) => s.folderScope);
+  const folderScopes = useLibraryStore((s) => s.folderScopes);
+  const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   const currentPath = usePlayerStore((s) => s.currentPath);
   const playing = usePlayerStore((s) => s.playing);
   const headers = headersFor(kind);
@@ -99,7 +102,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   // offset to the collapsed spacer height — landing at the list's bottom.
   useEffect(() => {
     virtualizer.scrollToOffset(0);
-  }, [folderScope, virtualizer]);
+  }, [folderScopes, hiddenFolders, virtualizer]);
 
   // Stable click handler so memo'd rows never re-render from a callback churn.
   // Only audio loads into the player; other kinds just move the selection.
@@ -167,8 +170,13 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
       </div>
 
       {rowCount === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-xs text-dim">
+        <div className="flex flex-1 flex-col items-center justify-center text-xs text-dim">
           {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
+          {activeFilterCount(kind, tab) > 0 && (
+            <button type="button" className="chip mt-2" onClick={() => clearFilters(kind)}>
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div ref={parentRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-scroll">
@@ -249,6 +257,11 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                   console.error("show_in_explorer failed", err);
                 });
               },
+            },
+            {
+              label: "Show in navigator",
+              icon: FolderTreeIcon,
+              onClick: () => revealInNavigator(menu.file.path),
             },
             {
               label: "Copy path",

@@ -107,12 +107,11 @@ textarea {
   background: transparent;
 }
 
-/* Opt-out for strips that scroll but are too short to host a 10px bar — the
-   toolbar's filter chips scroll horizontally when the window is narrow, and a
-   scrollbar in a 28px-tall row would eat the chips. WebView2 is Chromium, so
-   the webkit pseudo-element is all we need. */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+/* Popup-internal scroll: the global thumb is raised-on-bg and vanishes on a
+   raised panel — step it one tone up. */
+.facet-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-overlay);
+  border-color: var(--color-raised);
 }
 
 /* ---------------------------------------------------------- components --- */
@@ -184,10 +183,31 @@ html.sidebar-resizing * {
 }
 .tree-row.tree-row-selected {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 .tree-row.tree-row-selected:hover {
   background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+/* "Show in navigator" pulse: two accent beats, then the row hands its
+   background back to whatever state (selected/hover) it normally has. */
+.tree-row.tree-row-flash {
+  animation: tree-row-flash 1.4s ease-out;
+}
+@keyframes tree-row-flash {
+  0%,
+  18% {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  30% {
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  }
+  45%,
+  60% {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
 /* Alpha checkerboard behind texture thumbnails. Without it, cutout foliage

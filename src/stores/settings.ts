@@ -2,13 +2,19 @@ import { load, type Store } from "@tauri-apps/plugin-store";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import {
   ASSET_KINDS,
+  CHANNEL_GROUPS,
   EXTENSIONS,
+  FILTER_FACETS_BY_KIND,
   SORT_FIELDS_BY_KIND,
+  emptyRange,
   type AssetKind,
   type AtlasChoiceSettings,
+  type ChannelGroup,
+  type RangeFilter,
   type Settings,
   type SortDir,
   type SortField,
+  type TabFilterSettings,
   type TabSettings,
   type ViewMode,
 } from "../types";
@@ -23,6 +29,19 @@ import { defaultTabs, rescanRoots, useLibraryStore, type TabState } from "./libr
 import { useAtlasStore } from "./atlasStore";
 import { usePlayerStore } from "./playerStore";
 
+function defaultFilterSettings(): TabFilterSettings {
+  return {
+    duration: emptyRange(),
+    modified: emptyRange(),
+    channels: [],
+    material: false,
+    res: emptyRange(),
+    square: false,
+    pot: false,
+    size: emptyRange(),
+  };
+}
+
 function defaultTabSettings(kind: AssetKind): TabSettings {
   return {
     sortField: "name",
@@ -31,6 +50,7 @@ function defaultTabSettings(kind: AssetKind): TabSettings {
     viewMode: kind === "audio" ? "list" : "grid",
     cellSize: 132,
     groupMaterials: true,
+    filters: defaultFilterSettings(),
   };
 }
 
@@ -46,6 +66,8 @@ export const DEFAULT_SETTINGS: Settings = {
     texture: defaultTabSettings("texture"),
     model: defaultTabSettings("model"),
   },
+  folderScopes: [],
+  hiddenFolders: [],
   atlases: {},
 };
 
@@ -86,6 +108,52 @@ function clampNum(v: unknown, lo: number, hi: number, fallback: number): number 
   return typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 }
 
+/** One non-negative finite number or null — never NaN/Infinity into state. */
+const rangeEnd = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+
+/** Old persisted bucket ARRAYS fail isObj and degrade to the empty range —
+ *  the no-migration path for pre-range settings.json files. Note min > max is
+ *  persisted as-is: the empty result is the feedback, never swap/error. */
+const sanitizeRange = (raw: unknown): RangeFilter =>
+  isObj(raw) ? { min: rangeEnd(raw.min), max: rangeEnd(raw.max) } : emptyRange();
+
+/** Resolution is integral pixels; round rather than reject. */
+const intRange = (r: RangeFilter): RangeFilter => ({
+  min: r.min === null ? null : Math.round(r.min),
+  max: r.max === null ? null : Math.round(r.max),
+});
+
+function sanitizeFilters(kind: AssetKind, raw: unknown): TabFilterSettings {
+  const d = defaultFilterSettings();
+  if (!isObj(raw)) return d; // absent in every pre-feature settings.json
+  const pick = <T extends string>(v: unknown, allowed: readonly T[]): T[] =>
+    [...new Set(strArray(v, []).filter((x): x is T => (allowed as readonly string[]).includes(x)))];
+  const f: TabFilterSettings = {
+    duration: sanitizeRange(raw.duration),
+    // Unix seconds, whole numbers. The pre-range `modifiedDays` preset key is
+    // simply ignored — absent → empty range, the no-migration path.
+    modified: intRange(sanitizeRange(raw.modified)),
+    channels: pick(raw.channels, CHANNEL_GROUPS),
+    // Older files persisted an array or an enum string here — bool() rejects
+    // both → off, the usual no-migration degradation.
+    material: bool(raw.material, false),
+    res: intRange(sanitizeRange(raw.res)),
+    square: bool(raw.square, false),
+    pot: bool(raw.pot, false),
+    size: sanitizeRange(raw.size),
+  };
+  // The sortField gate, generalized: a texture-only facet that somehow landed
+  // in the audio tab's settings degrades to off, never to an invisible
+  // constraint.
+  for (const k of Object.keys(f) as (keyof TabFilterSettings)[]) {
+    if (!(FILTER_FACETS_BY_KIND[kind] as readonly string[]).includes(k)) {
+      (f as Record<keyof TabFilterSettings, unknown>)[k] = d[k];
+    }
+  }
+  return f;
+}
+
 function sanitizeTab(kind: AssetKind, raw: unknown): TabSettings {
   const d = defaultTabSettings(kind);
   if (!isObj(raw)) return d;
@@ -99,6 +167,7 @@ function sanitizeTab(kind: AssetKind, raw: unknown): TabSettings {
     viewMode: oneOf<ViewMode>(raw.viewMode, VIEW_MODES, d.viewMode),
     cellSize: Math.round(clampNum(raw.cellSize, MIN_CELL, MAX_CELL, d.cellSize)),
     groupMaterials: bool(raw.groupMaterials, d.groupMaterials),
+    filters: sanitizeFilters(kind, raw.filters),
   };
 }
 
@@ -146,6 +215,11 @@ export function sanitize(raw: unknown): Settings {
       texture: sanitizeTab("texture", tabs.texture),
       model: sanitizeTab("model", tabs.model),
     },
+    // Absent in files written before this feature → default to empty. Stale
+    // entries (folders since deleted) are pruned after the next scan by
+    // finishScan, not here — this stays a pure structural sanitizer.
+    folderScopes: strArray(v2.folderScopes, d.folderScopes),
+    hiddenFolders: strArray(v2.hiddenFolders, d.hiddenFolders),
     atlases: sanitizeAtlases(v2.atlases),
   };
 }
@@ -171,6 +245,14 @@ function tabToSettings(t: TabState): TabSettings {
     viewMode: t.viewMode,
     cellSize: t.cellSize,
     groupMaterials: t.groupMaterials,
+    filters: {
+      ...t.filters,
+      duration: { ...t.filters.duration },
+      modified: { ...t.filters.modified },
+      channels: [...t.filters.channels],
+      res: { ...t.filters.res },
+      size: { ...t.filters.size },
+    },
   };
 }
 
@@ -189,6 +271,8 @@ function currentSettings(): Settings {
       texture: tabToSettings(lib.tabs.texture),
       model: tabToSettings(lib.tabs.model),
     },
+    folderScopes: lib.folderScopes,
+    hiddenFolders: lib.hiddenFolders,
     atlases: useAtlasStore.getState().overrides,
   };
 }
@@ -224,7 +308,9 @@ function installSubscriptions(): void {
     if (
       state.roots !== prev.roots ||
       state.tabs !== prev.tabs ||
-      state.activeTab !== prev.activeTab
+      state.activeTab !== prev.activeTab ||
+      state.folderScopes !== prev.folderScopes ||
+      state.hiddenFolders !== prev.hiddenFolders
     ) {
       saveSettings();
     }
@@ -284,9 +370,24 @@ function applySettings(settings: Settings): void {
       viewMode: p.viewMode,
       cellSize: p.cellSize,
       groupMaterials: p.groupMaterials,
+      // Post-sanitize the arrays hold only vocabulary values — the casts are safe.
+      filters: {
+        ...p.filters,
+        duration: { ...p.filters.duration },
+        modified: { ...p.filters.modified },
+        channels: new Set(p.filters.channels as ChannelGroup[]),
+        res: { ...p.filters.res },
+        size: { ...p.filters.size },
+      },
     };
   }
-  useLibraryStore.setState({ roots: settings.roots, activeTab: settings.activeTab, tabs });
+  useLibraryStore.setState({
+    roots: settings.roots,
+    activeTab: settings.activeTab,
+    tabs,
+    folderScopes: settings.folderScopes,
+    hiddenFolders: settings.hiddenFolders,
+  });
   useAtlasStore.getState().hydrate(settings.atlases);
   usePlayerStore.setState({
     volume: settings.volume,

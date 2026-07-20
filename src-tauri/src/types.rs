@@ -37,6 +37,7 @@ pub mod events {
     pub const SCAN_BATCH: &str = "scan:batch";
     pub const SCAN_DONE: &str = "scan:done";
     pub const META_DURATIONS: &str = "meta:durations";
+    pub const META_DIMENSIONS: &str = "meta:dimensions";
     pub const WAVEFORM_READY: &str = "waveform:ready";
     pub const PLAYBACK_POSITION: &str = "playback:position";
     pub const PLAYBACK_STATE: &str = "playback:state";
@@ -121,6 +122,17 @@ pub struct ScanDone {
 #[serde(rename_all = "camelCase")]
 pub struct DurationBatch {
     pub entries: Vec<(u32, f32)>,
+}
+
+/// Batched `(file id, width, height)` triples. Carries the scan generation:
+/// file ids RESTART AT 0 every scan, so unlike a keyed cache a late batch from
+/// a superseded scan would land on the wrong files — the frontend drops any
+/// batch whose generation is not current.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DimensionBatch {
+    pub gen: u32,
+    pub entries: Vec<(u32, u32, u32)>,
 }
 
 /// `peaks` is interleaved `[min0, max0, min1, max1, ...]`, `2 * bins` floats in `[-1, 1]`.

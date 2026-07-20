@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
 import { AudioLines, Box, Copy, Image, Maximize2, Minimize2, Minus, Square, X } from "lucide-react";
-import { folderMatcher, useLibraryStore } from "../stores/libraryStore";
+import { scopePredicate, useLibraryStore } from "../stores/libraryStore";
 import { ASSET_KINDS, type AssetKind } from "../types";
 import { switchTab } from "../stores/tabs";
+import { toggleWindowFullscreen, toggleWindowMaximize } from "../hooks/useWindowFullscreen";
 import SettingsMenu from "./SettingsMenu";
 
 /**
@@ -19,6 +20,12 @@ import SettingsMenu from "./SettingsMenu";
  *
  * Needs core:window allow-minimize / toggle-maximize / is-maximized /
  * start-dragging / close (+ set/is-fullscreen).
+ *
+ * Maximize and fullscreen are deliberately routed through the helpers in
+ * hooks/useWindowFullscreen, which keep the two states mutually exclusive —
+ * naive setFullscreen on a maximized undecorated window renders like a plain
+ * maximize on Windows (tao clamps maximized borderless windows to the work
+ * area, fullscreen or not).
  */
 const win = getCurrentWindow();
 
@@ -60,19 +67,20 @@ export default function TitleBar(): ReactElement {
 
   const activeTab = useLibraryStore((s) => s.activeTab);
   const allFiles = useLibraryStore((s) => s.allFiles);
-  const folderScope = useLibraryStore((s) => s.folderScope);
+  const folderScopes = useLibraryStore((s) => s.folderScopes);
+  const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
 
   // Counts reflect the active folder scope — one pass over the library, not
   // three. Same derivation the tab row used before it moved up here.
   const counts = useMemo(() => {
-    const inScope = folderScope === null ? null : folderMatcher(folderScope);
+    const inScope = scopePredicate(folderScopes, hiddenFolders);
     const c: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0 };
     for (const f of allFiles) {
-      if (inScope !== null && !inScope(f.path)) continue;
+      if (!inScope(f.path)) continue;
       c[f.kind]++;
     }
     return c;
-  }, [allFiles, folderScope]);
+  }, [allFiles, folderScopes, hiddenFolders]);
 
   // Keep the maximize/fullscreen icons honest against changes made outside these
   // buttons (F11, OS snap, double-click drag). Every such change resizes the
@@ -102,19 +110,21 @@ export default function TitleBar(): ReactElement {
       {/* App branding. Draggable; icon/text are pointer-events-none so the drag
           handler still receives the pointer. */}
       <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-2 pl-3 pr-1">
-        {/* The mark is drawn as a mask filled with the accent, so it takes on
-            each theme's colour. Swap the mask URL to a dedicated B/W silhouette
-            if the full logo's alpha doesn't read as a clean shape. */}
+        {/* The mark is the transparent white logo used as an alpha mask filled
+            with the accent, so it takes each theme's colour on a clean,
+            background-free shape. (GAB_no_bg.png is white-on-transparent, so its
+            alpha IS the silhouette — the earlier opaque PNG masked to a full
+            square, which is why this uses the no-background export.) */}
         <div
           aria-hidden
           className="pointer-events-none h-[18px] w-[18px] shrink-0"
           style={{
             backgroundColor: "var(--color-accent)",
-            maskImage: "url(/GAB.png)",
+            maskImage: "url(/GAB_no_bg.png)",
             maskSize: "contain",
             maskRepeat: "no-repeat",
             maskPosition: "center",
-            WebkitMaskImage: "url(/GAB.png)",
+            WebkitMaskImage: "url(/GAB_no_bg.png)",
             WebkitMaskSize: "contain",
             WebkitMaskRepeat: "no-repeat",
             WebkitMaskPosition: "center",
@@ -124,6 +134,8 @@ export default function TitleBar(): ReactElement {
           Game Asset Browser
         </span>
       </div>
+
+      <SettingsMenu />
 
       {/* The three lenses as a segmented pill — a tonal well with the active
           tab lifted onto its own filled pill. Icon + live count preserved. */}
@@ -161,26 +173,19 @@ export default function TitleBar(): ReactElement {
           grabbable. */}
       <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
 
-      <SettingsMenu />
-
       <div className="flex h-full shrink-0">
         <ControlButton title="Minimize" onClick={() => void win.minimize().catch(log("minimize"))}>
           <Minus size={15} />
         </ControlButton>
         <ControlButton
           title={maximized ? "Restore" : "Maximize"}
-          onClick={() => void win.toggleMaximize().catch(log("toggle-maximize"))}
+          onClick={() => void toggleWindowMaximize().catch(log("toggle-maximize"))}
         >
           {maximized ? <Copy size={12} /> : <Square size={12} />}
         </ControlButton>
         <ControlButton
           title={fullscreen ? "Exit full screen" : "Full screen"}
-          onClick={() =>
-            void win
-              .isFullscreen()
-              .then((on) => win.setFullscreen(!on))
-              .catch(log("fullscreen"))
-          }
+          onClick={() => void toggleWindowFullscreen().catch(log("fullscreen"))}
         >
           {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </ControlButton>

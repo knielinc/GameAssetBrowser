@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
 import {
   ArrowDown,
@@ -17,11 +17,11 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { EXTENSIONS, SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
-import { useLibraryStore } from "../stores/libraryStore";
+import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
+import { activeFilterCount, useLibraryStore } from "../stores/libraryStore";
+import FilterMenu from "./FilterMenu";
 import { useRenderPrefs } from "../stores/renderPrefs";
 import { usePanelPrefs } from "../stores/panelPrefs";
-import { usePresentExts } from "../hooks/useVisibleFiles";
 import { MAX_CELL, MIN_CELL } from "../stores/settings";
 
 /** A folder/inspector panel toggle, sitting next to the panel it opens. */
@@ -73,8 +73,7 @@ export interface ToolbarProps {
 export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const setQuery = useLibraryStore((s) => s.setQuery);
-  const toggleExt = useLibraryStore((s) => s.toggleExt);
-  const clearExts = useLibraryStore((s) => s.clearExts);
+  const clearFilters = useLibraryStore((s) => s.clearFilters);
   const setSort = useLibraryStore((s) => s.setSort);
   const toggleSortDir = useLibraryStore((s) => s.toggleSortDir);
   const patchTab = useLibraryStore((s) => s.patchTab);
@@ -107,18 +106,9 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
     };
   }, [sortOpen]);
 
-  const { query, extFilter, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
+  const { query, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
   // Audio has no grid implementation — never render a control that does nothing.
   const canGrid = kind !== "audio";
-
-  const present = usePresentExts(kind);
-  // Keep an active filter's chip even if its format has left the scope —
-  // otherwise the filter is applied with no way to see or clear it.
-  const chips = useMemo(() => {
-    const shown = new Map(present.map((p) => [p.ext, p]));
-    for (const e of extFilter) if (!shown.has(e)) shown.set(e, { ext: e, count: 0 });
-    return EXTENSIONS[kind].filter((e) => shown.has(e)).map((e) => shown.get(e)!);
-  }, [present, extFilter, kind]);
 
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-y border-bg bg-panel px-3">
@@ -156,36 +146,25 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
         )}
       </div>
 
-      {/* Only formats that actually exist here; an active filter whose format
-          left the scope stays visible, or you'd be filtering by something you
-          can no longer see or clear. This flexes to fill the leftover width and
-          scrolls horizontally (bar hidden) when the window is too narrow to lay
-          every chip out — chips must never wrap and clip under the fixed
-          toolbar height. */}
-      <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
-        {chips.map(({ ext, count }) => (
-          <button
-            key={ext}
-            type="button"
-            title={`${count.toLocaleString()} ${ext} file${count === 1 ? "" : "s"}`}
-            className={clsx("chip shrink-0", extFilter.has(ext) && "chip-active")}
-            onClick={() => toggleExt(kind, ext)}
-          >
-            {ext}
-            <span className="ml-1 tabular-nums opacity-55">{count}</span>
-          </button>
-        ))}
-        {extFilter.size > 0 && (
-          <button
-            type="button"
-            title="Clear format filter"
-            className="shrink-0 text-dim transition-colors duration-[120ms] hover:text-text"
-            onClick={() => clearExts(kind)}
-          >
-            <X size={11} />
-          </button>
-        )}
-      </div>
+      {/* Search and Filter — the "narrowing" controls sit together on the
+          left; the right cluster stays presentation-only. Format chips live
+          INSIDE the filter popup, so the bar keeps one calm cluster per side. */}
+      {/* Keyed: Toolbar itself is NOT remounted per tab (only TabPane is), and
+          FilterMenu's collapse state + debounced query derive per kind on
+          mount — without the key they'd leak across tab switches. */}
+      <FilterMenu key={kind} kind={kind} />
+      {activeFilterCount(kind, tab) > 0 && (
+        <button
+          type="button"
+          title="Clear filters"
+          className="shrink-0 text-dim transition-colors duration-[120ms] hover:text-text"
+          onClick={() => clearFilters(kind)}
+        >
+          <X size={11} />
+        </button>
+      )}
+
+      <div className="min-w-0 flex-1" />
 
       <div className="flex shrink-0 items-center gap-1.5">
         {kind === "texture" && (

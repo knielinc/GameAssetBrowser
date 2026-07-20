@@ -6,7 +6,7 @@ import type { LibFile } from "../../stores/libraryStore";
 import { humanSize } from "../FileRow";
 import { CHANNEL_LABEL, type Channel } from "../../material/table";
 import type { Material, TextureItem } from "../../material/classify";
-import TexturePreview, { type ChannelKeys } from "./TexturePreview";
+import TexturePreview, { type ChannelKeys, type ChannelSrc } from "./TexturePreview";
 import PreviewControls, { type PreviewState } from "./PreviewControls";
 import Sprite2DView from "./Sprite2DView";
 
@@ -27,7 +27,7 @@ export function keysForMaterial(
     const m = material.channels.get(ch);
     if (m === undefined) return;
     const t = thumbs.get(m.file.id);
-    if (t !== undefined) keys[slot] = t.key;
+    if (t !== undefined) keys[slot] = { key: t.key, path: m.file.path, ext: m.file.ext };
   };
   put("baseColor", "baseColor");
   put("normal", "normal");
@@ -46,9 +46,10 @@ export function keysForMaterial(
     // The same texture into all three slots — three reads aoMap from .r,
     // roughnessMap from .g and metalnessMap from .b, so a packed map needs no
     // channel extraction and no extra VRAM. ORM was designed for exactly this.
-    keys.roughness ??= t.key;
-    keys.ao ??= t.key;
-    keys.metallic ??= t.key;
+    const src: ChannelSrc = { key: t.key, path: m.file.path, ext: m.file.ext };
+    keys.roughness ??= src;
+    keys.ao ??= src;
+    keys.metallic ??= src;
   }
   return keys;
 }
@@ -60,26 +61,27 @@ export function keysForFile(
 ): ChannelKeys {
   const t = thumbs.get(file.id);
   if (t === undefined) return {};
+  const src: ChannelSrc = { key: t.key, path: file.path, ext: file.ext };
   // A lone normal map previewed on a sphere should BE the normal map, not the
   // albedo — showing raw blue-purple on a sphere is useless.
   switch (channel) {
     case "normal":
-      return { normal: t.key, baseColor: undefined };
+      return { normal: src, baseColor: undefined };
     case "roughness":
-      return { roughness: t.key };
+      return { roughness: src };
     case "metallic":
-      return { metallic: t.key };
+      return { metallic: src };
     case "ao":
-      return { ao: t.key };
+      return { ao: src };
     case "height":
       // A lone height map should SHOW as relief, not as a grey albedo.
-      return { height: t.key };
+      return { height: src };
     case "emissive":
-      return { emissive: t.key };
+      return { emissive: src };
     case "opacity":
-      return { opacity: t.key };
+      return { opacity: src };
     default:
-      return { baseColor: t.key };
+      return { baseColor: src };
   }
 }
 
@@ -158,7 +160,6 @@ export default function TextureInspector({
             <Sprite2DView
               path={file2d.path}
               ext={file2d.ext}
-              thumbKey={thumbs.get(file2d.id)?.key}
               sprite={{
                 enabled: preview.spriteOn,
                 cols: preview.spriteCols,

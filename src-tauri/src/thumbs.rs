@@ -40,6 +40,12 @@ use crate::types::{events, ThumbBatch, ThumbInfo};
 /// Thumbnail edge in px. 256 covers the largest grid cell (220) plus a little
 /// headroom for hi-dpi without storing a second size.
 const THUMB_EDGE: u32 = 256;
+/// Preview edge in px. The grid keeps its 256px thumbnail, but the preview
+/// panel (and the 3D surface / HDRI env sphere) wants the real pixels — a 5K
+/// HDR through the 256px thumb is a blurry mess on a fullscreen panorama. 4096
+/// is source-quality for all but the largest maps, 16x the grid thumb, and
+/// stays under the WebGL2 max-texture-size on essentially all hardware.
+const PREVIEW_EDGE: u32 = 4096;
 /// Bump to invalidate every cached thumbnail after a pipeline change.
 const CACHE_VERSION: u32 = 1;
 /// Decode threads. Higher than metadata.rs's 2 because this is CPU-bound
@@ -55,6 +61,79 @@ pub struct ThumbState {
     cache: Mutex<LruCache<String, (String, ThumbInfo)>>,
     queue: Mutex<Vec<Job>>,
     running: Mutex<bool>,
+}
+
+/// Cache of full-resolution preview PNGs, keyed by `path|size|mtime`. Small —
+/// the preview shows one asset (a handful of channels) at a time, and each
+/// entry is a multi-MB decoded PNG, so a big LRU would just hoard RAM.
+pub struct PreviewState {
+    cache: Mutex<LruCache<String, Arc<Vec<u8>>>>,
+}
+
+impl Default for PreviewState {
+    fn default() -> Self {
+        Self {
+            cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(16).unwrap())),
+        }
+    }
+}
+
+/// Decode a texture to a full-resolution, browser-loadable PNG for the preview
+/// panel. Served over the `preview://` scheme for formats the browser cannot
+/// decode itself (HDR/EXR/DDS/TGA/TIFF); browser-decodable originals go straight
+/// over `model://` at native resolution instead, skipping this re-encode.
+///
+/// HDR/EXR are tone-mapped by [`to_ldr`] exactly like the thumbnail, so an HDRI
+/// looks identical to its grid cell — just sharp. Decode + resize + PNG encode
+/// is expensive, so results are cached by path+stamp.
+///
+/// Same consent gate as `model://`: only files inside a scanned root are read,
+/// so a crafted path cannot exfiltrate an arbitrary file.
+pub fn preview_png(app: &AppHandle, decoded_path: &str) -> Option<Vec<u8>> {
+    if decoded_path.is_empty() {
+        return None;
+    }
+    let path = std::path::PathBuf::from(decoded_path.replace('/', "\\"));
+    if !crate::scanner::is_within_roots(app, &path) {
+        eprintln!("[preview] refused out-of-scope read: {}", path.display());
+        return None;
+    }
+
+    let (size, mtime) = file_stamp(&path);
+    let ckey = format!("{}|{size}|{mtime}", path.display());
+    let state = app.state::<PreviewState>();
+    if let Some(bytes) = state.cache.lock().get(&ckey) {
+        return Some(bytes.as_ref().clone());
+    }
+
+    let img = match decode_image(&path) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("[preview] decode {}: {e}", path.display());
+            return None;
+        }
+    };
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    // Lanczos3 (not the thumbnail's Triangle): at near-1:1 the extra sharpness
+    // is exactly what the preview is for, and there is only one image to resize.
+    let img = if w.max(h) > PREVIEW_EDGE {
+        img.resize(PREVIEW_EDGE, PREVIEW_EDGE, FilterType::Lanczos3)
+    } else {
+        img
+    };
+    let img = to_ldr(img);
+
+    let mut bytes: Vec<u8> = Vec::new();
+    if let Err(e) = img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png) {
+        eprintln!("[preview] encode {}: {e}", path.display());
+        return None;
+    }
+    let arc = Arc::new(bytes);
+    state.cache.lock().put(ckey, arc.clone());
+    Some(arc.as_ref().clone())
 }
 
 /// No `gen` field: cancellation happens by CLEARING the queue in

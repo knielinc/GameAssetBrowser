@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import clsx from "clsx";
 import { useRenderPrefs } from "../../stores/renderPrefs";
 import {
@@ -61,6 +61,16 @@ function Stepper({
   min: number;
   onChange: (v: number) => void;
 }): ReactElement {
+  // Local text so the field can be cleared and retyped; it re-syncs whenever the
+  // value changes from the outside (the +/- buttons, a new selection's default).
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = (raw: string): void => {
+    const n = parseInt(raw, 10);
+    const next = Number.isFinite(n) ? Math.max(min, n) : value;
+    onChange(next);
+    setText(String(next));
+  };
   return (
     <div className="flex items-center justify-between rounded-full bg-bg px-2.5 py-1">
       <span className="text-[10px] text-dim">{label}</span>
@@ -72,7 +82,17 @@ function Stepper({
         >
           −
         </button>
-        <span className="w-5 text-center text-[11px] tabular-nums">{value}</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          className="w-6 bg-transparent text-center text-[11px] tabular-nums text-text outline-none"
+          value={text}
+          onChange={(e) => setText(e.target.value.replace(/[^0-9]/g, ""))}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+          }}
+        />
         <button
           type="button"
           className="text-dim transition-colors duration-[120ms] hover:text-text"

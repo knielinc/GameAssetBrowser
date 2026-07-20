@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { folderMatcher, useLibraryStore, type LibFile } from "../stores/libraryStore";
-import { EXTENSIONS, type AssetKind, type SortField } from "../types";
+import { scopePredicate, useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { channelGroupOf } from "../material/classify";
+import { useMaterialMembership } from "./useMaterialMembership";
+import {
+  CHANNEL_GROUPS,
+  EXTENSIONS,
+  MIB,
+  rangeActive,
+  type AssetKind,
+  type ChannelGroup,
+  type RangeFilter,
+  type SortField,
+} from "../types";
 
 function useDebounced<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -52,29 +63,83 @@ function makeComparator(
  * that gives you is load-bearing: `useDebounced` holds React state, so without
  * it a tab switch would keep showing the previous tab's query for 100 ms.
  */
+// Exported for useFacetCounts: counts must use the exact same predicate as the
+// filter, so there is exactly one definition.
+/** v passes iff within both set ends. min > max simply matches nothing —
+ *  never swap or error; the live count is the feedback. */
+export const inRange = (v: number, r: RangeFilter): boolean =>
+  (r.min === null || v >= r.min) && (r.max === null || v <= r.max);
+export const isPot = (n: number): boolean => n > 0 && (n & (n - 1)) === 0;
+
 export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const allFiles = useLibraryStore((s) => s.allFiles);
-  const folderScope = useLibraryStore((s) => s.folderScope);
+  const folderScopes = useLibraryStore((s) => s.folderScopes);
+  const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const durations = useLibraryStore((s) => s.durations);
   const durationsVersion = useLibraryStore((s) => s.durationsVersion);
-  const { query, extFilter, sortField, sortDir } = tab;
+  const dims = useLibraryStore((s) => s.dims);
+  const dimsVersion = useLibraryStore((s) => s.dimsVersion);
+  const { query, extFilter, sortField, sortDir, filters } = tab;
   const debouncedQuery = useDebounced(query, 100);
+  // The grouping pass runs only while the material facet is actually active —
+  // idle browsing pays nothing.
+  const membership = useMaterialMembership(kind === "texture" && filters.material);
 
   return useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
     const hasQuery = q !== "";
     const hasExtFilter = extFilter.size > 0;
-    // Folder scope narrows the library BEFORE query/ext filters apply.
-    const inScope = folderScope === null ? null : folderMatcher(folderScope);
+    // Folder scope (selected minus hidden) narrows the library BEFORE query/ext
+    // filters apply.
+    const inScope = scopePredicate(folderScopes, hiddenFolders);
+
+    // Facet gates hoisted out of the loop; each per-file check is O(1).
+    const flt = filters;
+    const hasDur = kind === "audio" && rangeActive(flt.duration);
+    const hasChan = kind === "texture" && flt.channels.size > 0;
+    const hasMat = kind === "texture" && flt.material && membership !== null;
+    const hasRes = kind === "texture" && rangeActive(flt.res);
+    const needShape = kind === "texture" && (flt.square || flt.pot);
+    const hasSize = kind === "model" && rangeActive(flt.size);
+    // Size is stored in MB; compare in bytes, converted once outside the loop.
+    const sizeBytes: RangeFilter = {
+      min: flt.size.min === null ? null : flt.size.min * MIB,
+      max: flt.size.max === null ? null : flt.size.max * MIB,
+    };
+    const hasMod = rangeActive(flt.modified);
 
     // Always a filtering pass now — every tab shows a subset by kind — so the
     // old "copy the whole array" fast path can't apply.
     const files: LibFile[] = [];
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
-      if (inScope !== null && !inScope(f.path)) continue;
+      if (!inScope(f.path)) continue;
       if (hasExtFilter && !extFilter.has(f.ext)) continue;
+      // Facets before the query: Map lookups beat the substring scan.
+      if (hasMod && !inRange(f.modified, flt.modified)) continue; // always known
+      if (hasSize && !inRange(f.size, sizeBytes)) continue; // size always known
+      if (hasChan && !flt.channels.has(channelGroupOf(f))) continue;
+      if (hasMat) {
+        const m = membership!.get(f.id);
+        // Unknown = keep (the map covers every scoped texture, but stay total).
+        if (m === "standalone") continue;
+      }
+      if (hasDur) {
+        const d = durations.get(f.id);
+        // Unknown = keep: a filter may only remove files it has positively
+        // measured. The list narrows as probe batches land (durationsVersion is
+        // already a memo dep) — never a flash-of-empty on a cold library.
+        if (d !== undefined && !inRange(d, flt.duration)) continue;
+      }
+      if (hasRes || needShape) {
+        const dm = dims.get(f.id);
+        if (dm !== undefined) { // unknown = keep, same rule
+          if (hasRes && !inRange(Math.max(dm[0], dm[1]), flt.res)) continue;
+          if (flt.square && dm[0] !== dm[1]) continue;
+          if (flt.pot && !(isPot(dm[0]) && isPot(dm[1]))) continue;
+        }
+      }
       if (hasQuery && !f.nameLower.includes(q)) continue;
       files.push(f);
     }
@@ -85,7 +150,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
       files.sort((a, b) => dir * cmp(a, b));
     }
     return files;
-  }, [kind, allFiles, folderScope, debouncedQuery, extFilter, sortField, sortDir, durations, durationsVersion]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, debouncedQuery, extFilter, sortField, sortDir, filters, durations, durationsVersion, dims, dimsVersion, membership]);
 }
 
 /**
@@ -101,34 +166,63 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
  */
 export function usePresentExts(kind: AssetKind): { ext: string; count: number }[] {
   const allFiles = useLibraryStore((s) => s.allFiles);
-  const folderScope = useLibraryStore((s) => s.folderScope);
+  const folderScopes = useLibraryStore((s) => s.folderScopes);
+  const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   return useMemo(() => {
-    const inScope = folderScope === null ? null : folderMatcher(folderScope);
+    const inScope = scopePredicate(folderScopes, hiddenFolders);
     const counts = new Map<string, number>();
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
-      if (inScope !== null && !inScope(f.path)) continue;
+      if (!inScope(f.path)) continue;
       counts.set(f.ext, (counts.get(f.ext) ?? 0) + 1);
     }
     return EXTENSIONS[kind]
       .filter((e) => counts.has(e))
       .map((e) => ({ ext: e, count: counts.get(e)! }));
-  }, [kind, allFiles, folderScope]);
+  }, [kind, allFiles, folderScopes, hiddenFolders]);
+}
+
+/**
+ * Channel groups that actually exist in the current folder scope, with counts,
+ * in CHANNEL_GROUPS canonical order — the usePresentExts discipline applied to
+ * the Channel facet: chips only for groups with members, stable order so they
+ * never reshuffle under the cursor.
+ */
+export function usePresentChannels(kind: AssetKind): { group: ChannelGroup; count: number }[] {
+  const allFiles = useLibraryStore((s) => s.allFiles);
+  const folderScopes = useLibraryStore((s) => s.folderScopes);
+  const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  return useMemo(() => {
+    if (kind !== "texture") return [];
+    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const counts = new Map<ChannelGroup, number>();
+    for (const f of allFiles) {
+      if (f.kind !== kind) continue;
+      if (!inScope(f.path)) continue;
+      const g = channelGroupOf(f);
+      counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    return CHANNEL_GROUPS.filter((g) => counts.has(g)).map((g) => ({
+      group: g,
+      count: counts.get(g)!,
+    }));
+  }, [kind, allFiles, folderScopes, hiddenFolders]);
 }
 
 /** Count of one kind inside the active folder scope — the status bar's
  *  denominator. Same scope rule as above, minus the query/ext filters. */
 export function useScopeCount(kind: AssetKind): number {
   const allFiles = useLibraryStore((s) => s.allFiles);
-  const folderScope = useLibraryStore((s) => s.folderScope);
+  const folderScopes = useLibraryStore((s) => s.folderScopes);
+  const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   return useMemo(() => {
-    const inScope = folderScope === null ? null : folderMatcher(folderScope);
+    const inScope = scopePredicate(folderScopes, hiddenFolders);
     let n = 0;
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
-      if (inScope !== null && !inScope(f.path)) continue;
+      if (!inScope(f.path)) continue;
       n++;
     }
     return n;
-  }, [kind, allFiles, folderScope]);
+  }, [kind, allFiles, folderScopes, hiddenFolders]);
 }

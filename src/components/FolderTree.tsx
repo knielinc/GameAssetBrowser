@@ -1,7 +1,8 @@
-import { useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from "react";
 import clsx from "clsx";
-import { ChevronRight, Copy, Folder, FolderOpen, Library, X } from "lucide-react";
-import { basename, removeRoot, useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { ChevronRight, Copy, Eye, EyeOff, Folder, FolderOpen, Library, Trash2 } from "lucide-react";
+import { basename, folderMatcher, removeRoot, useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { useRevealFolder } from "../stores/revealFolder";
 import { openInExplorer } from "../ipc/commands";
 import type { AssetKind } from "../types";
 import ContextMenu from "./ContextMenu";
@@ -117,7 +118,29 @@ export function buildFolderTree(files: readonly LibFile[], roots: readonly strin
   return rootNodes;
 }
 
-const INDENT_PX = 12;
+/** Path of the folder whose direct children include `path`, or null if `path`
+ *  is a root. Lets "Show all hidden folders" on a subfolder reveal its siblings
+ *  (the counterpart to "Hide all others"), not just its own hidden descendants. */
+function parentPathOf(roots: readonly FolderNode[], path: string): string | null {
+  let found: string | null = null;
+  const visit = (node: FolderNode): void => {
+    if (found) return;
+    if (node.children.some((c) => c.path === path)) {
+      found = node.path;
+      return;
+    }
+    for (const c of node.children) visit(c);
+  };
+  for (const root of roots) visit(root);
+  return found;
+}
+
+/** Horizontal step added per nesting level. One step is wider than the chevron
+ *  column so each depth reads as a clear, even stair. */
+const INDENT_STEP_PX = 14;
+/** Left padding every row starts from before depth indentation. Matches the
+ *  "All Files" row so the whole tree shares one left margin. */
+const BASE_PAD_PX = 8;
 /**
  * Depth at which indentation stops growing. The sidebar is a fixed 240px, so
  * uncapped indent would squeeze deep folder names to zero width and then push
@@ -126,51 +149,105 @@ const INDENT_PX = 12;
  */
 const MAX_INDENT_DEPTH = 8;
 
+/** The eye toggle that drops a folder's content from the query. Hidden folders
+ *  keep the icon visible (with EyeOff) so you can always find and reverse them;
+ *  visible folders only reveal it on row hover. */
+function EyeToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () => void }): ReactElement {
+  const Icon = hidden ? EyeOff : Eye;
+  return (
+    <button
+      type="button"
+      title={hidden ? "Show this folder's content" : "Hide this folder's content"}
+      className={clsx(
+        "shrink-0 rounded p-0.5 text-dim transition-all duration-[120ms] hover:text-text",
+        hidden ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+      )}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+    >
+      <Icon size={12} />
+    </button>
+  );
+}
+
 interface TreeNodeProps {
   node: FolderNode;
   depth: number;
   isRoot: boolean;
+  /** A hidden ancestor already excludes this subtree — dim it so the redundant
+   *  state reads at a glance. */
+  ancestorHidden: boolean;
   expanded: ReadonlySet<string>;
+  /** Path being flash-highlighted by "Show in navigator", or null. */
+  flash: string | null;
   onToggle: (path: string) => void;
   onNodeContextMenu: (path: string, e: ReactMouseEvent) => void;
 }
 
-function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }: TreeNodeProps): ReactElement {
-  const selected = useLibraryStore((s) => s.folderScope === node.path);
+function TreeNode({
+  node,
+  depth,
+  isRoot,
+  ancestorHidden,
+  expanded,
+  flash,
+  onToggle,
+  onNodeContextMenu,
+}: TreeNodeProps): ReactElement {
+  const selected = useLibraryStore((s) => s.folderScopes.includes(node.path));
+  const hidden = useLibraryStore((s) => s.hiddenFolders.includes(node.path));
   const activeTab = useLibraryStore((s) => s.activeTab);
-  const setFolderScope = useLibraryStore((s) => s.setFolderScope);
+  const soloScope = useLibraryStore((s) => s.soloScope);
+  const toggleScope = useLibraryStore((s) => s.toggleScope);
+  const toggleHidden = useLibraryStore((s) => s.toggleHidden);
   const hasChildren = node.children.length > 0;
   const isExpanded = hasChildren && expanded.has(node.path);
   const count = node.counts[activeTab];
   // Nothing here for this lens — dim it, keep it. See buildFolderTree's note.
   const emptyForTab = count === 0;
+  // Self-hidden, or excluded because an ancestor is hidden. Either way the
+  // content is out of the query, so present the row the same muted way.
+  const effectiveHidden = hidden || ancestorHidden;
   const breakdown = `${node.counts.audio} audio · ${node.counts.texture} textures · ${node.counts.model} models`;
 
-  // Single-click UX: selecting a folder also expands it; clicking the already
-  // active folder collapses it again (scope stays). The chevron still toggles
-  // expansion on its own via stopPropagation.
-  const selectNode = (): void => {
-    if (hasChildren && (!isExpanded || selected)) onToggle(node.path);
-    setFolderScope(node.path);
+  // Every folder — root or subfolder — scopes the file list the same way: plain
+  // click shows ONLY this folder's content, ctrl/cmd-click adds it to what's
+  // shown, shift-click hides it. Expansion is the chevron's job; the eye handles
+  // its own clicks via stopPropagation.
+  const onRowClick = (e: ReactMouseEvent): void => {
+    if (e.shiftKey) toggleHidden(node.path);
+    else if (e.ctrlKey || e.metaKey) toggleScope(node.path);
+    else soloScope(node.path);
   };
 
+  // Leading disclosure column, one fixed width at every depth so the identity
+  // icons below it line up. A childless folder keeps the empty slot.
   const chevron = hasChildren ? (
     <button
       type="button"
       title={isExpanded ? "Collapse" : "Expand"}
-      className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-dim transition-colors duration-[120ms] hover:text-text"
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-dim transition-colors duration-[120ms] hover:text-text"
       onClick={(e) => {
         e.stopPropagation();
         onToggle(node.path);
       }}
     >
       <ChevronRight
-        size={12}
+        size={13}
         className={clsx("transition-transform duration-[120ms]", isExpanded && "rotate-90")}
       />
     </button>
   ) : (
-    <span className="h-4 w-4 shrink-0" />
+    <span className="h-5 w-5 shrink-0" />
+  );
+
+  // Identity column, same 14px box for every row so names align at every depth.
+  // A scoped subfolder goes flat-accent (icon, name, count) over the tinted row.
+  const FolderIcon = isExpanded ? FolderOpen : Folder;
+  const identity = (
+    <FolderIcon size={14} className={clsx("shrink-0", selected ? "text-accent" : "text-dim")} />
   );
 
   const badge = (
@@ -182,62 +259,46 @@ function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }
     </span>
   );
 
+  // The eye hides this folder's content — same control at every depth. Removing
+  // a root lives in the context menu now.
+  const trailing = <EyeToggle hidden={hidden} onToggle={() => toggleHidden(node.path)} />;
+
   return (
     <>
-      {isRoot ? (
-        <div
-          className={clsx(
-            "group tree-row flex items-start gap-1 rounded-md py-1.5 pl-1 pr-2",
-            selected && "tree-row-selected",
-            emptyForTab && !selected && "opacity-40",
-          )}
-          onClick={selectNode}
-          onContextMenu={(e) => onNodeContextMenu(node.path, e)}
-        >
-          <span className="mt-px">{chevron}</span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-semibold text-text">{node.name}</div>
-            <div className="truncate text-[10px] text-dim" title={node.path}>
-              {node.path}
-            </div>
-          </div>
-          <span className="mt-px">{badge}</span>
-          <button
-            type="button"
-            title="Remove folder"
-            className="mt-px shrink-0 rounded p-0.5 text-dim opacity-0 transition-all duration-[120ms] hover:text-danger group-hover:opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              removeRoot(node.path);
-            }}
+      <div
+        data-tree-path={node.path}
+        className={clsx(
+          "group tree-row flex items-center gap-1.5 rounded-md pr-2",
+          isRoot ? "py-1" : "h-7",
+          selected && "tree-row-selected",
+          flash === node.path && "tree-row-flash",
+          emptyForTab && !selected && !effectiveHidden && "opacity-40",
+          effectiveHidden && "opacity-50",
+        )}
+        style={{
+          paddingLeft: `${BASE_PAD_PX + Math.min(depth, MAX_INDENT_DEPTH) * INDENT_STEP_PX}px`,
+        }}
+        onClick={onRowClick}
+        onContextMenu={(e) => onNodeContextMenu(node.path, e)}
+        title={isRoot ? node.path : `${node.path}\n${breakdown}`}
+      >
+        {chevron}
+        {identity}
+        <div className="min-w-0 flex-1">
+          <div
+            className={clsx(
+              "truncate text-xs",
+              selected ? "text-accent" : "text-text",
+              isRoot && "font-semibold",
+            )}
           >
-            <X size={12} />
-          </button>
-        </div>
-      ) : (
-        <div
-          className={clsx(
-            "tree-row flex h-[26px] items-center gap-1 rounded-md pr-2",
-            selected && "tree-row-selected",
-            emptyForTab && !selected && "opacity-40",
-          )}
-          style={{ paddingLeft: `${Math.min(depth, MAX_INDENT_DEPTH) * INDENT_PX + 4}px` }}
-          onClick={selectNode}
-          onContextMenu={(e) => onNodeContextMenu(node.path, e)}
-          title={`${node.path}\n${breakdown}`}
-        >
-          {chevron}
-          {isExpanded ? (
-            <FolderOpen size={13} className={clsx("shrink-0", selected ? "text-accent" : "text-dim")} />
-          ) : (
-            <Folder size={13} className={clsx("shrink-0", selected ? "text-accent" : "text-dim")} />
-          )}
-          <span className={clsx("min-w-0 flex-1 truncate text-xs", selected ? "text-text" : "text-dim")}>
             {node.name}
-          </span>
-          {badge}
+          </div>
+          {isRoot && <div className="truncate text-[10px] leading-tight text-dim">{node.path}</div>}
         </div>
-      )}
+        {badge}
+        {trailing}
+      </div>
       {isExpanded &&
         node.children.map((child) => (
           <TreeNode
@@ -245,7 +306,9 @@ function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }
             node={child}
             depth={depth + 1}
             isRoot={false}
+            ancestorHidden={effectiveHidden}
             expanded={expanded}
+            flash={flash}
             onToggle={onToggle}
             onNodeContextMenu={onNodeContextMenu}
           />
@@ -255,16 +318,20 @@ function TreeNode({ node, depth, isRoot, expanded, onToggle, onNodeContextMenu }
 }
 
 /**
- * The sidebar folder tree: an "All Files" node, then one expandable node per
- * root. Expansion is local UI state; the selected scope lives in the library
- * store so the file list and status bar stay in sync.
+ * The sidebar folder tree: an "All Files" master-switch header, then one
+ * expandable node per root. Expansion is local UI state; enable/disable and
+ * subfolder hiding live in the store's hidden set so the file list, counts, and
+ * status bar stay in sync.
  */
 export default function FolderTree(): ReactElement {
   const roots = useLibraryStore((s) => s.roots);
   const allFiles = useLibraryStore((s) => s.allFiles);
   const activeTab = useLibraryStore((s) => s.activeTab);
-  const scopeIsAll = useLibraryStore((s) => s.folderScope === null);
-  const setFolderScope = useLibraryStore((s) => s.setFolderScope);
+  const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const scopeIsAll = useLibraryStore((s) => s.folderScopes.length === 0);
+  const clearScopes = useLibraryStore((s) => s.clearScopes);
+  const toggleHidden = useLibraryStore((s) => s.toggleHidden);
+  const resetHidden = useLibraryStore((s) => s.resetHidden);
   const totalCount = useMemo(
     () => allFiles.reduce((n, f) => (f.kind === activeTab ? n + 1 : n), 0),
     [allFiles, activeTab],
@@ -291,6 +358,59 @@ export default function FolderTree(): ReactElement {
 
   const tree = useMemo(() => buildFolderTree(allFiles, roots), [allFiles, roots]);
 
+  // "Show in navigator": expand every ancestor of the requested folder, then
+  // scroll to and flash its row. Fresh object per flash so revealing the same
+  // folder again re-runs the scroll.
+  const [flash, setFlash] = useState<{ path: string } | null>(null);
+  const revealTarget = useRevealFolder((s) => s.target);
+  useEffect(() => {
+    if (revealTarget === null) return;
+    const target = revealTarget.path;
+    // Root nodes are keyed by the root string EXACTLY as picked (possibly with
+    // a trailing separator, e.g. "C:\"); inner nodes by the separator slices
+    // buildFolderTree produces. Add both spellings so every level opens.
+    let ownerTrimmed: string | null = null;
+    let flashPath = target;
+    const toExpand: string[] = [];
+    for (const r of roots) {
+      const t = r.replace(/[\\/]+$/, "");
+      const c = target.charCodeAt(t.length);
+      if (target !== t && !(target.startsWith(t) && (c === 92 || c === 47))) continue;
+      toExpand.push(r);
+      if (target === t) flashPath = r; // the folder IS a root — flash its node
+      // Outermost root owns the walk, exactly like buildFolderTree.
+      if (ownerTrimmed === null || t.length < ownerTrimmed.length) ownerTrimmed = t;
+    }
+    if (ownerTrimmed !== null) {
+      let segStart = ownerTrimmed.length + 1;
+      for (;;) {
+        const sep = nextSeparator(target, segStart);
+        if (sep === -1) break;
+        toExpand.push(target.slice(0, sep));
+        segStart = sep + 1;
+      }
+      toExpand.push(target);
+    }
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const p of toExpand) next.add(p);
+      return next;
+    });
+    setFlash({ path: flashPath });
+    useRevealFolder.getState().clear();
+  }, [revealTarget, roots]);
+
+  // Runs after the expansion above has committed, so the row exists to scroll
+  // to. The flash class rides on the row for the animation's duration.
+  useEffect(() => {
+    if (flash === null) return;
+    document
+      .querySelector<HTMLElement>(`[data-tree-path="${CSS.escape(flash.path)}"]`)
+      ?.scrollIntoView({ block: "center" });
+    const t = window.setTimeout(() => setFlash(null), 1400);
+    return () => window.clearTimeout(t);
+  }, [flash]);
+
   if (roots.length === 0) {
     return (
       <p className="px-2 py-1.5 text-[11px] leading-relaxed text-dim">
@@ -303,13 +423,16 @@ export default function FolderTree(): ReactElement {
     <div>
       <div
         className={clsx(
-          "tree-row mb-1 flex h-[26px] items-center gap-1.5 rounded-md px-2",
+          "tree-row mb-1 flex h-7 items-center gap-1.5 rounded-md pr-2",
           scopeIsAll && "tree-row-selected",
         )}
-        onClick={() => setFolderScope(null)}
+        style={{ paddingLeft: `${BASE_PAD_PX}px` }}
+        title="Show every folder's content (clears the focus)"
+        onClick={() => clearScopes()}
       >
-        <Library size={13} className={clsx("shrink-0", scopeIsAll ? "text-accent" : "text-dim")} />
-        <span className={clsx("min-w-0 flex-1 truncate text-xs", scopeIsAll ? "text-text" : "text-dim")}>
+        <span className="h-5 w-5 shrink-0" />
+        <Library size={14} className={clsx("shrink-0", scopeIsAll ? "text-accent" : "text-dim")} />
+        <span className={clsx("min-w-0 flex-1 truncate text-xs", scopeIsAll ? "text-accent" : "text-text")}>
           All Files
         </span>
         <span className={clsx("shrink-0 text-[10px] tabular-nums", scopeIsAll ? "text-accent" : "text-dim")}>
@@ -322,16 +445,24 @@ export default function FolderTree(): ReactElement {
           node={root}
           depth={0}
           isRoot
+          ancestorHidden={false}
           expanded={expanded}
+          flash={flash?.path ?? null}
           onToggle={onToggle}
           onNodeContextMenu={onNodeContextMenu}
         />
       ))}
-      {menu !== null && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          items={[
+      {menu !== null &&
+        (() => {
+          const isRootMenu = roots.includes(menu.path);
+          const menuHidden = hiddenFolders.includes(menu.path);
+          // A root reveals its own subtree; a subfolder reveals its parent's
+          // subtree, so hidden siblings come back too.
+          const revealScope = isRootMenu ? menu.path : parentPathOf(tree, menu.path);
+          const under = revealScope !== null ? folderMatcher(revealScope) : null;
+          const hasHiddenInScope =
+            revealScope !== null && hiddenFolders.some((f) => f === revealScope || under!(f));
+          const items = [
             {
               label: "Open in Explorer",
               icon: FolderOpen,
@@ -350,10 +481,31 @@ export default function FolderTree(): ReactElement {
                 });
               },
             },
-          ]}
-          onClose={() => setMenu(null)}
-        />
-      )}
+          ];
+          if (!isRootMenu) {
+            items.push({
+              label: menuHidden ? "Show this folder" : "Hide this folder",
+              icon: menuHidden ? Eye : EyeOff,
+              onClick: () => toggleHidden(menu.path),
+            });
+          }
+          if (hasHiddenInScope && revealScope !== null) {
+            const scope = revealScope;
+            items.push({
+              label: "Show all hidden folders",
+              icon: Eye,
+              onClick: () => resetHidden(scope),
+            });
+          }
+          if (isRootMenu) {
+            items.push({
+              label: "Remove folder",
+              icon: Trash2,
+              onClick: () => removeRoot(menu.path),
+            });
+          }
+          return <ContextMenu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />;
+        })()}
     </div>
   );
 }

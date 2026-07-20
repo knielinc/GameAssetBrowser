@@ -4,10 +4,12 @@ mod metadata;
 mod modeltex;
 mod portable;
 mod scanner;
+mod texmeta;
 mod thumbcache;
 mod thumbs;
 mod types;
 mod waveform;
+mod winmode;
 
 use audio::{AudioController, PlayerCmd};
 use tauri::Manager;
@@ -92,6 +94,7 @@ pub fn run() {
         .manage(scanner::ScanState::default())
         .manage(waveform::WaveformState::default())
         .manage(thumbs::ThumbState::default())
+        .manage(thumbs::PreviewState::default())
         // Thumbnails are served as files over their own scheme rather than as
         // bytes over IPC: WebView2 fetches them out-of-band on its own threads
         // and applies its own HTTP cache. 2000 cells x 256px RGBA over invoke
@@ -149,6 +152,34 @@ pub fn run() {
                 match resp {
                     Ok(r) => responder.respond(r),
                     Err(e) => eprintln!("[tex] response build failed: {e}"),
+                }
+            });
+        })
+        // Full-resolution texture previews for formats the browser can't decode
+        // (HDR/EXR/DDS/TGA/…). The grid stays on the 256px thumb; the preview
+        // panel and 3D surface fetch the real pixels here, decoded + tone-mapped
+        // in Rust to a PNG. URL shape mirrors model://:
+        // http://preview.localhost/C:/Pack/env_5k.hdr
+        .register_asynchronous_uri_scheme_protocol("preview", |ctx, req, responder| {
+            let app = ctx.app_handle().clone();
+            let uri = req.uri().clone();
+            std::thread::spawn(move || {
+                let decoded = percent_decode(uri.path().trim_start_matches('/'));
+                let resp = match thumbs::preview_png(&app, &decoded) {
+                    Some(bytes) => tauri::http::Response::builder()
+                        .header("Content-Type", "image/png")
+                        // Keyed by path+stamp inside; the URL's bytes are stable.
+                        .header("Cache-Control", "public, max-age=31536000, immutable")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes),
+                    None => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Vec::new()),
+                };
+                match resp {
+                    Ok(r) => responder.respond(r),
+                    Err(e) => eprintln!("[preview] response build failed: {e}"),
                 }
             });
         })
@@ -231,6 +262,7 @@ pub fn run() {
             portable::settings_store_path,
             portable::settings_export,
             portable::settings_import,
+            winmode::set_fullscreen_smooth,
             scanner::start_scan,
             thumbs::request_thumbs,
             thumbs::model_thumb_lookup,

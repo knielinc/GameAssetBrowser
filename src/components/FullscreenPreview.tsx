@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, type ReactElement } from "react";
 import { X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import type { TextureItem } from "../material/classify";
@@ -42,20 +42,17 @@ export default function FullscreenPreview({
   const keys =
     item === null
       ? file.kind === "texture" && thumb !== undefined
-        ? { baseColor: thumb.key }
+        ? { baseColor: { key: thumb.key, path: file.path, ext: file.ext } }
         : {}
       : item.kind === "material"
         ? keysForMaterial(item.material, thumbs)
         : keysForFile(item.file, item.channel, thumbs);
 
-  // Fullscreening an image opens it as a flat, framed picture — not wrapped on
-  // the drawer's default sphere. The mesh is a LOCAL override so the shared
-  // drawer state is untouched; the controls below still switch to sphere/cube.
-  const [meshOverride, setMeshOverride] = useState<MeshMode>("flat");
-  useEffect(() => {
-    setMeshOverride("flat");
-  }, [file.id]);
-  const mesh: MeshMode = file.kind === "texture" ? meshOverride : preview3d.mesh;
+  // Fullscreen is the inspector blown up, not a separate viewer: it adopts the
+  // drawer's CURRENT state wholesale (mesh, lighting, tiling, zoom, sprite),
+  // and the controls below write back to the same shared state — leave
+  // fullscreen and the drawer is exactly where you left it.
+  const mesh: MeshMode = preview3d.mesh;
   // An equirectangular (2:1) image is almost certainly an environment map, so
   // leaving 2D opens it on the env viewer rather than the flat plane.
   const info = thumb?.info;
@@ -63,12 +60,6 @@ export default function FullscreenPreview({
     info != null && info.sourceHeight > 0 && Math.abs(info.sourceWidth / info.sourceHeight - 2) < 0.15
       ? "env"
       : undefined;
-  const onControlsChange = (patch: Partial<PreviewState>): void => {
-    if (patch.mesh !== undefined) setMeshOverride(patch.mesh);
-    const rest: Partial<PreviewState> = { ...patch };
-    delete rest.mesh;
-    if (Object.keys(rest).length > 0) onPreviewChange(rest);
-  };
 
   // Flat mode on a texture is the 2D lens — image / GIF / sprite sheet.
   const use2D = file.kind === "texture" && mesh === "flat";
@@ -109,7 +100,6 @@ export default function FullscreenPreview({
               <Sprite2DView
                 path={file.path}
                 ext={file.ext}
-                thumbKey={thumb?.key}
                 sprite={{
                   enabled: preview3d.spriteOn,
                   cols: preview3d.spriteCols,
@@ -144,8 +134,8 @@ export default function FullscreenPreview({
         {file.kind === "texture" && (Object.keys(keys).length > 0 || use2D) && (
           <div className="shrink-0">
             <PreviewControls
-              value={{ ...preview3d, mesh }}
-              onChange={onControlsChange}
+              value={preview3d}
+              onChange={onPreviewChange}
               inline
               hasHeight={keys.height !== undefined}
               default3d={default3d}

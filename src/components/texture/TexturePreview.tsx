@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { thumbUrl } from "../../types";
+import { sourceUrl } from "../../model/loadModel";
 import { applyParallax } from "./parallax";
 
 /** Shared 1×1 white — the parallax shader keys off a base-color map, so a
@@ -34,16 +34,24 @@ export const LIGHT_MODES: { id: LightMode; label: string }[] = [
   { id: "unlit", label: "Unlit" },
 ];
 
-/** Cache keys for the channels this material has. Missing = slot unused. */
+/** One channel's image source: the original path + ext drive the full-res
+ *  preview URL; `key` is the 256px thumbnail, kept as a cheap fallback. */
+export interface ChannelSrc {
+  key: string;
+  path: string;
+  ext: string;
+}
+
+/** The channels this material has. Missing = slot unused. */
 export interface ChannelKeys {
-  baseColor?: string;
-  normal?: string;
-  roughness?: string;
-  metallic?: string;
-  ao?: string;
-  height?: string;
-  emissive?: string;
-  opacity?: string;
+  baseColor?: ChannelSrc;
+  normal?: ChannelSrc;
+  roughness?: ChannelSrc;
+  metallic?: ChannelSrc;
+  ao?: ChannelSrc;
+  height?: ChannelSrc;
+  emissive?: ChannelSrc;
+  opacity?: ChannelSrc;
 }
 
 /** Parallax depth presets, in UV units (the shader marches the height field in
@@ -142,8 +150,12 @@ export default function TexturePreview({
     obj?: THREE.Mesh;
     mat?: THREE.MeshStandardMaterial;
     lights: THREE.Object3D[];
-    textures: THREE.Texture[];
-  }>({ lights: [], textures: [] });
+    /** url|colorspace → loaded texture, kept across material rebuilds. A
+     *  lighting/relief/channel change rebuilds the MATERIAL, and handing it
+     *  already-loaded textures is what keeps that rebuild flicker-free —
+     *  reloading async painted the mesh untextured for a few frames. */
+    texCache: Map<string, THREE.Texture>;
+  }>({ lights: [], texCache: new Map() });
   const cam = useRef({ yaw: 0.6, pitch: 0.3, dist: 3.2, panX: 0, panY: 0 });
   const dirty = useRef(true);
   const [ready, setReady] = useState(false);
@@ -264,7 +276,8 @@ export default function TexturePreview({
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      for (const t of refs.current.textures) t.dispose();
+      for (const t of refs.current.texCache.values()) t.dispose();
+      refs.current.texCache.clear();
       refs.current.obj?.geometry.dispose();
       refs.current.mat?.dispose();
       pmrem.dispose();
@@ -296,33 +309,54 @@ export default function TexturePreview({
     dirty.current = true;
   }, [light, ready]);
 
+  // The camera belongs to the USER: a rebuild triggered by lighting, tiling,
+  // relief, or channel changes must not touch it. Only an actual geometry
+  // switch re-frames (a sphere's framing is meaningless on a flat image).
+  const framedMesh = useRef<MeshMode | null>(null);
+
   // --- mesh + material ---
   useEffect(() => {
     const { scene, renderer } = refs.current;
     if (scene === undefined || renderer === undefined) return;
+    const reframe = framedMesh.current !== mesh;
+    framedMesh.current = mesh;
 
     if (refs.current.obj !== undefined) {
       scene.remove(refs.current.obj);
       refs.current.obj.geometry.dispose();
     }
-    for (const t of refs.current.textures) t.dispose();
-    refs.current.textures = [];
     refs.current.mat?.dispose();
 
     const loader = new THREE.TextureLoader();
-    const load = (key: string | undefined, srgb: boolean): THREE.Texture | null => {
-      if (key === undefined) return null;
-      const t = loader.load(thumbUrl(key), () => {
-        dirty.current = true;
-      });
+    const cache = refs.current.texCache;
+    const used = new Set<string>();
+    const load = (src: ChannelSrc | undefined, srgb: boolean): THREE.Texture | null => {
+      if (src === undefined) return null;
+      // Source quality, not the 256px grid thumb — the preview is where you look
+      // closely, and a 5K HDRI on the env sphere must not read as a blurry blob.
+      const url = sourceUrl(src.path, src.ext);
+      const cacheKey = `${url}|${srgb ? "s" : "l"}`;
+      used.add(cacheKey);
+      let t = cache.get(cacheKey);
+      if (t === undefined) {
+        t = loader.load(url, () => {
+          dirty.current = true;
+        });
+        t.wrapS = THREE.RepeatWrapping;
+        t.wrapT = THREE.RepeatWrapping;
+        t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        cache.set(cacheKey, t);
+      }
+      // Re-asserted on every build, not only on load: flat mode retags linear
+      // maps sRGB for display (below), and a cache hit must undo that.
       // THE colorspace rule: base color is sRGB; normal/roughness/AO/height
       // are linear DATA. Backwards = washed out and subtly wrong.
-      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-      t.wrapS = THREE.RepeatWrapping;
-      t.wrapT = THREE.RepeatWrapping;
+      const cs = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      if (t.colorSpace !== cs) {
+        t.colorSpace = cs;
+        t.needsUpdate = true;
+      }
       t.repeat.set(tiles, tiles);
-      t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      refs.current.textures.push(t);
       return t;
     };
 
@@ -334,6 +368,15 @@ export default function TexturePreview({
     const heightMap = load(keys.height, false);
     const emissiveMap = load(keys.emissive, true);
     const opacityMap = load(keys.opacity, false);
+
+    // Evict what this build no longer references — a different file's maps —
+    // so switching selections doesn't accumulate GPU textures forever.
+    for (const [k, t] of cache) {
+      if (!used.has(k)) {
+        t.dispose();
+        cache.delete(k);
+      }
+    }
 
     if (mesh === "env") {
       // Equirect panorama seen from inside — the view HDRIs and skyboxes want.
@@ -348,7 +391,7 @@ export default function TexturePreview({
       refs.current.obj = m;
       refs.current.mat = mat as unknown as THREE.MeshStandardMaterial;
       if (map !== null) map.repeat.set(1, 1); // never tile a panorama
-      cam.current.dist = 0.01;
+      if (reframe) cam.current.dist = 0.01;
       dirty.current = true;
       return;
     }
@@ -399,12 +442,14 @@ export default function TexturePreview({
       scene.add(m);
       refs.current.obj = m;
       refs.current.mat = mat as unknown as THREE.MeshStandardMaterial;
-      const c = cam.current;
-      c.yaw = 0;
-      c.pitch = 0;
-      c.dist = 2.42;
-      c.panX = 0;
-      c.panY = 0;
+      if (reframe) {
+        const c = cam.current;
+        c.yaw = 0;
+        c.pitch = 0;
+        c.dist = 2.42;
+        c.panX = 0;
+        c.panY = 0;
+      }
       dirty.current = true;
       return;
     }
@@ -478,12 +523,14 @@ export default function TexturePreview({
     refs.current.mat = mat as THREE.MeshStandardMaterial;
 
     // Flat is handled above and returns early — only the 3D meshes reach here.
-    const c = cam.current;
-    c.yaw = 0.6;
-    c.pitch = 0.3;
-    c.dist = mesh === "cube" ? 4 : 3.2;
-    c.panX = 0;
-    c.panY = 0;
+    if (reframe) {
+      const c = cam.current;
+      c.yaw = 0.6;
+      c.pitch = 0.3;
+      c.dist = mesh === "cube" ? 4 : 3.2;
+      c.panX = 0;
+      c.panY = 0;
+    }
     dirty.current = true;
   }, [
     keys.baseColor, keys.normal, keys.roughness, keys.metallic,

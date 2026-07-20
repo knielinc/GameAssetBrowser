@@ -15,7 +15,7 @@
  */
 
 import type { LibFile } from "../stores/libraryStore";
-import type { ThumbInfo } from "../types";
+import type { ChannelGroup, ThumbInfo } from "../types";
 import {
   AMBIGUOUS,
   DISPLAY_PREFIXES,
@@ -203,6 +203,57 @@ export function parse(file: LibFile): Parsed {
   };
 }
 
+/** table.ts's 23 channels folded onto the filter vocabulary of 10 (types.ts). */
+const GROUP_OF: Record<Channel, ChannelGroup> = {
+  baseColor: "baseColor",
+  normal: "normal",
+  roughness: "roughness",
+  smoothness: "roughness",
+  gloss: "roughness",
+  metallic: "metallic",
+  ao: "ao",
+  height: "height",
+  emissive: "emissive",
+  opacity: "opacity",
+  packedORM: "packed",
+  packedARM: "packed",
+  packedRMA: "packed",
+  packedMRA: "packed",
+  packedUnityMask: "packed",
+  packedMetalSmooth: "packed",
+  specular: "other",
+  curvature: "other",
+  cavity: "other",
+  subsurface: "other",
+  sheen: "other",
+  transmission: "other",
+  unknown: "other",
+};
+
+// Pure function of the name; cached by the ORIGINAL-CASED name at module level
+// so the tokenizer runs once per distinct name per session, never per
+// keystroke. Not nameLower: tokenize() splits on camelCase boundaries, so
+// `RockNormal.png` and `rocknormal.png` classify differently and must not
+// share a cache slot.
+const groupCache = new Map<string, ChannelGroup>();
+
+/**
+ * Stage-A per-file only — the joint pass is NOT run, so `Rock_A.png` filters
+ * as its solo best guess and the ambiguous tail lands on `other` (itself a
+ * selectable chip). Acceptable for a filter; the grouped view still resolves
+ * jointly.
+ */
+export function channelGroupOf(file: LibFile): ChannelGroup {
+  const hit = groupCache.get(file.name);
+  if (hit !== undefined) return hit;
+  const cands = parse(file).candidates;
+  let best: Candidate | null = null;
+  for (const c of cands) if (best === null || c.confidence > best.confidence) best = c;
+  const group = best === null ? "other" : GROUP_OF[best.channel];
+  groupCache.set(file.name, group);
+  return group;
+}
+
 /**
  * Stage C — solve one group's ambiguities against sibling evidence + content.
  *
@@ -222,9 +273,16 @@ function resolveGroup(parsed: Parsed[], stats: Map<number, ThumbInfo>): Member[]
   return parsed.map((p): Member => {
     const info = stats.get(p.file.id);
 
-    // No suffix at all + a suffixed sibling → implicit base color. Unity and
-    // Unreal exporters do this constantly (Wood.png + Wood_N.png).
+    // No suffix at all. A blue-dominant image is a normal map whatever the name
+    // (or lack of one) says — check content BEFORE the implicit-base-color rule,
+    // or a normal map named `Rock.png` next to `Rock_Color.png` gets miscalled
+    // base color and both fight over the same slot.
     if (p.candidates.length === 0) {
+      if (info?.normalLike === true) {
+        return { ...p, channel: "normal", resolved: 0.8, byContent: true };
+      }
+      // No suffix + a suffixed sibling → implicit base color. Unity and Unreal
+      // exporters do this constantly (Wood.png + Wood_N.png).
       const implicit = parsed.some((q) => q !== p && q.candidates.length > 0);
       if (implicit && (info === undefined || !info.grayscale)) {
         return { ...p, channel: "baseColor", resolved: 0.7, byContent: info !== undefined };

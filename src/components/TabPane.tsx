@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
 import clsx from "clsx";
-import { Copy, FolderOpen, Loader2 } from "lucide-react";
+import { Copy, FolderOpen, FolderTree as FolderTreeIcon, Loader2 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { usePanelWidth } from "../hooks/usePanelWidth";
 import { usePanelPrefs } from "../stores/panelPrefs";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
-import { thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { showInExplorer } from "../ipc/commands";
+import { revealInNavigator } from "../stores/revealFolder";
 import type { AssetKind } from "../types";
 import FileList from "./FileList";
 import StatusBar from "./StatusBar";
@@ -38,17 +39,12 @@ export interface TabPaneProps {
  */
 export default function TabPane({ kind }: TabPaneProps): ReactElement {
   const visible = useVisibleFiles(kind);
-  const [preview, setPreview] = useState<LibFile | null>(null);
-  const onPreview = useCallback((f: LibFile) => setPreview(f), []);
-  useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview);
-  const onTextureRange = useThumbRequests(visible, kind === "texture");
-  const onModelRange = useModelThumbs(visible, kind === "model");
-  const onVisibleRange = kind === "model" ? onModelRange : onTextureRange;
 
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const scanning = useLibraryStore((s) => s.scanning);
   const anyFiles = useLibraryStore((s) => s.allFiles.length > 0);
   const select = useLibraryStore((s) => s.select);
+  const clearFilters = useLibraryStore((s) => s.clearFilters);
   const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
 
   // Materials are derived in the frontend in one memoized pass — the same
@@ -60,6 +56,36 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     if (kind !== "texture" || !tab.groupMaterials) return null;
     return groupTextures(visible, thumbInfos());
   }, [kind, tab.groupMaterials, visible, thumbsVersion]);
+
+  const [preview, setPreview] = useState<LibFile | null>(null);
+  // The shortcut hook resolves Space against the FLAT file list, but in the
+  // grouped view the selection is keyed by the grouped item — a material's key
+  // is no file path, and its index is a grouped index. Re-resolve here, where
+  // the grouping lives; a material previews as its face file (same one the
+  // cell thumbnail shows).
+  const onPreview = useCallback(
+    (f: LibFile) => {
+      if (grouped !== null) {
+        const t = useLibraryStore.getState().tabs[kind];
+        const it =
+          grouped.find((i) => i.key === t.selectedPath) ?? grouped[t.selectedIndex] ?? grouped[0];
+        if (it !== undefined) {
+          setPreview(
+            it.kind === "material"
+              ? (it.material.channels.get("baseColor") ?? it.material.members[0]!).file
+              : it.file,
+          );
+          return;
+        }
+      }
+      setPreview(f);
+    },
+    [grouped, kind],
+  );
+  useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview);
+  const onTextureRange = useThumbRequests(visible, kind === "texture");
+  const onModelRange = useModelThumbs(visible, kind === "model");
+  const onVisibleRange = kind === "model" ? onModelRange : onTextureRange;
 
   const [menu, setMenu] = useState<{ x: number; y: number; file: LibFile } | null>(null);
   // Inspector show/hide is shared with the TabBar toggle; its width is a
@@ -84,8 +110,8 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     zoomFit: true,
     zoomPct: 100,
     spriteOn: false,
-    spriteCols: 4,
-    spriteRows: 4,
+    spriteCols: 1,
+    spriteRows: 1,
     spriteFps: 12,
     spritePlaying: true,
   });
@@ -178,8 +204,13 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     );
   } else if (visible.length === 0 && tab.viewMode === "grid" && kind !== "audio") {
     content = (
-      <div className="flex flex-1 items-center justify-center text-xs text-dim">
+      <div className="flex flex-1 flex-col items-center justify-center text-xs text-dim">
         {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
+        {activeFilterCount(kind, tab) > 0 && (
+          <button type="button" className="chip mt-2" onClick={() => clearFilters(kind)}>
+            Clear filters
+          </button>
+        )}
       </div>
     );
   } else if (grouped !== null && tab.viewMode === "grid") {
@@ -309,6 +340,11 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
                   console.error("show_in_explorer failed", err);
                 });
               },
+            },
+            {
+              label: "Show in navigator",
+              icon: FolderTreeIcon,
+              onClick: () => revealInNavigator(menu.file.path),
             },
             {
               label: "Copy path",
