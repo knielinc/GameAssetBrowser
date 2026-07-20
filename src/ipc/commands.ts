@@ -90,6 +90,21 @@ export function openInExplorer(path: string): Promise<void> {
   return invoke<void>("open_in_explorer", { path });
 }
 
+/** Of `paths`, return only those that are directories — the drop-to-add-root gate. */
+export function filterDirs(paths: string[]): Promise<string[]> {
+  return invoke<string[]>("filter_dirs", { paths });
+}
+
+/** Decode a texture to RGBA and put it on the OS clipboard (HDR/EXR tone-mapped). */
+export function copyImageToClipboard(path: string): Promise<void> {
+  return invoke<void>("copy_image_to_clipboard", { path });
+}
+
+/** Launch a registered external app with `path`, detached ("Open with…"). */
+export function openWith(exe: string, path: string): Promise<void> {
+  return invoke<void>("open_with", { exe, path });
+}
+
 /**
  * Absolute path of `settings.json` inside the app's data home — next to the
  * exe for portable copies, the OS app-data dir otherwise. Pass it to the

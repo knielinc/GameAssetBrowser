@@ -12,6 +12,7 @@
     "export": "powershell -ExecutionPolicy Bypass -File scripts/export-release.ps1"
   },
   "dependencies": {
+    "@crabnebula/tauri-plugin-drag": "^2.1.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-virtual": "^3.14.6",
     "@tauri-apps/api": "^2",

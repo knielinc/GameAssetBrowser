@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
-import { BarChart3, Check, CopyCheck, MousePointer2, Settings } from "lucide-react";
+import { AppWindow, BarChart3, Check, CopyCheck, MousePointer2, Settings } from "lucide-react";
 import { MAX_SCALE, MIN_SCALE, THEMES, useThemeStore } from "../stores/theme";
 import { usePlayerStore } from "../stores/playerStore";
 import DuplicatesModal from "./DuplicatesModal";
+import ExternalAppsModal from "./ExternalAppsModal";
 import StatsModal from "./StatsModal";
 
 /**
@@ -21,6 +22,7 @@ export default function SettingsMenu(): ReactElement {
   // fights the modal's own backdrop handling.
   const [showDupes, setShowDupes] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [showApps, setShowApps] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const themeId = useThemeStore((s) => s.themeId);
   const setTheme = useThemeStore((s) => s.setTheme);
@@ -160,11 +162,24 @@ export default function SettingsMenu(): ReactElement {
             <BarChart3 size={13} className="shrink-0 text-faint" />
             Library statistics…
           </button>
+          {/* Per-kind "Open with…" targets for the file context menus. */}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            onClick={() => {
+              setOpen(false);
+              setShowApps(true);
+            }}
+          >
+            <AppWindow size={13} className="shrink-0 text-faint" />
+            External apps…
+          </button>
         </div>
       )}
 
       {showDupes && <DuplicatesModal onClose={() => setShowDupes(false)} />}
       {showStats && <StatsModal onClose={() => setShowStats(false)} />}
+      {showApps && <ExternalAppsModal onClose={() => setShowApps(false)} />}
     </div>
   );
 }

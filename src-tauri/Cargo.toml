@@ -118,6 +118,12 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 # transitively via tauri's deps).
 rustfft = "6"
 base64 = "0.22"
+# Native drag-OUT (grid cells / rows → Explorer, DAWs, game engines). The
+# webview cannot start an OS drag with real file paths on its own.
+tauri-plugin-drag = "2"
+# "Copy image" context action (workflow.rs): full-RGBA clipboard write, so a
+# DDS/TGA/EXR pastes into any editor without an export step.
+arboard = "3"
 
 # Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs).
 # Same 0.61 tauri/tao already use, so no new crate in the tree.

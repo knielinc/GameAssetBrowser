@@ -14,15 +14,19 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  ExternalLink,
   FolderOpen,
   FolderTree as FolderTreeIcon,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
-import { showInExplorer } from "../ipc/commands";
+import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
 import { activeFilterCount, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { revealInNavigator } from "../stores/revealFolder";
 import { toggleFavoriteSmart, useFavoritesStore } from "../stores/favoritesStore";
+import { appsForKind, useExternalAppsStore } from "../stores/externalApps";
+import { armDragOut } from "../dragOut";
 import { hoverPlay, hoverStop, loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import type { TextureItem } from "../material/classify";
@@ -158,6 +162,8 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   // Fresh Set identity per toggle, so the row props (plain booleans) recompute.
   const favorites = useFavoritesStore((s) => s.favorites);
   const collectionScope = useLibraryStore((s) => s.collectionScope);
+  // "Open with…" targets for this kind (SettingsMenu → External apps…).
+  const externalApps = useExternalAppsStore((s) => s.apps);
   const headers = headersFor(kind);
 
   const virtualizer = useVirtualizer({
@@ -249,6 +255,33 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
     },
     [],
   );
+
+  // Drag-out (stable like onSelect, resolved through the same refs): a press
+  // that travels past the threshold becomes a native OS file drag. Paths are
+  // resolved lazily AT the threshold: the full selection when the pressed row
+  // is part of it, else just that row (a material row drags all its maps).
+  // Under the threshold nothing fires and the press stays a click.
+  const onRowDragOut = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
+    const its = itemsRef.current;
+    const kind = kindRef.current;
+    armDragOut(e, () => {
+      const it = its?.[index];
+      const key = its !== undefined ? it?.key : filesRef.current[index]?.path;
+      if (key === undefined) return [];
+      const sel = useLibraryStore.getState().tabs[kind].selectedPaths;
+      if (sel.has(key)) {
+        const paths = selectionFilePaths(sel, filesRef.current, its);
+        if (paths.length > 0) return paths;
+      }
+      if (it !== undefined) {
+        return it.kind === "material"
+          ? it.material.members.map((m) => m.file.path)
+          : [it.file.path];
+      }
+      const f = filesRef.current[index];
+      return f !== undefined ? [f.path] : [];
+    });
+  }, []);
 
   // Stable like onSelect, resolved through the same refs. Grouped material
   // rows have no star slot, so only file-backed rows land here.
@@ -380,6 +413,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         focused={multiSelect && it.key === selectedPath}
                         onSelect={onSelect}
                         onContextMenu={onRowContextMenu}
+                        onDragOut={onRowDragOut}
                       />
                     ) : (
                       <FileRow
@@ -398,6 +432,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         playing={false}
                         onSelect={onSelect}
                         onContextMenu={onRowContextMenu}
+                        onDragOut={onRowDragOut}
                       />
                     )
                   ) : (
@@ -419,6 +454,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                       playing={kind === "audio" && playing && file!.path === currentPath}
                       onSelect={onSelect}
                       onContextMenu={onRowContextMenu}
+                      onDragOut={onRowDragOut}
                       onHoverStart={kind === "audio" && hoverPreview ? onRowHoverStart : undefined}
                       onHoverEnd={kind === "audio" && hoverPreview ? onRowHoverEnd : undefined}
                     />
@@ -461,12 +497,38 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                 });
               },
             },
+            // Textures only, single-target like Show in Explorer — the OS
+            // clipboard holds one image. HDR/EXR land tone-mapped (as shown).
+            ...(kind === "texture"
+              ? [
+                  {
+                    label: "Copy image",
+                    icon: ImageIcon,
+                    onClick: () => {
+                      copyImageToClipboard(menu.file.path).catch((err: unknown) => {
+                        console.warn("copy_image_to_clipboard failed", err);
+                      });
+                    },
+                  },
+                ]
+              : []),
             {
               // Whole selection, like Copy paths (materials expand to members).
               label: menu.count > 1 ? `Add to collection… (${menu.count})` : "Add to collection…",
               icon: BookmarkPlus,
               onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
             },
+            // One entry per registered app of this kind (External apps…),
+            // single-target: an editor opens one document, not a selection.
+            ...appsForKind(externalApps, kind).map((a) => ({
+              label: `Open with ${a.name}`,
+              icon: ExternalLink,
+              onClick: () => {
+                openWith(a.exe, menu.file.path).catch((err: unknown) => {
+                  console.error("open_with failed", err);
+                });
+              },
+            })),
             // Only while browsing a user collection — the one place "remove"
             // has an unambiguous target. Favorites/Recent are not collections.
             ...(collectionScope !== null && collectionScope.startsWith("col:")

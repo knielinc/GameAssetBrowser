@@ -8,6 +8,7 @@ import TabPane from "./components/TabPane";
 import PlayerBar from "./components/player/PlayerBar";
 import { useSidebarWidth } from "./hooks/useSidebarWidth";
 import { useWindowFullscreen } from "./hooks/useWindowFullscreen";
+import { useExternalDrop } from "./hooks/useExternalDrop";
 import { addFolders, useLibraryStore } from "./stores/libraryStore";
 import { usePanelPrefs } from "./stores/panelPrefs";
 
@@ -16,6 +17,8 @@ export default function App(): ReactElement {
   // F11 = OS window fullscreen for the whole app. Distinct from Space, which
   // opens an in-app overlay for one asset; the two compose.
   useWindowFullscreen();
+  // External drag hovering the window → the drop-to-add-root overlay below.
+  const dropHover = useExternalDrop();
   const hasRoots = useLibraryStore((s) => s.roots.length > 0);
   const activeTab = useLibraryStore((s) => s.activeTab);
   const leftOpen = usePanelPrefs((s) => s.left);
@@ -60,6 +63,18 @@ export default function App(): ReactElement {
           would mean audible-but-uncontrollable playback — switchTab() pauses
           on the way out to keep that honest. */}
       {activeTab === "audio" && <PlayerBar />}
+      {/* Drop-to-add-root. pointer-events-none: the OS drives the drag, and
+          the native drop event carries the paths — the overlay is pure
+          feedback and must not swallow anything. */}
+      {dropHover && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-bg/75 p-8">
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent">
+            <FolderPlus size={28} className="text-accent" />
+            <p className="text-sm text-text">Drop to add folder to library</p>
+            <p className="text-xs text-dim">Files are ignored — folders become library roots</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

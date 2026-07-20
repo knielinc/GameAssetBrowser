@@ -97,6 +97,9 @@ export interface FileRowProps {
   /** Carries the click event so the pane can read Ctrl/Shift modifiers. */
   onSelect: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  /** Mousedown that may become a native drag-out (see dragOut.armDragOut) —
+   *  under the movement threshold the press stays a plain click. */
+  onDragOut?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   /** Hover-preview dwell (audio list, only when the setting is on). The enter
    *  handler gets the event so the pane can ignore hovers mid-drag. */
   onHoverStart?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
@@ -119,6 +122,7 @@ function FileRowInner({
   playing,
   onSelect,
   onContextMenu,
+  onDragOut,
   onHoverStart,
   onHoverEnd,
 }: FileRowProps): ReactElement {
@@ -131,6 +135,7 @@ function FileRowInner({
         focused && "row-focused",
       )}
       onClick={(e) => onSelect(index, e)}
+      onMouseDown={onDragOut === undefined ? undefined : (e) => onDragOut(index, e)}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(index, e);
@@ -207,6 +212,8 @@ export interface MaterialRowProps {
   focused: boolean;
   onSelect: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  /** See FileRowProps.onDragOut — a material drags all of its member maps. */
+  onDragOut?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
 }
 
 /** A grouped material as a single list row: the name column carries a layers
@@ -220,6 +227,7 @@ function MaterialRowInner({
   focused,
   onSelect,
   onContextMenu,
+  onDragOut,
 }: MaterialRowProps): ReactElement {
   let size = 0;
   let modified = 0;
@@ -237,6 +245,7 @@ function MaterialRowInner({
         focused && "row-focused",
       )}
       onClick={(e) => onSelect(index, e)}
+      onMouseDown={onDragOut === undefined ? undefined : (e) => onDragOut(index, e)}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(index, e);

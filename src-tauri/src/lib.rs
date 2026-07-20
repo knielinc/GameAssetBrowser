@@ -14,6 +14,7 @@ mod types;
 mod watcher;
 mod waveform;
 mod winmode;
+mod workflow;
 
 use audio::{AudioController, PlayerCmd};
 use tauri::Manager;
@@ -94,6 +95,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        // Native drag-OUT (grid cells / rows → Explorer, DAWs, engines): the
+        // webview cannot start an OS drag carrying real file paths itself.
+        // Needs "drag:default" in capabilities/default.json.
+        .plugin(tauri_plugin_drag::init())
         .manage(AudioController::new(tx))
         .manage(scanner::ScanState::default())
         .manage(watcher::WatcherState::default())
@@ -282,6 +287,9 @@ pub fn run() {
             dupes::cancel_duplicates,
             explorer::show_in_explorer,
             explorer::open_in_explorer,
+            workflow::filter_dirs,
+            workflow::copy_image_to_clipboard,
+            workflow::open_with,
             audio::commands::player_load,
             audio::commands::player_play,
             audio::commands::player_pause,

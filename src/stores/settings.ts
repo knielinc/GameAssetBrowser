@@ -17,6 +17,7 @@ import {
   type ColorBucket,
   type SampleRateBucket,
   type CollectionSettings,
+  type ExternalAppSettings,
   type RecentSettings,
   type RangeFilter,
   type Settings,
@@ -35,6 +36,7 @@ import {
 } from "../ipc/commands";
 import { defaultTabs, rescanRoots, useLibraryStore, type TabState } from "./libraryStore";
 import { useAtlasStore } from "./atlasStore";
+import { useExternalAppsStore } from "./externalApps";
 import { RECENTS_CAP, useFavoritesStore } from "./favoritesStore";
 import { usePlayerStore } from "./playerStore";
 
@@ -86,6 +88,7 @@ export const DEFAULT_SETTINGS: Settings = {
   favorites: [],
   collections: [],
   recents: [],
+  externalApps: [],
 };
 
 const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
@@ -250,7 +253,23 @@ export function sanitize(raw: unknown): Settings {
     favorites: [...new Set(strArray(v2.favorites, d.favorites))],
     collections: sanitizeCollections(v2.collections),
     recents: sanitizeRecents(v2.recents),
+    externalApps: sanitizeExternalApps(v2.externalApps),
   };
+}
+
+/** Entries need a valid kind, a non-empty name, and a non-empty exe path —
+ *  anything else is dropped, the sanitizer stays total. */
+function sanitizeExternalApps(raw: unknown): ExternalAppSettings[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ExternalAppSettings[] = [];
+  for (const v of raw) {
+    if (!isObj(v)) continue;
+    if (typeof v.kind !== "string" || !(ASSET_KINDS as readonly string[]).includes(v.kind)) continue;
+    if (typeof v.name !== "string" || v.name.trim() === "") continue;
+    if (typeof v.exe !== "string" || v.exe === "") continue;
+    out.push({ kind: v.kind as AssetKind, name: v.name, exe: v.exe });
+  }
+  return out;
 }
 
 /** Entries need a non-empty string name (deduped, first wins) and a string
@@ -346,6 +365,7 @@ function currentSettings(): Settings {
     favorites: [...fav.favorites],
     collections: fav.collections.map((c) => ({ name: c.name, paths: [...c.paths] })),
     recents: fav.recents.map((r) => ({ ...r })),
+    externalApps: useExternalAppsStore.getState().apps.map((a) => ({ ...a })),
   };
 }
 
@@ -403,6 +423,11 @@ function installSubscriptions(): void {
     ) {
       saveSettings();
     }
+  });
+
+  // Same fresh-identity contract as the favorites store above.
+  useExternalAppsStore.subscribe((state, prev) => {
+    if (state.apps !== prev.apps) saveSettings();
   });
 
   usePlayerStore.subscribe((state, prev) => {
@@ -484,6 +509,7 @@ function applySettings(settings: Settings): void {
   useFavoritesStore
     .getState()
     .hydrate(settings.favorites, settings.collections, settings.recents);
+  useExternalAppsStore.getState().hydrate(settings.externalApps);
   usePlayerStore.setState({
     volume: settings.volume,
     loop: settings.loop,

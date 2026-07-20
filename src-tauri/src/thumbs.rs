@@ -265,6 +265,7 @@ fn analyze(img: &DynamicImage) -> ThumbInfo {
 }
 
 /// Tone-map a floating-point image down to 8-bit.
+/// (`pub(crate)`: workflow.rs's "Copy image" shares this decode pipeline.)
 ///
 /// `.hdr` decodes to Rgb32F and `.exr` to Rgba32F, and the PNG encoder cannot
 /// write either — it returns Unsupported, the thumbnail is never written, and
@@ -276,7 +277,7 @@ fn analyze(img: &DynamicImage) -> ThumbInfo {
 /// whole range into [0,1] first, then gamma-encodes — the same shape of
 /// tone-mapping the 3D viewport applies, so an HDRI's thumbnail resembles what
 /// you get when you open it.
-fn to_ldr(img: DynamicImage) -> DynamicImage {
+pub(crate) fn to_ldr(img: DynamicImage) -> DynamicImage {
     match img {
         DynamicImage::ImageRgb32F(_) | DynamicImage::ImageRgba32F(_) => {
             let src = img.to_rgba32f();
@@ -304,7 +305,7 @@ fn to_ldr(img: DynamicImage) -> DynamicImage {
 /// Decode an image, retrying WebP through libwebp. The pure-Rust `image` WebP
 /// decoder rejects some extended/animated WebP ("Invalid Chunk header") that
 /// libwebp decodes fine; other formats go straight through `image`.
-fn decode_image(p: &Path) -> Result<DynamicImage, String> {
+pub(crate) fn decode_image(p: &Path) -> Result<DynamicImage, String> {
     match image::open(p) {
         Ok(img) => Ok(img),
         Err(e) => {

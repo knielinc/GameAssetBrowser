@@ -14,6 +14,9 @@
 //   request_spectrogram { path: string }                // result arrives via EVT.SPECTROGRAM_READY
 //   show_in_explorer    { path: string }                // reveal file in Windows Explorer; rejects if path is gone
 //   open_in_explorer    { path: string }                // open a folder window in Explorer; rejects if not a directory
+//   filter_dirs         { paths: string[] }             → Promise<string[]> (only the paths that are directories)
+//   copy_image_to_clipboard { path: string }            // decode to RGBA and put on the OS clipboard; rejects on failure
+//   open_with           { exe: string, path: string }   // spawn a registered external app, detached; rejects on spawn error
 //   settings_store_path {}                              → Promise<string> (absolute settings.json path, portable-aware)
 
 /** Which lens (tab) a scanned file belongs to. */
@@ -324,6 +327,14 @@ export interface RecentSettings {
   ts: number;
 }
 
+/** One user-registered external app ("Open with…" — stores/externalApps.ts).
+ *  `kind` gates which context menus offer it; `exe` is the absolute path. */
+export interface ExternalAppSettings {
+  kind: AssetKind;
+  name: string;
+  exe: string;
+}
+
 export interface Settings {
   version: 2;
   roots: string[];
@@ -352,4 +363,7 @@ export interface Settings {
   /** Recently played/previewed files, most-recent-first, capped (see
    *  favoritesStore.RECENTS_CAP). */
   recents: RecentSettings[];
+  /** "Open with…" apps (SettingsMenu → External apps…). Absent pre-feature →
+   *  empty. */
+  externalApps: ExternalAppSettings[];
 }

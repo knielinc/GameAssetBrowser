@@ -4,8 +4,10 @@ import {
   BookmarkMinus,
   BookmarkPlus,
   Copy,
+  ExternalLink,
   FolderOpen,
   FolderTree as FolderTreeIcon,
+  Image as ImageIcon,
   Loader2,
 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
@@ -18,8 +20,10 @@ import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "..
 import { useFavoritesStore } from "../stores/favoritesStore";
 import { audioVisibleRef } from "../stores/playerStore";
 import { publishShuffleSource } from "../stores/shuffle";
-import { showInExplorer } from "../ipc/commands";
+import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
 import { revealInNavigator } from "../stores/revealFolder";
+import { appsForKind, useExternalAppsStore } from "../stores/externalApps";
+import { armDragOut } from "../dragOut";
 import type { AssetKind } from "../types";
 import CollectionPopup from "./CollectionPopup";
 import FileList, { selectionFilePaths } from "./FileList";
@@ -141,6 +145,8 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   // "Add to collection…" chooser, anchored where the context menu was.
   const [colPopup, setColPopup] = useState<{ x: number; y: number; paths: string[] } | null>(null);
   const collectionScope = useLibraryStore((s) => s.collectionScope);
+  // "Open with…" targets for this kind (SettingsMenu → External apps…).
+  const externalApps = useExternalAppsStore((s) => s.apps);
   // Inspector show/hide is shared with the TabBar toggle; its width is a
   // user-dragged right-anchored panel, just like the left sidebar.
   const inspectorOpen = usePanelPrefs((s) => s.right);
@@ -199,6 +205,25 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     },
     [visible, visibleKeys, select, toggleSelect, rangeSelect, kind],
   );
+  // Drag-out: a press that travels past the threshold becomes a native OS
+  // file drag. Paths resolve lazily AT the threshold — the full selection when
+  // the pressed cell is part of it, else just that cell. Under the threshold
+  // the press stays a plain click/select.
+  const onCellDragOut = useCallback(
+    (index: number, e: MouseEvent<HTMLDivElement>) => {
+      const file = visible[index];
+      if (!file) return;
+      armDragOut(e, () => {
+        const sel = useLibraryStore.getState().tabs[kind].selectedPaths;
+        if (sel.has(file.path)) {
+          const paths = selectionFilePaths(sel, visible);
+          if (paths.length > 0) return paths;
+        }
+        return [file.path];
+      });
+    },
+    [visible, kind],
+  );
   const onCellContextMenu = useCallback(
     (index: number, e: MouseEvent<HTMLDivElement>) => {
       const file = visible[index];
@@ -236,6 +261,24 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
       }
     },
     [grouped, visibleKeys, select, toggleSelect, rangeSelect, kind],
+  );
+  // Grouped twin of onCellDragOut: a MaterialCell drags every member map.
+  const onGroupDragOut = useCallback(
+    (index: number, e: MouseEvent<HTMLDivElement>) => {
+      const it = grouped?.[index];
+      if (it === undefined) return;
+      armDragOut(e, () => {
+        const sel = useLibraryStore.getState().tabs[kind].selectedPaths;
+        if (sel.has(it.key)) {
+          const paths = selectionFilePaths(sel, visible, grouped ?? undefined);
+          if (paths.length > 0) return paths;
+        }
+        return it.kind === "material"
+          ? it.material.members.map((m) => m.file.path)
+          : [it.file.path];
+      });
+    },
+    [grouped, visible, kind],
   );
   const onGroupContextMenu = useCallback(
     (index: number, e: MouseEvent<HTMLDivElement>) => {
@@ -322,6 +365,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         selectedIndex={tab.selectedIndex}
         onSelect={onGroupSelect}
         onContextMenu={onGroupContextMenu}
+        onCellMouseDown={onGroupDragOut}
         onVisibleRange={onGroupedRange}
         glThumbs={glThumbs}
         renderCell={(it) =>
@@ -351,6 +395,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         selectedIndex={tab.selectedIndex}
         onSelect={onCellSelect}
         onContextMenu={onCellContextMenu}
+        onCellMouseDown={onCellDragOut}
         onVisibleRange={onVisibleRange}
         glThumbs={glThumbs}
         renderCell={(f) =>
@@ -471,12 +516,38 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
                 });
               },
             },
+            // Textures only, single-target like Show in Explorer — the OS
+            // clipboard holds one image. A material offers its face file.
+            ...(kind === "texture"
+              ? [
+                  {
+                    label: "Copy image",
+                    icon: ImageIcon,
+                    onClick: () => {
+                      copyImageToClipboard(menu.file.path).catch((err: unknown) => {
+                        console.warn("copy_image_to_clipboard failed", err);
+                      });
+                    },
+                  },
+                ]
+              : []),
             {
               // Whole selection, like Copy paths (materials expand to members).
               label: menu.count > 1 ? `Add to collection… (${menu.count})` : "Add to collection…",
               icon: BookmarkPlus,
               onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
             },
+            // One entry per registered app of this kind (External apps…),
+            // single-target: an editor opens one document, not a selection.
+            ...appsForKind(externalApps, kind).map((a) => ({
+              label: `Open with ${a.name}`,
+              icon: ExternalLink,
+              onClick: () => {
+                openWith(a.exe, menu.file.path).catch((err: unknown) => {
+                  console.error("open_with failed", err);
+                });
+              },
+            })),
             // Only while browsing a user collection — the one place "remove"
             // has an unambiguous target. Favorites/Recent are not collections.
             ...(collectionScope !== null && collectionScope.startsWith("col:")
