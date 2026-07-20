@@ -13,6 +13,13 @@ mod thumbs;
 mod types;
 mod watcher;
 mod waveform;
+// winmode is Win32-only (tao maximize/fullscreen bug workaround). Off Windows a
+// same-named stub keeps `winmode::set_fullscreen_smooth` — and the invoke
+// contract — identical without the module having to compile the `windows` crate.
+#[cfg(windows)]
+mod winmode;
+#[cfg(not(windows))]
+#[path = "winmode_stub.rs"]
 mod winmode;
 mod workflow;
 
@@ -22,17 +29,23 @@ use tauri::Manager;
 /// Read a model (or one of its sibling textures / .bin chunks) for the
 /// `model://` scheme.
 ///
-/// The URL path is `/C:/Pack/model.gltf`. WebView2 has already normalized any
-/// `../` because it is a real HTTP URL, but the scope check is what actually
-/// matters: without it a crafted glTF could reference
-/// `../../../../Windows/System32/config/SAM` and exfiltrate it. Only paths
-/// inside a root the user explicitly picked are served.
+/// The URL path is `/C:/Pack/model.gltf` (Windows) or `/home/u/Pack/model.gltf`
+/// (Unix). The scope check is what actually matters for safety: without it a
+/// crafted glTF could reference `../../../../etc/shadow` and exfiltrate it. Only
+/// paths inside a root the user explicitly picked are served (is_within_roots
+/// canonicalizes, resolving any `../` before the prefix test).
 fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<(Vec<u8>, &'static str)> {
     let decoded = percent_decode(uri_path.trim_start_matches('/'));
     if decoded.is_empty() {
         return None;
     }
+    // The URL carries "/"-separated paths with the leading slash stripped. On
+    // Windows rebuild "C:/Pack/x" -> "C:\Pack\x"; on Unix re-add the root that
+    // trim_start_matches('/') removed ("home/u/x" -> "/home/u/x").
+    #[cfg(windows)]
     let path = std::path::PathBuf::from(decoded.replace('/', "\\"));
+    #[cfg(not(windows))]
+    let path = std::path::PathBuf::from(format!("/{decoded}"));
     if !scanner::is_within_roots(app, &path) {
         eprintln!("[model] refused out-of-scope read: {}", path.display());
         return None;
@@ -235,8 +248,10 @@ pub fn run() {
 
             let data_home = portable::resolve(app)?;
             portable::migrate_legacy_settings(app, &data_home);
-            // Redirecting the WebView2 profile only applies to portable
-            // copies; installed copies keep tauri's %LOCALAPPDATA% default.
+            // Redirecting the WebView2 profile only applies to portable copies
+            // on Windows; installed copies keep tauri's %LOCALAPPDATA% default,
+            // and data_directory() is a WebView2 concept, so it's Windows-only.
+            #[cfg(windows)]
             let webview_dir = data_home.is_portable().then(|| data_home.webview_dir());
             // Thumbnails are cached in RAM only — nothing is written to disk.
             // Delete any on-disk cache a previous build left behind. Managed
@@ -252,6 +267,8 @@ pub fn run() {
             // folder at the portable data home. Keep EXACT parity with the
             // old config (title/size/theme/background); the label must stay
             // "main" (capabilities/default.json and the frontend assume it).
+            // `mut` is used only by the Windows data_directory redirect below.
+            #[cfg_attr(not(windows), allow(unused_mut))]
             let mut window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                     .title("Game Asset Browser")
@@ -263,6 +280,7 @@ pub fn run() {
                     .decorations(false)
                     .theme(Some(tauri::Theme::Dark))
                     .background_color(tauri::webview::Color(0x0a, 0x0a, 0x0f, 0xff));
+            #[cfg(windows)]
             if let Some(dir) = webview_dir {
                 window = window.data_directory(dir);
             }

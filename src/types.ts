@@ -19,6 +19,8 @@
 //   open_with           { exe: string, path: string }   // spawn a registered external app, detached; rejects on spawn error
 //   settings_store_path {}                              → Promise<string> (absolute settings.json path, portable-aware)
 
+import { schemeBase } from "./platform";
+
 /** Which lens (tab) a scanned file belongs to. */
 export type AssetKind = "audio" | "texture" | "model";
 export const ASSET_KINDS = ["audio", "texture", "model"] as const;
@@ -143,16 +145,17 @@ export interface ThumbBatch {
   entries: [id: number, info: ThumbInfo, key: string][];
 }
 
-/** Thumbnails are fetched by WebView2 over their own scheme, off the JS main
- *  thread. On Windows a custom scheme resolves as http://<name>.localhost. */
+/** Thumbnails are fetched by the webview over their own scheme, off the JS main
+ *  thread. The base differs per platform (see schemeBase); the key is opaque
+ *  and single-segment, so it slots straight in. */
 export function thumbUrl(key: string): string {
-  return `http://thumb.localhost/${key}`;
+  return `${schemeBase("thumb")}/${key}`;
 }
 
 /** Raw RGBA for the WebGL grid: `[u32 w][u32 h][rgba]`. Uploaded straight to
  *  the GPU atlas — no PNG decode. Served by the `tex://` scheme. */
 export function texUrl(key: string): string {
-  return `http://tex.localhost/${key}`;
+  return `${schemeBase("tex")}/${key}`;
 }
 
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4a"] as const;

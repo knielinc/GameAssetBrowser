@@ -93,7 +93,13 @@ pub fn preview_png(app: &AppHandle, decoded_path: &str) -> Option<Vec<u8>> {
     if decoded_path.is_empty() {
         return None;
     }
+    // Same "/"-separated, leading-slash-stripped shape as model://: on Windows
+    // rebuild "C:/Pack/x" -> "C:\Pack\x"; on Unix re-add the root the scheme
+    // handler's trim_start_matches('/') removed.
+    #[cfg(windows)]
     let path = std::path::PathBuf::from(decoded_path.replace('/', "\\"));
+    #[cfg(not(windows))]
+    let path = std::path::PathBuf::from(format!("/{decoded_path}"));
     if !crate::scanner::is_within_roots(app, &path) {
         eprintln!("[preview] refused out-of-scope read: {}", path.display());
         return None;

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { IS_WINDOWS } from "../platform";
 
 /**
  * F11 toggles the OS window fullscreen for the whole application.
@@ -25,11 +26,20 @@ const win = getCurrentWindow();
 // bit around the fullscreen change natively and without intermediate window
 // geometry, so the transition is a single resize instead of a flash through
 // the restored window. This flag remembers where fullscreen was entered from.
+//
+// That whole dance is a Windows/tao bug workaround; macOS (WKWebView) and Linux
+// (webkit2gtk) don't have it, and winmode.rs doesn't compile there, so off
+// Windows we drive the standard tao window APIs directly.
 let remaximizeOnExit = false;
 
 /** Toggle real OS fullscreen (covers the taskbar). */
 export async function toggleWindowFullscreen(): Promise<void> {
-  if (await win.isFullscreen()) {
+  const isFullscreen = await win.isFullscreen();
+  if (!IS_WINDOWS) {
+    await win.setFullscreen(!isFullscreen);
+    return;
+  }
+  if (isFullscreen) {
     const remaximize = remaximizeOnExit;
     remaximizeOnExit = false;
     await invoke("set_fullscreen_smooth", { on: false, remaximize });
@@ -46,6 +56,11 @@ export async function toggleWindowMaximize(): Promise<void> {
   // Maximize pressed while fullscreen means "back to a normal window, but
   // big": leave fullscreen straight into the maximized state.
   if (await win.isFullscreen()) {
+    if (!IS_WINDOWS) {
+      await win.setFullscreen(false);
+      await win.maximize();
+      return;
+    }
     remaximizeOnExit = false;
     await invoke("set_fullscreen_smooth", { on: false, remaximize: true });
     return;

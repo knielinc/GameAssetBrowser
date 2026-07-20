@@ -1,4 +1,5 @@
 import type { AnimationClip, Group, Object3D } from "three";
+import { schemeBase } from "../platform";
 
 /**
  * Local model files, loaded into the webview over our own `model://` scheme.
@@ -9,22 +10,29 @@ import type { AnimationClip, Group, Object3D } from "three";
  * `http://asset.localhost/` — so every sibling texture and .bin chunk resolves
  * to garbage. OBJ+MTL and glTF would load silently untextured, with no error.
  *
- * Our scheme lets us choose the shape: `http://model.localhost/C:/Pack/m.gltf`
- * is slash-separated, so three's relative join works untouched, and WebView2
- * normalizes `../` for us because it is a real HTTP URL. No vfs prefix, no
- * setURLModifier.
+ * Our scheme lets us choose the shape: `.../model.localhost/C:/Pack/m.gltf` is
+ * slash-separated, so three's relative join works untouched, and the webview
+ * normalizes `../` for us. No vfs prefix, no setURLModifier. The scheme BASE
+ * differs per platform (http://model.localhost on Windows, model://localhost
+ * elsewhere — see schemeBase).
  */
+function schemePath(path: string): string {
+  // "\" → "/" (Windows paths), then strip a leading "/" so `base + "/" + path`
+  // never double-slashes: Unix absolute paths start with "/", and the Rust
+  // handler re-adds that root. encodeURI (not encodeURIComponent) leaves "/"
+  // and ":" literal, which is exactly what keeps the path multi-segment.
+  return encodeURI(path.replace(/\\/g, "/").replace(/^\//, ""));
+}
+
 export function modelUrl(path: string): string {
-  // encodeURI (not encodeURIComponent) — it leaves `/` and `:` alone, which is
-  // exactly what keeps the path multi-segment.
-  return `http://model.localhost/${encodeURI(path.replace(/\\/g, "/"))}`;
+  return `${schemeBase("model")}/${schemePath(path)}`;
 }
 
 /** Full-resolution preview of a texture the browser can't decode (HDR/EXR/DDS/
  *  TGA/…), decoded + tone-mapped to a PNG in Rust. Same URL shape as modelUrl;
  *  browser-decodable formats should use modelUrl (native res, no re-encode). */
 export function previewUrl(path: string): string {
-  return `http://preview.localhost/${encodeURI(path.replace(/\\/g, "/"))}`;
+  return `${schemeBase("preview")}/${schemePath(path)}`;
 }
 
 /** Formats the browser decodes natively — served as the ORIGINAL file at full
