@@ -3,13 +3,13 @@
 #
 # "Standalone" = the raw release binary, which runs in portable mode (it keeps
 # its data in a GameAssetBrowser.data folder beside itself), so a single .exe is
-# genuinely all you need. Renamed from the crate's lowercase game-file-browser.exe
-# to GameAssetBrowser.exe so the file the user double-clicks matches the product.
+# genuinely all you need. tauri build emits "Game Asset Browser.exe" (mainBinaryName);
+# we copy it to GameAssetBrowser.exe (no spaces) for a cleaner portable filename.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $exportDir = Join-Path $root "export"
-$builtExe = Join-Path $root "src-tauri\target\release\game-file-browser.exe"
+$builtExe = Join-Path $root "src-tauri\target\release\Game Asset Browser.exe"
 
 Write-Host "Building release (this takes a couple of minutes)..." -ForegroundColor Cyan
 Push-Location $root
