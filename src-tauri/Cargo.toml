@@ -84,6 +84,9 @@ symphonia = { version = "0.5", default-features = false, features = [
     "alac",
 ] }
 walkdir = "2.5"
+# Filesystem watcher (watcher.rs) driving the auto-rescan. Debounce is a small
+# manual thread on our own crossbeam channel — no debouncer crate needed.
+notify = "8"
 crossbeam-channel = "0.5"
 rayon = "1.10"
 lru = "0.12"

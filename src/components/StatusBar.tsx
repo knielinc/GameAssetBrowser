@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useMemo, type ReactElement } from "react";
 import { Loader2 } from "lucide-react";
 import { activeFilterCount, basename, facetActive, useLibraryStore, type TabFilters } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
@@ -59,6 +59,21 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
       ? `${info.sourceWidth.toLocaleString()} × ${info.sourceHeight.toLocaleString()}`
       : null;
 
+  // Multi-selection readout: `N selected · total size`. The size sum is one
+  // pass over allFiles, memoized on the Set's identity (every selection action
+  // builds a fresh Set). In the grouped texture view material keys are no file
+  // paths and contribute no bytes — the count still reflects selected items.
+  const selectedPaths = useLibraryStore((s) => s.tabs[kind].selectedPaths);
+  const selCount = selectedPaths.size;
+  const selBytes = useMemo(() => {
+    if (selectedPaths.size < 2) return 0;
+    let sum = 0;
+    for (const f of useLibraryStore.getState().allFiles) {
+      if (selectedPaths.has(f.path)) sum += f.size;
+    }
+    return sum;
+  }, [selectedPaths]);
+
   // Denominator = files OF THIS KIND in the current scope (minus hidden), so
   // "N / M" reads "visible after filters / total of this kind in what I'm
   // looking at". (Per-kind here, while pruneFolders in libraryStore keeps a
@@ -80,6 +95,11 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
       <span className="tabular-nums">
         {visibleCount.toLocaleString()} / {scopeCount.toLocaleString()} {NOUN[kind]}
       </span>
+      {selCount > 1 && (
+        <span className="tabular-nums text-text">
+          {selCount.toLocaleString()} selected · {humanSize(selBytes)}
+        </span>
+      )}
       {activeFilterCount(kind, { filters, extFilter }) > 0 && (
         <span className="text-accent" title={facetSummary(kind, filters, extFilter)}>
           · filtered

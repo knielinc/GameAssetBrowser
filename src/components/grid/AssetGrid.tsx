@@ -24,7 +24,8 @@ export interface AssetGridProps<T> {
   getKey: (item: T) => string;
   renderCell: (item: T, index: number) => ReactNode;
   selectedIndex: number;
-  onSelect: (index: number) => void;
+  /** Carries the click event so the pane can read Ctrl/Shift modifiers. */
+  onSelect: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   /** Flat [start, end) item range currently rendered (incl. overscan). Drives
    *  lazy thumbnail requests — decoding 2000 textures eagerly is not an
@@ -197,7 +198,7 @@ export default function AssetGrid<T>({
                   <div
                     key={getKey(item)}
                     data-selected={index === selectedIndex || undefined}
-                    onClick={() => onSelect(index)}
+                    onClick={(e) => onSelect(index, e)}
                     onContextMenu={(e) => handleContext(index, e)}
                   >
                     {renderCell(item, index)}

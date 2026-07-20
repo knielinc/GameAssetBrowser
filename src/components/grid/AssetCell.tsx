@@ -14,6 +14,9 @@ export interface AssetCellProps {
   sub?: ReactNode;
   badges?: Badge[];
   selected: boolean;
+  /** Keyboard cursor while a multi-selection exists — inset accent ring on top
+   *  of (or without) the membership styling. Omitted/false in single-select. */
+  focused?: boolean;
   /** The thumbnail area. Falls back to a format-lettered placeholder. */
   children?: ReactNode;
   /** Alpha checkerboard behind the thumb — cutout foliage on a dark panel
@@ -36,6 +39,7 @@ function AssetCellInner({
   sub,
   badges,
   selected,
+  focused,
   children,
   checker,
   thumbKey,
@@ -61,6 +65,8 @@ function AssetCellInner({
             ? "shadow-sel"
             : "bg-accent/8 shadow-sel"
           : "shadow-e1 group-hover:shadow-e2",
+        // outline-based, so it stacks on the box-shadow styling above.
+        focused === true && "cell-focused",
       )}
     >
       <div

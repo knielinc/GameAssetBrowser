@@ -39,11 +39,16 @@ const AUTOPLAY_DEBOUNCE_MS = 60;
  *   ←/→        seek ±2 s (audio list) · move ∓1 cell (grid)
  *   Space      play/pause · Enter replay · L loop
  *   Ctrl+1/2/3 switch tab
+ *   Ctrl+A     select all visible · Escape collapse multi-selection
  */
 export function useKeyboardShortcuts(
   kind: AssetKind,
   visible: LibFile[],
   onPreview?: (file: LibFile) => void,
+  /** Key order of what is actually rendered — in the grouped texture view the
+   *  items are materials whose keys are no file paths, so Ctrl+A cannot derive
+   *  them from `visible`. Falls back to the flat paths when omitted. */
+  visibleKeys?: readonly string[],
 ): void {
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -51,6 +56,8 @@ export function useKeyboardShortcuts(
   kindRef.current = kind;
   const previewRef = useRef(onPreview);
   previewRef.current = onPreview;
+  const keysRef = useRef(visibleKeys);
+  keysRef.current = visibleKeys;
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -67,6 +74,15 @@ export function useKeyboardShortcuts(
         e.preventDefault();
         const next = ASSET_KINDS[Number(e.code.slice(-1)) - 1];
         if (next !== undefined) switchTab(next);
+        return;
+      }
+      // Ctrl+A — select every visible item. Checked before the generic
+      // modifier bail; input/textarea targets already returned above, so
+      // native select-all in the search box keeps working.
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && e.code === "KeyA") {
+        e.preventDefault();
+        const keys = keysRef.current ?? visibleRef.current.map((f) => f.path);
+        useLibraryStore.getState().selectAll(kindRef.current, keys);
         return;
       }
       if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -158,6 +174,18 @@ export function useKeyboardShortcuts(
         case "KeyL": {
           if (!isAudio) return;
           usePlayerStore.getState().toggleLoop();
+          break;
+        }
+
+        case "Escape": {
+          // Collapse the multi-selection to the focused item. Guarded on a
+          // real multi-selection and no preventDefault — Escape also closes
+          // previews/menus via their own listeners, and those must keep
+          // working unchanged.
+          const t = useLibraryStore.getState().tabs[activeKind];
+          if (t.selectedPaths.size > 1) {
+            useLibraryStore.getState().collapseSelection(activeKind);
+          }
           break;
         }
       }

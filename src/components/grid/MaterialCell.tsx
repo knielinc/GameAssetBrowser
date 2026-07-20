@@ -9,6 +9,8 @@ import type { Material } from "../../material/classify";
 export interface MaterialCellProps {
   material: Material;
   selected: boolean;
+  /** See AssetCellProps.focused (multi-select keyboard cursor ring). */
+  focused?: boolean;
 }
 
 /** Packed maps carry three channels at once — show them after the strip. */
@@ -38,7 +40,11 @@ const CH_CLS: Partial<Record<Channel, string>> = {
  * metadata line. The strip is the useful one — `BC N R —` tells you the AO map
  * is missing before you click.
  */
-export default function MaterialCell({ material, selected }: MaterialCellProps): ReactElement {
+export default function MaterialCell({
+  material,
+  selected,
+  focused,
+}: MaterialCellProps): ReactElement {
   // Face = base color if present, else whatever we have.
   const face = material.channels.get("baseColor") ?? material.members[0]!;
   const { src, imgKey, onError, onLoad } = useThumbSrc(face.file);
@@ -62,6 +68,8 @@ export default function MaterialCell({ material, selected }: MaterialCellProps):
         className={clsx(
           "relative overflow-hidden rounded-lg bg-panel transition-[box-shadow] duration-200 ease-spring",
           selected ? "bg-accent/8 shadow-sel" : "shadow-e1 group-hover:shadow-e2",
+          // outline-based, so it stacks on the box-shadow styling above.
+          focused === true && "cell-focused",
         )}
       >
         <div className="alpha-checker relative aspect-square w-full overflow-hidden">

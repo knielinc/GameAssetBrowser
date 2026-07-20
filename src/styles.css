@@ -134,6 +134,18 @@ textarea {
   background: color-mix(in srgb, var(--color-accent) 16%, transparent);
 }
 
+/* Multi-select: membership uses the normal selected styling; the focused item
+   (keyboard cursor / range endpoint) additionally carries this inset ring so
+   focus and membership stay visually distinct. Panes apply it only while a
+   multi-selection exists, so the everyday single selection looks unchanged.
+   outline (not box-shadow) so it stacks cleanly on row-selected/shadow-sel,
+   and it follows border-radius in Chromium. */
+.file-row.row-focused,
+.cell-focused {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
 /* Sidebar resize handle: an invisible 6px hit strip straddling the
    sidebar/main boundary (negative margins keep it out of the flex flow).
    Hover or an active drag fades in a 1px accent line over the panel border —

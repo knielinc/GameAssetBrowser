@@ -9,13 +9,15 @@ import AssetCell, { type Badge } from "./AssetCell";
 export interface ModelCellProps {
   file: LibFile;
   selected: boolean;
+  /** See AssetCellProps.focused. */
+  focused?: boolean;
 }
 
 /** Scanned and listed, but no viable loader exists — say so rather than
  *  letting the file vanish from a folder the user knows has models in it. */
 export const UNPREVIEWABLE = new Set(["blend", "3ds"]);
 
-export default function ModelCell({ file, selected }: ModelCellProps): ReactElement {
+export default function ModelCell({ file, selected, focused }: ModelCellProps): ReactElement {
   useLibraryStore((s) => s.thumbsVersion);
   const thumb = useLibraryStore.getState().thumbs.get(file.id);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
@@ -27,7 +29,13 @@ export default function ModelCell({ file, selected }: ModelCellProps): ReactElem
   }
 
   return (
-    <AssetCell name={file.name} sub={humanSize(file.size)} badges={badges} selected={selected}>
+    <AssetCell
+      name={file.name}
+      sub={humanSize(file.size)}
+      badges={badges}
+      selected={selected}
+      focused={focused}
+    >
       <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-[#15151d] to-[#0c0c12]">
         {thumb !== undefined ? (
           // A rendered thumbnail is a plain <img> — the grid holds no WebGL

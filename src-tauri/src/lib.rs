@@ -1,5 +1,6 @@
 mod audio;
 mod explorer;
+mod index;
 mod metadata;
 mod modeltex;
 mod portable;
@@ -8,6 +9,7 @@ mod texmeta;
 mod thumbcache;
 mod thumbs;
 mod types;
+mod watcher;
 mod waveform;
 mod winmode;
 
@@ -92,6 +94,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AudioController::new(tx))
         .manage(scanner::ScanState::default())
+        .manage(watcher::WatcherState::default())
         .manage(waveform::WaveformState::default())
         .manage(thumbs::ThumbState::default())
         .manage(thumbs::PreviewState::default())

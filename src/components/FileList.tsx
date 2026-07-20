@@ -78,11 +78,41 @@ export interface FileListProps {
   items?: TextureItem[];
 }
 
-/** An open row context menu: where it sits and which file it targets. */
+/**
+ * Resolve a selection (row/cell keys, kept in visible order) to concrete file
+ * paths for clipboard actions. In the grouped texture view a selected material
+ * contributes every member map's path — its group key names nothing on disk.
+ * Shared with TabPane's grid context menu.
+ */
+export function selectionFilePaths(
+  selected: ReadonlySet<string>,
+  files: readonly LibFile[],
+  items?: readonly TextureItem[],
+): string[] {
+  const out: string[] = [];
+  if (items !== undefined) {
+    for (const it of items) {
+      if (!selected.has(it.key)) continue;
+      if (it.kind === "material") {
+        for (const m of it.material.members) out.push(m.file.path);
+      } else {
+        out.push(it.file.path);
+      }
+    }
+    return out;
+  }
+  for (const f of files) if (selected.has(f.path)) out.push(f.path);
+  return out;
+}
+
+/** An open row context menu: where it sits, its single-target file, and the
+ *  selection it acts on (`paths` for the clipboard, `count` for the label). */
 interface RowMenu {
   x: number;
   y: number;
   file: LibFile;
+  paths: string[];
+  count: number;
 }
 
 export default function FileList({ kind, files, items }: FileListProps): ReactElement {
@@ -96,7 +126,10 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   const rowCount = items ? items.length : files.length;
 
   const tab = useLibraryStore((s) => s.tabs[kind]);
-  const { selectedPath, sortField, sortDir } = tab;
+  const { selectedPath, selectedPaths, sortField, sortDir } = tab;
+  // The focus ring only carries information while a real multi-selection
+  // exists — single selection keeps its classic look.
+  const multiSelect = selectedPaths.size > 1;
   const durations = useLibraryStore((s) => s.durations);
   const audioMeta = useLibraryStore((s) => s.audioMeta);
   // Map identity is stable across merges — subscribe to the version counter so
@@ -137,44 +170,67 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   }, [folderScopes, hiddenFolders, virtualizer]);
 
   // Stable click handler so memo'd rows never re-render from a callback churn.
-  // Only audio loads into the player; other kinds just move the selection.
-  const onSelect = useCallback((index: number) => {
+  // Plain click keeps the old behavior (audio loads into the player, grouped
+  // rows select by key); Ctrl toggles membership and Shift range-selects from
+  // the anchor — both are pure selection ops that never load/play, so
+  // auditioning stays a deliberate plain-click/arrow gesture.
+  const onSelect = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
     const its = itemsRef.current;
-    if (its !== undefined) {
-      // Grouped: a material has no single path, so select by the item's key.
-      const it = its[index];
-      if (it !== undefined) useLibraryStore.getState().select(kindRef.current, index, it.key);
+    const kind = kindRef.current;
+    const lib = useLibraryStore.getState();
+    // Grouped: a material has no single path, so selection keys off item keys.
+    const key = its !== undefined ? its[index]?.key : filesRef.current[index]?.path;
+    if (key === undefined) return;
+    if (e.shiftKey) {
+      const order = its !== undefined ? its.map((i) => i.key) : filesRef.current.map((f) => f.path);
+      lib.rangeSelect(kind, index, key, order);
       return;
     }
-    const file = filesRef.current[index];
-    if (!file) return;
-    if (kindRef.current === "audio") {
-      loadAndSelect(file, index);
-    } else {
-      useLibraryStore.getState().select(kindRef.current, index, file.path);
+    if (e.ctrlKey || e.metaKey) {
+      lib.toggleSelect(kind, index, key);
+      return;
     }
+    if (its !== undefined || kind !== "audio") {
+      lib.select(kind, index, key);
+      return;
+    }
+    loadAndSelect(filesRef.current[index]!, index);
   }, []);
 
-  // Single menu state = at most one menu. Right-click selects the row like a
-  // left-click but deliberately does NOT load/auto-play it. A right-click on
-  // another row lands here again after ContextMenu's mousedown close, so the
-  // menu re-opens at the new cursor position.
+  // Single menu state = at most one menu. Right-click INSIDE the selection
+  // keeps it — the menu acts on all of it; outside, it collapses to the
+  // clicked row first (Explorer convention). Either way it deliberately does
+  // NOT load/auto-play. A right-click on another row lands here again after
+  // ContextMenu's mousedown close, so the menu re-opens at the new position.
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const onRowContextMenu = useCallback((index: number, e: MouseEvent<HTMLDivElement>) => {
     const its = itemsRef.current;
-    if (its !== undefined) {
-      const it = its[index];
-      if (it === undefined) return;
-      useLibraryStore.getState().select(kindRef.current, index, it.key);
-      const file = it.kind === "material" ? it.material.members[0]!.file : it.file;
-      setMenu({ x: e.clientX, y: e.clientY, file });
-      return;
+    const kind = kindRef.current;
+    const lib = useLibraryStore.getState();
+    const it = its?.[index];
+    const key = its !== undefined ? it?.key : filesRef.current[index]?.path;
+    if (key === undefined) return;
+    const file =
+      it !== undefined
+        ? it.kind === "material"
+          ? it.material.members[0]!.file
+          : it.file
+        : filesRef.current[index]!;
+    if (!lib.tabs[kind].selectedPaths.has(key)) {
+      lib.select(kind, index, key);
     }
-    const file = filesRef.current[index];
-    if (!file) return;
-    useLibraryStore.getState().select(kindRef.current, index, file.path);
-    setMenu({ x: e.clientX, y: e.clientY, file });
+    // Re-read after the possible collapse; snapshot the acted-on paths now so
+    // the menu is immune to selection churn while it is open.
+    const sel = useLibraryStore.getState().tabs[kind].selectedPaths;
+    const paths = selectionFilePaths(sel, filesRef.current, its);
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      file,
+      paths: paths.length > 0 ? paths : [file.path],
+      count: sel.size,
+    });
   }, []);
 
   return (
@@ -243,7 +299,8 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                       <MaterialRow
                         index={row.index}
                         material={it.material}
-                        selected={it.key === selectedPath}
+                        selected={selectedPaths.has(it.key)}
+                        focused={multiSelect && it.key === selectedPath}
                         onSelect={onSelect}
                         onContextMenu={onRowContextMenu}
                       />
@@ -257,7 +314,8 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         durationSeconds={undefined}
                         formatLabel={undefined}
                         showDuration={false}
-                        selected={it.file.path === selectedPath}
+                        selected={selectedPaths.has(it.key)}
+                        focused={multiSelect && it.key === selectedPath}
                         playing={false}
                         onSelect={onSelect}
                         onContextMenu={onRowContextMenu}
@@ -275,7 +333,8 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         kind === "audio" ? formatAudioMeta(audioMeta.get(file!.id)) : undefined
                       }
                       showDuration={kind === "audio"}
-                      selected={file!.path === selectedPath}
+                      selected={selectedPaths.has(file!.path)}
+                      focused={multiSelect && file!.path === selectedPath}
                       playing={kind === "audio" && playing && file!.path === currentPath}
                       onSelect={onSelect}
                       onContextMenu={onRowContextMenu}
@@ -309,10 +368,12 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
               onClick: () => revealInNavigator(menu.file.path),
             },
             {
-              label: "Copy path",
+              // Acts on the whole selection; Show in Explorer above stays
+              // single-target (the clicked row) on purpose.
+              label: menu.count > 1 ? `Copy paths (${menu.count})` : "Copy path",
               icon: Copy,
               onClick: () => {
-                navigator.clipboard.writeText(menu.file.path).catch((err: unknown) => {
+                navigator.clipboard.writeText(menu.paths.join("\n")).catch((err: unknown) => {
                   console.error("clipboard write failed", err);
                 });
               },

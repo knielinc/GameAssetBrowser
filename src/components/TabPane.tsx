@@ -11,7 +11,7 @@ import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "..
 import { showInExplorer } from "../ipc/commands";
 import { revealInNavigator } from "../stores/revealFolder";
 import type { AssetKind } from "../types";
-import FileList from "./FileList";
+import FileList, { selectionFilePaths } from "./FileList";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
 import AssetGrid from "./grid/AssetGrid";
@@ -44,6 +44,8 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   const scanning = useLibraryStore((s) => s.scanning);
   const anyFiles = useLibraryStore((s) => s.allFiles.length > 0);
   const select = useLibraryStore((s) => s.select);
+  const toggleSelect = useLibraryStore((s) => s.toggleSelect);
+  const rangeSelect = useLibraryStore((s) => s.rangeSelect);
   const clearFilters = useLibraryStore((s) => s.clearFilters);
   const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
 
@@ -56,6 +58,16 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     if (kind !== "texture" || !tab.groupMaterials) return null;
     return groupTextures(visible, thumbInfos());
   }, [kind, tab.groupMaterials, visible, thumbsVersion]);
+
+  // Key order of what is actually rendered (grouped keys in the grouped
+  // texture view, else flat paths) — Shift-range and Ctrl+A operate over it.
+  const visibleKeys = useMemo(
+    () => (grouped !== null ? grouped.map((i) => i.key) : visible.map((f) => f.path)),
+    [grouped, visible],
+  );
+  // The focus ring only carries information while a real multi-selection
+  // exists — single selection keeps its classic look.
+  const multiSelect = tab.selectedPaths.size > 1;
 
   const [preview, setPreview] = useState<LibFile | null>(null);
   // The shortcut hook resolves Space against the FLAT file list, but in the
@@ -82,12 +94,20 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     },
     [grouped, kind],
   );
-  useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview);
+  useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview, visibleKeys);
   const onTextureRange = useThumbRequests(visible, kind === "texture");
   const onModelRange = useModelThumbs(visible, kind === "model");
   const onVisibleRange = kind === "model" ? onModelRange : onTextureRange;
 
-  const [menu, setMenu] = useState<{ x: number; y: number; file: LibFile } | null>(null);
+  // `paths`/`count`: snapshot of the selection the menu acts on (materials
+  // expand to member paths), taken at open time so it survives churn.
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    file: LibFile;
+    paths: string[];
+    count: number;
+  } | null>(null);
   // Inspector show/hide is shared with the TabBar toggle; its width is a
   // user-dragged right-anchored panel, just like the left sidebar.
   const inspectorOpen = usePanelPrefs((s) => s.right);
@@ -130,19 +150,40 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
       s.spriteOn || s.iso !== "rgb" ? { ...s, spriteOn: false, iso: "rgb" } : s,
     );
   }, [tab.selectedPath]);
+  // Plain click focuses + collapses to one; Ctrl toggles membership; Shift
+  // range-selects from the anchor over the visible order.
   const onCellSelect = useCallback(
-    (index: number) => {
+    (index: number, e: MouseEvent<HTMLDivElement>) => {
       const file = visible[index];
-      if (file) select(kind, index, file.path);
+      if (!file) return;
+      if (e.shiftKey) {
+        rangeSelect(kind, index, file.path, visibleKeys);
+      } else if (e.ctrlKey || e.metaKey) {
+        toggleSelect(kind, index, file.path);
+      } else {
+        select(kind, index, file.path);
+      }
     },
-    [visible, select, kind],
+    [visible, visibleKeys, select, toggleSelect, rangeSelect, kind],
   );
   const onCellContextMenu = useCallback(
     (index: number, e: MouseEvent<HTMLDivElement>) => {
       const file = visible[index];
       if (!file) return;
-      select(kind, index, file.path);
-      setMenu({ x: e.clientX, y: e.clientY, file });
+      // Explorer convention: right-click inside the selection keeps it (the
+      // menu acts on all of it); outside, collapse to the clicked cell first.
+      if (!useLibraryStore.getState().tabs[kind].selectedPaths.has(file.path)) {
+        select(kind, index, file.path);
+      }
+      const sel = useLibraryStore.getState().tabs[kind].selectedPaths;
+      const paths = selectionFilePaths(sel, visible);
+      setMenu({
+        x: e.clientX,
+        y: e.clientY,
+        file,
+        paths: paths.length > 0 ? paths : [file.path],
+        count: sel.size,
+      });
     },
     [visible, select, kind],
   );
@@ -150,21 +191,38 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   // Grouped view: selection is keyed by the item's own key (a material has no
   // single path), and thumbs are requested for each visible material's members.
   const onGroupSelect = useCallback(
-    (index: number) => {
+    (index: number, e: MouseEvent<HTMLDivElement>) => {
       const it = grouped?.[index];
-      if (it !== undefined) select(kind, index, it.key);
+      if (it === undefined) return;
+      if (e.shiftKey) {
+        rangeSelect(kind, index, it.key, visibleKeys);
+      } else if (e.ctrlKey || e.metaKey) {
+        toggleSelect(kind, index, it.key);
+      } else {
+        select(kind, index, it.key);
+      }
     },
-    [grouped, select, kind],
+    [grouped, visibleKeys, select, toggleSelect, rangeSelect, kind],
   );
   const onGroupContextMenu = useCallback(
     (index: number, e: MouseEvent<HTMLDivElement>) => {
       const it = grouped?.[index];
       if (it === undefined) return;
-      select(kind, index, it.key);
       const file = it.kind === "material" ? it.material.members[0]!.file : it.file;
-      setMenu({ x: e.clientX, y: e.clientY, file });
+      if (!useLibraryStore.getState().tabs[kind].selectedPaths.has(it.key)) {
+        select(kind, index, it.key);
+      }
+      const sel = useLibraryStore.getState().tabs[kind].selectedPaths;
+      const paths = selectionFilePaths(sel, visible, grouped ?? undefined);
+      setMenu({
+        x: e.clientX,
+        y: e.clientY,
+        file,
+        paths: paths.length > 0 ? paths : [file.path],
+        count: sel.size,
+      });
     },
-    [grouped, select, kind],
+    [grouped, visible, select, kind],
   );
   const onGroupedRange = useCallback(
     (start: number, end: number) => {
@@ -235,9 +293,18 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         glThumbs={glThumbs}
         renderCell={(it) =>
           it.kind === "material" ? (
-            <MaterialCell material={it.material} selected={it.key === tab.selectedPath} />
+            <MaterialCell
+              material={it.material}
+              selected={tab.selectedPaths.has(it.key)}
+              focused={multiSelect && it.key === tab.selectedPath}
+            />
           ) : (
-            <TextureCell file={it.file} selected={it.file.path === tab.selectedPath} gl={glThumbs} />
+            <TextureCell
+              file={it.file}
+              selected={tab.selectedPaths.has(it.key)}
+              focused={multiSelect && it.key === tab.selectedPath}
+              gl={glThumbs}
+            />
           )
         }
       />
@@ -255,9 +322,18 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         glThumbs={glThumbs}
         renderCell={(f) =>
           kind === "texture" ? (
-            <TextureCell file={f} selected={f.path === tab.selectedPath} gl={glThumbs} />
+            <TextureCell
+              file={f}
+              selected={tab.selectedPaths.has(f.path)}
+              focused={multiSelect && f.path === tab.selectedPath}
+              gl={glThumbs}
+            />
           ) : (
-            <ModelCell file={f} selected={f.path === tab.selectedPath} />
+            <ModelCell
+              file={f}
+              selected={tab.selectedPaths.has(f.path)}
+              focused={multiSelect && f.path === tab.selectedPath}
+            />
           )
         }
       />
@@ -352,10 +428,12 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
               onClick: () => revealInNavigator(menu.file.path),
             },
             {
-              label: "Copy path",
+              // Acts on the whole selection; Show in Explorer above stays
+              // single-target (the clicked cell) on purpose.
+              label: menu.count > 1 ? `Copy paths (${menu.count})` : "Copy path",
               icon: Copy,
               onClick: () => {
-                navigator.clipboard.writeText(menu.file.path).catch((err: unknown) => {
+                navigator.clipboard.writeText(menu.paths.join("\n")).catch((err: unknown) => {
                   console.error("clipboard write failed", err);
                 });
               },

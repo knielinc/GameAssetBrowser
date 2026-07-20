@@ -87,6 +87,16 @@ export interface TabState {
   /** Index into the *visible* (filtered/sorted) list; -1 = none. */
   selectedIndex: number;
   selectedPath: string | null;
+  /**
+   * Multi-selection membership, keyed the same way `selectedPath` is (file
+   * path, or a material's group key in the grouped texture view). The focused
+   * item (`selectedPath`) is the keyboard cursor and normally a member, but
+   * Ctrl+click can toggle it out — focus ≠ membership. Session-only, never
+   * persisted (tabToSettings picks fields explicitly, so nothing extra needed).
+   */
+  selectedPaths: Set<string>;
+  /** Shift-range pivot: set by plain/Ctrl click, kept across Shift+clicks. */
+  selectionAnchor: string | null;
   viewMode: ViewMode;
   /** Grid cell edge in px. */
   cellSize: number;
@@ -173,6 +183,15 @@ export interface LibraryState {
   /** Un-hide a folder and every hidden folder beneath it (reset a subtree). */
   resetHidden: (path: string) => void;
   select: (kind: AssetKind, index: number, path: string | null) => void;
+  /** Ctrl+click: toggle membership; focus and anchor follow the clicked item. */
+  toggleSelect: (kind: AssetKind, index: number, path: string) => void;
+  /** Shift+click: replace the selection with anchor→item over `order` — the
+   *  current visible key order, which only the pane knows, so it passes it in. */
+  rangeSelect: (kind: AssetKind, index: number, path: string, order: readonly string[]) => void;
+  /** Ctrl+A: select every visible item; focus and anchor stay put. */
+  selectAll: (kind: AssetKind, order: readonly string[]) => void;
+  /** Escape: collapse the multi-selection back to just the focused item. */
+  collapseSelection: (kind: AssetKind) => void;
 }
 
 function defaultTab(kind: AssetKind): TabState {
@@ -183,6 +202,9 @@ function defaultTab(kind: AssetKind): TabState {
     sortDir: "asc",
     selectedIndex: -1,
     selectedPath: null,
+    // Fresh Set per tab — a shared mutable default would alias across tabs.
+    selectedPaths: new Set<string>(),
+    selectionAnchor: null,
     // Audio's list is the workflow that already works; visual assets are
     // scanned by eye, so they default to the grid.
     viewMode: kind === "audio" ? "list" : "grid",
@@ -452,10 +474,89 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       return next.length === s.hiddenFolders.length ? {} : { hiddenFolders: next };
     }),
 
+  // Plain click / arrow nav: focus + collapse the multi-selection to that one
+  // item. Every pre-multi-select caller keeps its exact semantics through this
+  // single funnel — nothing else has to know the multi layer exists.
   select: (kind, index, path) =>
     set((s) => ({
-      tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], selectedIndex: index, selectedPath: path } },
+      tabs: {
+        ...s.tabs,
+        [kind]: {
+          ...s.tabs[kind],
+          selectedIndex: index,
+          selectedPath: path,
+          selectedPaths: path === null ? new Set<string>() : new Set([path]),
+          selectionAnchor: path,
+        },
+      },
     })),
+
+  toggleSelect: (kind, index, path) =>
+    set((s) => {
+      const t = s.tabs[kind];
+      // Fresh Set identity on every action — consumers (StatusBar's size sum)
+      // memoize on it, and zustand's shallow compare needs it anyway.
+      const next = new Set(t.selectedPaths);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return {
+        tabs: {
+          ...s.tabs,
+          [kind]: {
+            ...t,
+            selectedIndex: index,
+            selectedPath: path,
+            selectedPaths: next,
+            selectionAnchor: path,
+          },
+        },
+      };
+    }),
+
+  rangeSelect: (kind, index, path, order) =>
+    set((s) => {
+      const t = s.tabs[kind];
+      // No anchor yet (fresh pane) → the range degenerates to the clicked item.
+      const anchor = t.selectionAnchor ?? t.selectedPath ?? path;
+      const b = order.indexOf(path);
+      let a = order.indexOf(anchor);
+      // Anchor filtered/regrouped away since it was set — degenerate likewise.
+      if (a < 0) a = b;
+      const next = new Set<string>();
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(order[i]!);
+      // Anchor deliberately unchanged: another Shift+click extends from the
+      // same pivot, per the platform convention.
+      return {
+        tabs: {
+          ...s.tabs,
+          [kind]: { ...t, selectedIndex: index, selectedPath: path, selectedPaths: next },
+        },
+      };
+    }),
+
+  selectAll: (kind, order) =>
+    set((s) => ({
+      tabs: { ...s.tabs, [kind]: { ...s.tabs[kind], selectedPaths: new Set(order) } },
+    })),
+
+  collapseSelection: (kind) =>
+    set((s) => {
+      const t = s.tabs[kind];
+      return {
+        tabs: {
+          ...s.tabs,
+          [kind]: {
+            ...t,
+            selectedPaths:
+              t.selectedPath === null ? new Set<string>() : new Set([t.selectedPath]),
+            selectionAnchor: t.selectedPath,
+          },
+        },
+      };
+    }),
 }));
 
 /** `id → ThumbInfo` view of the thumbs map, for the material classifier.

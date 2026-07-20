@@ -3,15 +3,18 @@
 //! most [`BATCH_SIZE`] entries — never one huge invoke payload. Threads from
 //! superseded scans notice the generation change and stop emitting.
 
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Instant, UNIX_EPOCH};
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
 
+use crate::index;
 use crate::metadata;
 use crate::texmeta;
+use crate::watcher;
 use crate::types::{
     events, AssetKind, FileEntry, ScanBatch, ScanDone, AUDIO_EXTENSIONS, MODEL_EXTENSIONS,
     SKIP_DIRS, TEXTURE_EXTENSIONS,
@@ -24,6 +27,13 @@ const BATCH_SIZE: usize = 1000;
 #[derive(Default)]
 pub struct ScanState {
     pub generation: AtomicU32,
+    /// True from generation bump until that generation's worker finished its
+    /// disk walk (including the index-verify pass). The watcher reads this to
+    /// coalesce mid-scan filesystem bursts into one trailing rescan.
+    pub scanning: AtomicBool,
+    /// Set by the watcher when relevant events land while `scanning`; drained
+    /// into exactly one rescan when the running scan finishes.
+    pub rescan_pending: AtomicBool,
     /// The roots the user has consented to, as of the last scan. The `model://`
     /// scheme checks reads against these — a crafted glTF referencing
     /// `../../../../Windows/System32/...` must not resolve. `start_scan` is the
@@ -87,15 +97,22 @@ pub fn current_generation(app: &AppHandle) -> u32 {
 }
 
 #[tauri::command]
-pub async fn start_scan(
-    app: AppHandle,
-    state: State<'_, ScanState>,
-    roots: Vec<String>,
-) -> Result<u32, String> {
+pub async fn start_scan(app: AppHandle, roots: Vec<String>) -> Result<u32, String> {
+    spawn_scan(&app, roots)
+}
+
+/// Bump the generation and spawn a walker thread. The single internal entry
+/// point for scans — the `start_scan` command and the filesystem watcher's
+/// rescan both pass through here, so consent recording and the scanning flag
+/// can never drift apart.
+pub fn spawn_scan(app: &AppHandle, roots: Vec<String>) -> Result<u32, String> {
+    let state = app.state::<ScanState>();
     let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
     // Record consent before the walk: the model:// scheme reads this, and a
     // preview can be requested the moment the first batch lands.
     *state.roots.lock() = roots.clone();
+    state.scanning.store(true, Ordering::SeqCst);
+    let app = app.clone();
     std::thread::Builder::new()
         .name(format!("scanner-{gen}"))
         .spawn(move || scan_worker(app, roots, gen))
@@ -103,23 +120,165 @@ pub async fn start_scan(
     Ok(gen)
 }
 
+/// Watcher entry point: debounced filesystem changes land here. Coalesces to
+/// one trailing rescan when a scan is already running.
+pub fn rescan_from_watcher(app: &AppHandle) {
+    let state = app.state::<ScanState>();
+    // Set the flag FIRST, then check `scanning`: whichever side observes the
+    // other's write drains the flag, so a burst landing exactly at scan-end
+    // still gets its trailing rescan instead of being lost in the gap.
+    state.rescan_pending.store(true, Ordering::SeqCst);
+    if !state.scanning.load(Ordering::SeqCst) {
+        run_pending_rescan(app);
+    }
+}
+
+/// Drain the pending-rescan flag into an actual scan of the last roots.
+fn run_pending_rescan(app: &AppHandle) {
+    let state = app.state::<ScanState>();
+    if !state.rescan_pending.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let roots = state.roots.lock().clone();
+    if roots.is_empty() {
+        return;
+    }
+    if let Err(e) = spawn_scan(app, roots) {
+        eprintln!("[scan] watcher rescan failed: {e}");
+    }
+}
+
+/// End-of-scan bookkeeping for a worker whose generation is still current:
+/// clear the scanning flag, (re-)arm the watcher over the scanned roots, and
+/// run the trailing rescan the watcher may have parked while we walked.
+fn finish_scan(app: &AppHandle, gen: u32, roots: &[String]) {
+    if current_generation(app) != gen {
+        return; // a newer scan owns the flags now
+    }
+    let state = app.state::<ScanState>();
+    state.scanning.store(false, Ordering::SeqCst);
+    watcher::arm(app, roots);
+    run_pending_rescan(app);
+}
+
 fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
+    // Fast path: a persisted index for exactly these roots streams instantly;
+    // the real walk then runs behind it and corrects only if the disk changed.
+    if let Some(stored) = index::load_matching(&app, &roots) {
+        serve_index_then_verify(&app, &roots, gen, stored);
+        return;
+    }
+
+    // Cold path: walk the disk, streaming batches as they fill.
     let started = Instant::now();
-    let mut next_id: u32 = 0;
-    let mut total: u64 = 0;
-    let mut batch: Vec<FileEntry> = Vec::with_capacity(BATCH_SIZE);
-    // (id, path) list handed to the audio-metadata probe worker after the walk.
-    let mut meta_queue: Vec<(u32, String)> = Vec::new();
-    // (id, path) list handed to the dimension-probe worker after the walk.
-    let mut tex_queue: Vec<(u32, String)> = Vec::new();
-    // Paths already emitted, so a file reachable from two OVERLAPPING roots
+    let Some(files) = walk_roots(&app, &roots, gen, true) else {
+        return; // superseded mid-walk — go quiet
+    };
+    emit_done(&app, gen, files.len() as u64, started);
+    spawn_probes(&app, gen, &files);
+    index::save(&app, &roots, &files);
+    finish_scan(&app, gen, &roots);
+}
+
+/// Serve the persisted index as a normal scan (batches + done + probes), then
+/// silently re-walk the disk behind it. Identical result → emit nothing more;
+/// any difference → stream the fresh list under a NEW generation (the frontend
+/// replaces wholesale on a gen bump) and rewrite the index.
+fn serve_index_then_verify(
+    app: &AppHandle,
+    roots: &[String],
+    gen: u32,
+    stored: Vec<(String, u64, i64)>,
+) {
+    let started = Instant::now();
+    let served = entries_from_index(stored);
+    if !stream_collected(app, gen, &served, started) {
+        return; // superseded while streaming
+    }
+    // Probes re-probe from scratch for the index-served gen — accepted cost;
+    // durations/dimensions are deliberately not persisted in the index.
+    spawn_probes(app, gen, &served);
+
+    let verify_started = Instant::now();
+    let Some(fresh) = walk_roots(app, roots, gen, false) else {
+        return;
+    };
+    if index::fingerprint(&fresh) == index::fingerprint(&served) {
+        finish_scan(app, gen, roots);
+        return; // disk matches what the frontend already has
+    }
+
+    // Disk changed since the index was written. Claim a fresh generation — but
+    // only if ours is still the live one: losing the CAS means a newer scan
+    // superseded us mid-verify, and ITS walk delivers the truth instead.
+    let state = app.state::<ScanState>();
+    let new_gen = gen + 1;
+    if state
+        .generation
+        .compare_exchange(gen, new_gen, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    if !stream_collected(app, new_gen, &fresh, verify_started) {
+        return;
+    }
+    spawn_probes(app, new_gen, &fresh);
+    index::save(app, roots, &fresh);
+    finish_scan(app, new_gen, roots);
+}
+
+/// Rebuild `FileEntry`s from stored `(path, size, mtime)` tuples. Kind and ext
+/// are re-derived from the extension exactly as the walker does — `classify`
+/// stays the single source of truth — so a file the current build would no
+/// longer list (say a new doc-image marker) drops out here too, and the
+/// fingerprint comparison then flags the difference. Ids restart at 0, as
+/// every generation's do.
+fn entries_from_index(stored: Vec<(String, u64, i64)>) -> Vec<FileEntry> {
+    let mut files: Vec<FileEntry> = Vec::with_capacity(stored.len());
+    for (path, size, modified) in stored {
+        let p = Path::new(&path);
+        let Some((ext, kind)) = classify(p) else {
+            continue;
+        };
+        let name = match p.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => continue,
+        };
+        files.push(FileEntry {
+            id: files.len() as u32,
+            path,
+            name,
+            ext,
+            kind,
+            size,
+            modified,
+        });
+    }
+    files
+}
+
+/// Walk `roots`, classifying and deduping into one collected list. `stream`
+/// emits each full batch as it fills so a cold scan paints progressively; the
+/// index-verify pass walks silently. Returns `None` when superseded mid-walk
+/// (already-emitted batches are harmless — the newer gen replaces them).
+fn walk_roots(
+    app: &AppHandle,
+    roots: &[String],
+    gen: u32,
+    stream: bool,
+) -> Option<Vec<FileEntry>> {
+    let mut files: Vec<FileEntry> = Vec::new();
+    // How many of `files` have already been emitted when streaming.
+    let mut streamed = 0usize;
+    // Paths already listed, so a file reachable from two OVERLAPPING roots
     // (e.g. `Documents` and `Documents\git\3d-test`) is listed once. Without
     // this it appears twice, and since selection is keyed by path, clicking one
     // copy highlights both. Normalized (lowercase + backslashes) — the same
     // file is byte-identical across roots, so no canonicalize syscall needed.
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
-    for root in &roots {
+    for root in roots {
         // filter_entry prunes whole subtrees (build dirs, VCS metadata) before
         // walkdir descends — a straight speed win, and the only thing keeping
         // a C++ build's COFF `.obj` files out of the Models tab.
@@ -127,8 +286,8 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             .into_iter()
             .filter_entry(|e| !is_skipped_dir(e));
         for entry in walker {
-            if current_generation(&app) != gen {
-                return; // superseded by a newer scan — go quiet
+            if current_generation(app) != gen {
+                return None; // superseded by a newer scan — go quiet
             }
             let entry = match entry {
                 Ok(e) => e,
@@ -165,21 +324,8 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
                 }
             };
 
-            let id = next_id;
-            next_id += 1;
-            total += 1;
-            // AUDIO ONLY. probe_audio_meta hands every queued path to symphonia;
-            // queueing textures/models would make it try to decode `.png` and
-            // `.fbx` — thousands of them in a Synty pack — burning CPU and
-            // flooding stderr for results that can never exist.
-            if matches!(kind, AssetKind::Audio) {
-                meta_queue.push((id, path.clone()));
-            }
-            if matches!(kind, AssetKind::Texture) {
-                tex_queue.push((id, path.clone()));
-            }
-            batch.push(FileEntry {
-                id,
+            files.push(FileEntry {
+                id: files.len() as u32,
                 path,
                 name: entry.file_name().to_string_lossy().into_owned(),
                 ext,
@@ -188,18 +334,51 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
                 modified,
             });
 
-            if batch.len() >= BATCH_SIZE {
-                emit_batch(&app, gen, &mut batch);
+            if stream && files.len() - streamed >= BATCH_SIZE {
+                emit_range(app, gen, &files[streamed..]);
+                streamed = files.len();
             }
         }
     }
 
-    if current_generation(&app) != gen {
-        return;
+    if current_generation(app) != gen {
+        return None;
     }
-    if !batch.is_empty() {
-        emit_batch(&app, gen, &mut batch);
+    if stream && files.len() > streamed {
+        emit_range(app, gen, &files[streamed..]);
     }
+    Some(files)
+}
+
+/// Stream an already-collected list as normal `scan:batch`/`scan:done` events
+/// under `gen` — exactly the surface a live walk produces, which is what lets
+/// the index fast path and the verify re-stream reuse the whole frontend
+/// pipeline untouched. Returns false when superseded partway (stops emitting).
+fn stream_collected(app: &AppHandle, gen: u32, files: &[FileEntry], started: Instant) -> bool {
+    for chunk in files.chunks(BATCH_SIZE) {
+        if current_generation(app) != gen {
+            return false;
+        }
+        emit_range(app, gen, chunk);
+    }
+    if current_generation(app) != gen {
+        return false;
+    }
+    emit_done(app, gen, files.len() as u64, started);
+    true
+}
+
+fn emit_range(app: &AppHandle, gen: u32, files: &[FileEntry]) {
+    let batch = ScanBatch {
+        gen,
+        files: files.to_vec(),
+    };
+    if let Err(e) = app.emit(events::SCAN_BATCH, batch) {
+        eprintln!("[scan] failed to emit scan:batch: {e}");
+    }
+}
+
+fn emit_done(app: &AppHandle, gen: u32, total: u64, started: Instant) {
     let done = ScanDone {
         gen,
         total,
@@ -208,11 +387,27 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
     if let Err(e) = app.emit(events::SCAN_DONE, done) {
         eprintln!("[scan] failed to emit scan:done: {e}");
     }
+}
 
-    // Dimension probing gets its OWN thread rather than running after
-    // probe_audio_meta below: an audio-heavy library would otherwise hold
-    // texture dims — and the Resolution/Shape filters — hostage to the
-    // duration probe.
+/// Hand the audio and texture path queues to the probe workers, each on its
+/// own thread. AUDIO ONLY goes to symphonia: queueing textures/models would
+/// make it try to decode `.png` and `.fbx` — thousands of them in a Synty
+/// pack — burning CPU and flooding stderr for results that can never exist.
+/// Dimension probing likewise gets its OWN thread so an audio-heavy library
+/// can't hold texture dims — and the Resolution/Shape filters — hostage to
+/// the duration probe; and the scanner thread itself must stay free for the
+/// index-verify walk that may still be running behind an index-served gen.
+fn spawn_probes(app: &AppHandle, gen: u32, files: &[FileEntry]) {
+    let meta_queue: Vec<(u32, String)> = files
+        .iter()
+        .filter(|f| matches!(f.kind, AssetKind::Audio))
+        .map(|f| (f.id, f.path.clone()))
+        .collect();
+    let tex_queue: Vec<(u32, String)> = files
+        .iter()
+        .filter(|f| matches!(f.kind, AssetKind::Texture))
+        .map(|f| (f.id, f.path.clone()))
+        .collect();
     {
         let app = app.clone();
         if let Err(e) = std::thread::Builder::new()
@@ -222,16 +417,14 @@ fn scan_worker(app: AppHandle, roots: Vec<String>, gen: u32) {
             eprintln!("[scan] failed to spawn tex-meta thread: {e}");
         }
     }
-
-    // Lazy audio metadata probing runs on this (already background) thread
-    // until done or superseded.
-    metadata::probe_audio_meta(app, meta_queue, gen);
-}
-
-fn emit_batch(app: &AppHandle, gen: u32, batch: &mut Vec<FileEntry>) {
-    let files = std::mem::take(batch);
-    if let Err(e) = app.emit(events::SCAN_BATCH, ScanBatch { gen, files }) {
-        eprintln!("[scan] failed to emit scan:batch: {e}");
+    {
+        let app = app.clone();
+        if let Err(e) = std::thread::Builder::new()
+            .name("audio-meta".into())
+            .spawn(move || metadata::probe_audio_meta(app, meta_queue, gen))
+        {
+            eprintln!("[scan] failed to spawn audio-meta thread: {e}");
+        }
     }
 }
 

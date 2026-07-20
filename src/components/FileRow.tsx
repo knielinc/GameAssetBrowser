@@ -83,9 +83,14 @@ export interface FileRowProps {
   formatLabel: string | undefined;
   /** Audio only — drives the Format/Length columns and the grid template. */
   showDuration: boolean;
+  /** Multi-selection membership — the accent tint + left bar. */
   selected: boolean;
+  /** Keyboard cursor while a multi-selection exists — the extra inset ring.
+   *  Passed as false in single-select so the classic look is untouched. */
+  focused: boolean;
   playing: boolean;
-  onSelect: (index: number) => void;
+  /** Carries the click event so the pane can read Ctrl/Shift modifiers. */
+  onSelect: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
 }
 
@@ -99,14 +104,20 @@ function FileRowInner({
   formatLabel,
   showDuration,
   selected,
+  focused,
   playing,
   onSelect,
   onContextMenu,
 }: FileRowProps): ReactElement {
   return (
     <div
-      className={clsx("file-row", rowGrid(showDuration), selected && "row-selected")}
-      onClick={() => onSelect(index)}
+      className={clsx(
+        "file-row",
+        rowGrid(showDuration),
+        selected && "row-selected",
+        focused && "row-focused",
+      )}
+      onClick={(e) => onSelect(index, e)}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(index, e);
@@ -156,7 +167,9 @@ export interface MaterialRowProps {
   index: number;
   material: Material;
   selected: boolean;
-  onSelect: (index: number) => void;
+  /** See FileRowProps.focused. */
+  focused: boolean;
+  onSelect: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
 }
 
@@ -168,6 +181,7 @@ function MaterialRowInner({
   index,
   material,
   selected,
+  focused,
   onSelect,
   onContextMenu,
 }: MaterialRowProps): ReactElement {
@@ -180,8 +194,13 @@ function MaterialRowInner({
   const codes = [...material.channels.keys()].map((c) => CHANNEL_CODE[c]).join(" · ");
   return (
     <div
-      className={clsx("file-row", rowGrid(false), selected && "row-selected")}
-      onClick={() => onSelect(index)}
+      className={clsx(
+        "file-row",
+        rowGrid(false),
+        selected && "row-selected",
+        focused && "row-focused",
+      )}
+      onClick={(e) => onSelect(index, e)}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(index, e);

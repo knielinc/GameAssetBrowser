@@ -9,12 +9,19 @@ import AssetCell, { type Badge } from "./AssetCell";
 export interface TextureCellProps {
   file: LibFile;
   selected: boolean;
+  /** See AssetCellProps.focused. */
+  focused?: boolean;
   /** Render a transparent GL hole (the WebGL grid paints it) instead of an
    *  `<img>`. Off → the classic thumb:// image path. */
   gl?: boolean;
 }
 
-export default function TextureCell({ file, selected, gl }: TextureCellProps): ReactElement {
+export default function TextureCell({
+  file,
+  selected,
+  focused,
+  gl,
+}: TextureCellProps): ReactElement {
   // Derived key → the image shows the instant WebView2 can read it off disk,
   // no IPC round trip. `info` (badges) fills in when the stats request lands.
   const { src, cacheKey, imgKey, info, onError, onLoad } = useThumbSrc(file);
@@ -48,6 +55,7 @@ export default function TextureCell({ file, selected, gl }: TextureCellProps): R
       badges={badges}
       corner={dims}
       selected={selected}
+      focused={focused}
       checker
       thumbKey={gl === true ? cacheKey : undefined}
     >
