@@ -34,8 +34,13 @@ import { hasWebGL2 } from "./grid/thumbGL";
 import TextureCell from "./grid/TextureCell";
 import MaterialCell from "./grid/MaterialCell";
 import ModelCell from "./grid/ModelCell";
+import DocumentCell from "./document/DocumentCell";
 import ModelInspector from "./model/ModelInspector";
 import TextureInspector from "./texture/TextureInspector";
+import SpriteArtInspector from "./texture/SpriteArtInspector";
+import { isSpriteArt } from "./texture/SpriteArtView";
+import DocumentInspector from "./document/DocumentInspector";
+import { docIsPsd } from "./document/doc";
 import type { PreviewState } from "./texture/PreviewControls";
 import FullscreenPreview from "./FullscreenPreview";
 import { groupTextures, type TextureItem } from "../material/classify";
@@ -414,6 +419,12 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
               focused={multiSelect && f.path === tab.selectedPath}
               gl={glThumbs}
             />
+          ) : kind === "document" ? (
+            <DocumentCell
+              file={f}
+              selected={tab.selectedPaths.has(f.path)}
+              focused={multiSelect && f.path === tab.selectedPath}
+            />
           ) : (
             <ModelCell
               file={f}
@@ -467,11 +478,39 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             width={inspector.width}
           />
         )}
-        {kind === "texture" && inspectorOpen && preview === null && (
-          <TextureInspector
-            item={selectedItem}
-            preview={preview3d}
-            onPreviewChange={patchPreview}
+        {kind === "texture" &&
+          inspectorOpen &&
+          preview === null &&
+          (isSpriteArt(selectedFile?.ext) ? (
+            <SpriteArtInspector
+              path={selectedFile?.path ?? null}
+              ext={selectedFile?.ext ?? null}
+              size={selectedFile?.size ?? null}
+              onClose={toggleInspector}
+              width={inspector.width}
+            />
+          ) : docIsPsd(selectedFile?.ext ?? "") ? (
+            <DocumentInspector
+              path={selectedFile?.path ?? null}
+              ext={selectedFile?.ext ?? null}
+              size={selectedFile?.size ?? null}
+              onClose={toggleInspector}
+              width={inspector.width}
+            />
+          ) : (
+            <TextureInspector
+              item={selectedItem}
+              preview={preview3d}
+              onPreviewChange={patchPreview}
+              onClose={toggleInspector}
+              width={inspector.width}
+            />
+          ))}
+        {kind === "document" && inspectorOpen && preview === null && (
+          <DocumentInspector
+            path={selectedFile?.path ?? null}
+            ext={selectedFile?.ext ?? null}
+            size={selectedFile?.size ?? null}
             onClose={toggleInspector}
             width={inspector.width}
           />
@@ -547,7 +586,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             },
             // One entry per registered app of this kind (External apps…),
             // single-target: an editor opens one document, not a selection.
-            ...appsForKind(externalApps, kind).map((a) => ({
+            ...appsForKind(externalApps, kind, menu.file.ext).map((a) => ({
               label: `Open with ${a.name}`,
               icon: ExternalLink,
               onClick: () => {

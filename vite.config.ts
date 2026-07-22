@@ -52,9 +52,21 @@ function flattenCascadeLayersPlugin(): Plugin {
     },
     // Dev (`tauri dev`): best-effort so the same old-WebView machines can run the
     // dev server too. Idempotent — a second pass finds no `@layer` and no-ops.
+    //
+    // With enforce:"post" this hook can fire AFTER Vite's css-post plugin has
+    // already wrapped the stylesheet into a JS module (`import { updateStyle }
+    // … const __vite__css = "…@layer…"`). That module body still contains the
+    // "@layer" substring, but it is JavaScript — feeding it to postcss.parse
+    // throws "Unknown word updateStyle". Skip anything that has been module-
+    // wrapped, and fail soft on any other non-CSS payload: the build path
+    // (generateBundle) is the one that must be correct.
     transform(code, id) {
-      if (id.endsWith(".css") && code.includes("@layer")) {
+      if (!id.endsWith(".css") || !code.includes("@layer")) return;
+      if (/\b(?:import|export|const)\b/.test(code) || code.includes("updateStyle")) return;
+      try {
         return { code: flattenCascadeLayers(code), map: null };
+      } catch {
+        return;
       }
     },
   };

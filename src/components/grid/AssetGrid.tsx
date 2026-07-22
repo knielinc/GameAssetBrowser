@@ -176,9 +176,15 @@ export default function AssetGrid<T>({
           shows through the cells' transparent `[data-thumb-key]` holes, so it
           must sit under the scroll layer (z-0 vs z-10). */}
       {glThumbs === true && <ThumbGLOverlay scrollRef={parentRef} revision={glRevision} />}
+      {/* overscroll-none kills the trackpad rubber-band at the scroll ends. The
+          GL thumbnail overlay (a fixed sibling, not inside this scroller) aligns
+          off scrollTop, but the elastic bounce is a compositor-only transform
+          that never touches scrollTop OR the cells' measured rects — so the
+          cells would visibly bounce while the painted thumbnails stayed put.
+          No bounce, no drift. */}
       <div
         ref={parentRef}
-        className="absolute inset-0 z-10 overflow-x-hidden overflow-y-scroll"
+        className="absolute inset-0 z-10 overflow-x-hidden overflow-y-scroll overscroll-none"
       >
       <div style={{ height: `${virtualizer.getTotalSize() + PAD * 2}px`, position: "relative" }}>
         {virtualItems.map((row) => {

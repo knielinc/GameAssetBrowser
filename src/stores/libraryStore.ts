@@ -52,6 +52,9 @@ export interface TabFilters {
    *  within the set), distinct from the sidebar's whole-library collection
    *  scopes. Empty = off. */
   collections: Set<string>;
+  /** All kinds — hide files whose name contains ANY term (substring,
+   *  lowercased). ANDs with query/scope; OR within the set. Empty = off. */
+  excludeTerms: Set<string>;
 }
 
 export function defaultFilters(): TabFilters {
@@ -69,6 +72,7 @@ export function defaultFilters(): TabFilters {
     sampleRates: new Set(),
     favorite: false,
     collections: new Set(),
+    excludeTerms: new Set(),
   };
 }
 
@@ -270,8 +274,9 @@ function defaultTab(kind: AssetKind): TabState {
     selectedPaths: new Set<string>(),
     selectionAnchor: null,
     // Audio's list is the workflow that already works; visual assets are
-    // scanned by eye, so they default to the grid.
-    viewMode: kind === "audio" ? "list" : "grid",
+    // scanned by eye, so they default to the grid. Documents are read by name
+    // (and previewed one at a time), so they list like audio.
+    viewMode: kind === "audio" || kind === "document" ? "list" : "grid",
     cellSize: 132,
     groupMaterials: true,
     // Fresh Sets per tab — a shared mutable default would alias across tabs.
@@ -284,6 +289,7 @@ export function defaultTabs(): Record<AssetKind, TabState> {
     audio: defaultTab("audio"),
     texture: defaultTab("texture"),
     model: defaultTab("model"),
+    document: defaultTab("document"),
   };
 }
 
@@ -438,10 +444,26 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
         };
       }
       // Re-scan: swap the buffered scan in atomically. durations/audioMeta/dims
-      // were buffered by the new ids, so they land ready — no re-probe. Thumbs
-      // are keyed by per-scan id and can't carry over, so clear them; the new
-      // list's visible cells re-request and the warm on-disk cache (same
-      // path+mtime → same key) serves them near-instantly.
+      // were buffered by the new ids, so they land ready — no re-probe.
+      //
+      // Thumbs are keyed by per-scan id, so they can't be reused as-is — but a
+      // re-scan usually leaves almost every file untouched. Re-key the old
+      // thumbnails by path+size+mtime and hand each unchanged file its cached
+      // entry under the NEW id. Without this, every visible cell blanked and its
+      // info badges (resolution / N?/MASK?/α) vanished and re-loaded on each
+      // rescan — the flicker. The thumb:// key is a hash of path+size+mtime, so
+      // it stays valid across the swap; a file that actually changed misses the
+      // lookup and re-requests, which is correct.
+      const prevByStamp = new Map<string, { key: string; info: ThumbInfo | null }>();
+      for (const f of s.allFiles) {
+        const t = s.thumbs.get(f.id);
+        if (t !== undefined) prevByStamp.set(`${f.path}|${f.size}|${f.modified}`, t);
+      }
+      const carried = new Map<number, { key: string; info: ThumbInfo | null }>();
+      for (const f of p.files) {
+        const t = prevByStamp.get(`${f.path}|${f.size}|${f.modified}`);
+        if (t !== undefined) carried.set(f.id, t);
+      }
       const next = { roots: s.roots, allFiles: p.files };
       return {
         scanning: false,
@@ -454,7 +476,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
         audioMetaVersion: s.audioMetaVersion + 1,
         dims: p.dims,
         dimsVersion: s.dimsVersion + 1,
-        thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
+        thumbs: carried,
         thumbsVersion: s.thumbsVersion + 1,
         folderScopes: pruneFolders(s.folderScopes, next),
         hiddenFolders: pruneFolders(s.hiddenFolders, next),
@@ -782,7 +804,7 @@ export function thumbInfos(): Map<number, ThumbInfo> {
  *  that pre-partitioning by kind would be speculative — `useVisibleFiles`
  *  folds this into its existing filter loop. */
 export function countByKind(files: readonly LibFile[]): Record<AssetKind, number> {
-  const counts: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0 };
+  const counts: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0, document: 0 };
   for (const f of files) counts[f.kind]++;
   return counts;
 }

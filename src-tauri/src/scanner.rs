@@ -16,8 +16,8 @@ use crate::metadata;
 use crate::texmeta;
 use crate::watcher;
 use crate::types::{
-    events, AssetKind, FileEntry, ScanBatch, ScanDone, AUDIO_EXTENSIONS, MODEL_EXTENSIONS,
-    SKIP_DIRS, TEXTURE_EXTENSIONS,
+    events, AssetKind, FileEntry, ScanBatch, ScanDone, AUDIO_EXTENSIONS, DOCUMENT_EXTENSIONS,
+    MODEL_EXTENSIONS, SKIP_DIRS, TEXTURE_EXTENSIONS,
 };
 
 const BATCH_SIZE: usize = 1000;
@@ -495,6 +495,11 @@ fn classify(path: &Path) -> Option<(String, AssetKind)> {
         AssetKind::Texture
     } else if MODEL_EXTENSIONS.contains(&e) {
         AssetKind::Model
+    } else if DOCUMENT_EXTENSIONS.contains(&e) {
+        // Design docs, references, notes. No is_doc_image gate here: a
+        // "readme.md" IS the document we want to surface, unlike a readme
+        // *image* masquerading as a texture.
+        AssetKind::Document
     } else {
         return None;
     };

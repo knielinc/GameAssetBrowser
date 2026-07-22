@@ -218,6 +218,9 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
   return useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
     const hasQuery = q !== "";
+    // Exclude terms are stored pre-lowercased; substring-match against nameLower.
+    const excludeList = [...filters.excludeTerms];
+    const hasExclude = excludeList.length > 0;
     const hasExtFilter = extFilter.size > 0;
     // Folder scope (selected minus hidden) narrows the library BEFORE query/ext
     // filters apply.
@@ -262,7 +265,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     const hasAChan = kind === "audio" && flt.audioChannels.size > 0;
     const hasRate = kind === "audio" && flt.sampleRates.size > 0;
     const hasFav = flt.favorite; // all kinds — membership is always "known"
-    const hasSize = kind === "model" && rangeActive(flt.size);
+    const hasSize = (kind === "model" || kind === "document") && rangeActive(flt.size);
     // Size is stored in MB; compare in bytes, converted once outside the loop.
     const sizeBytes: RangeFilter = {
       min: flt.size.min === null ? null : flt.size.min * MIB,
@@ -331,6 +334,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
         }
       }
       if (hasQuery && !f.nameLower.includes(q)) continue;
+      if (hasExclude && excludeList.some((ex) => f.nameLower.includes(ex))) continue;
       files.push(f);
     }
 

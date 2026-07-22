@@ -34,7 +34,11 @@ use tauri::Manager;
 /// crafted glTF could reference `../../../../etc/shadow` and exfiltrate it. Only
 /// paths inside a root the user explicitly picked are served (is_within_roots
 /// canonicalizes, resolving any `../` before the prefix test).
-fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<(Vec<u8>, &'static str)> {
+/// Resolve a scheme URL path to a real, in-scope file path. The scope check is
+/// what makes serving arbitrary paths safe: only files inside a root the user
+/// explicitly picked are reachable (is_within_roots canonicalizes, resolving
+/// any `../` before the prefix test).
+fn scoped_path(app: &tauri::AppHandle, uri_path: &str) -> Option<std::path::PathBuf> {
     let decoded = percent_decode(uri_path.trim_start_matches('/'));
     if decoded.is_empty() {
         return None;
@@ -47,11 +51,122 @@ fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<(Vec<u8>, &'sta
     #[cfg(not(windows))]
     let path = std::path::PathBuf::from(format!("/{decoded}"));
     if !scanner::is_within_roots(app, &path) {
-        eprintln!("[model] refused out-of-scope read: {}", path.display());
+        eprintln!("[scheme] refused out-of-scope read: {}", path.display());
         return None;
     }
+    Some(path)
+}
+
+fn model_bytes(app: &tauri::AppHandle, uri_path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let path = scoped_path(app, uri_path)?;
     let bytes = std::fs::read(&path).ok()?;
     Some((bytes, mime_for(&path)))
+}
+
+/// Parse a single-range `Range: bytes=…` header into an inclusive `(start, end)`
+/// clamped to the file. Handles the open (`bytes=N-`) and suffix (`bytes=-N`)
+/// forms; multi-range is declined (None → caller serves the whole file).
+fn parse_byte_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    if total == 0 {
+        return None;
+    }
+    let spec = header.strip_prefix("bytes=")?.split(',').next()?.trim();
+    let (s, e) = spec.split_once('-')?;
+    if s.is_empty() {
+        let n: u64 = e.parse().ok()?;
+        if n == 0 {
+            return None;
+        }
+        return Some((total.saturating_sub(n), total - 1));
+    }
+    let start: u64 = s.parse().ok()?;
+    if start >= total {
+        return None;
+    }
+    let end = if e.is_empty() { total - 1 } else { e.parse::<u64>().ok()?.min(total - 1) };
+    if start > end {
+        return None;
+    }
+    Some((start, end))
+}
+
+/// Serve a document over `doc://`, honoring HTTP range requests. This is what
+/// lets a 500 MB PDF open in a blink: pdf.js reads the file's cross-reference
+/// table (a tail range) and then only the objects for the pages you view, via
+/// `Range` GETs — never the whole file. A HEAD returns the size without a read;
+/// md/txt fetch with no Range and get the full 200 as before.
+fn doc_response(
+    app: &tauri::AppHandle,
+    uri_path: &str,
+    range: Option<&str>,
+    is_head: bool,
+) -> tauri::http::Response<Vec<u8>> {
+    let deny = |status: u16| {
+        tauri::http::Response::builder()
+            .status(status)
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Vec::new())
+            .expect("static response builds")
+    };
+    let Some(path) = scoped_path(app, uri_path) else {
+        return deny(404);
+    };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return deny(404);
+    };
+    let total = meta.len();
+    let mime = mime_for(&path);
+    // Content-Length is CORS-safelisted; Accept-Ranges / Content-Range are not,
+    // so expose them for pdf.js's cross-origin fetch to read.
+    let expose = "Content-Range, Content-Length, Accept-Ranges";
+
+    if is_head {
+        return tauri::http::Response::builder()
+            .status(200)
+            .header("Content-Type", mime)
+            .header("Content-Length", total.to_string())
+            .header("Accept-Ranges", "bytes")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Expose-Headers", expose)
+            .body(Vec::new())
+            .expect("head response builds");
+    }
+
+    if let Some((start, end)) = range.and_then(|r| parse_byte_range(r, total)) {
+        use std::io::{Read, Seek, SeekFrom};
+        let len = end - start + 1;
+        let mut buf = vec![0u8; len as usize];
+        let read = std::fs::File::open(&path).and_then(|mut f| {
+            f.seek(SeekFrom::Start(start))?;
+            f.read_exact(&mut buf)
+        });
+        if read.is_err() {
+            return deny(404);
+        }
+        return tauri::http::Response::builder()
+            .status(206)
+            .header("Content-Type", mime)
+            .header("Content-Range", format!("bytes {start}-{end}/{total}"))
+            .header("Content-Length", len.to_string())
+            .header("Accept-Ranges", "bytes")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Expose-Headers", expose)
+            .body(buf)
+            .expect("range response builds");
+    }
+
+    let Ok(bytes) = std::fs::read(&path) else {
+        return deny(404);
+    };
+    tauri::http::Response::builder()
+        .status(200)
+        .header("Content-Type", mime)
+        .header("Content-Length", total.to_string())
+        .header("Accept-Ranges", "bytes")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Expose-Headers", expose)
+        .body(bytes)
+        .expect("full response builds")
 }
 
 /// Content-Type by extension. Correct image MIMEs matter for the 2D preview:
@@ -71,6 +186,14 @@ fn mime_for(path: &std::path::Path) -> &'static str {
         Some("webp") => "image/webp",
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("bmp") => "image/bmp",
+        // Documents served over the `doc://` scheme. The frontend fetches these
+        // as bytes/text (pdf.js takes the ArrayBuffer, md/txt are decoded as
+        // UTF-8), so the Content-Type is advisory — but honest headers keep the
+        // scheme reusable if anything ever loads a doc URL directly.
+        Some("pdf") => "application/pdf",
+        Some("md") | Some("markdown") => "text/markdown; charset=utf-8",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("psd") | Some("psb") => "image/vnd.adobe.photoshop",
         _ => "application/octet-stream",
     }
 }
@@ -100,8 +223,62 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Byte size of a scoped file. pdf.js asks for this once to set up range-based
+/// loading (see pdf_range).
+#[tauri::command]
+fn pdf_size(app: tauri::AppHandle, path: String) -> Result<u64, String> {
+    let p = std::path::PathBuf::from(&path);
+    if !scanner::is_within_roots(&app, &p) {
+        return Err("out of scope".into());
+    }
+    std::fs::metadata(&p).map(|m| m.len()).map_err(|e| e.to_string())
+}
+
+/// Raw byte slice `[start, end)` of a scoped file, returned over Tauri's binary
+/// IPC channel (no base64, no custom-scheme Range guesswork). pdf.js pulls only
+/// the cross-reference table + the pages you actually view through this, so a
+/// 500 MB PDF never loads whole and the first page paints almost immediately.
+#[tauri::command]
+fn pdf_range(
+    app: tauri::AppHandle,
+    path: String,
+    start: u64,
+    end: u64,
+) -> Result<tauri::ipc::Response, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let p = std::path::PathBuf::from(&path);
+    if !scanner::is_within_roots(&app, &p) {
+        return Err("out of scope".into());
+    }
+    let mut f = std::fs::File::open(&p).map_err(|e| e.to_string())?;
+    let total = f.metadata().map_err(|e| e.to_string())?.len();
+    let end = end.min(total);
+    if start >= end {
+        return Ok(tauri::ipc::Response::new(Vec::new()));
+    }
+    f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let mut buf = vec![0u8; (end - start) as usize];
+    f.read_exact(&mut buf).map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(buf))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // asefile panics compositing tilemap cels (a known upstream bug); the
+    // decoders catch_unwind it, but the default hook still prints a scary line
+    // per file. Silence just asefile panics so a folder of tilemap sprites
+    // doesn't flood the log — every other panic keeps the default hook.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let from_asefile = info
+            .location()
+            .map(|l| l.file().contains("asefile"))
+            .unwrap_or(false);
+        if !from_asefile {
+            default_hook(info);
+        }
+    }));
+
     // Unbounded: player commands are tiny and must never block the caller.
     let (tx, rx) = crossbeam_channel::unbounded::<PlayerCmd>();
 
@@ -241,6 +418,25 @@ pub fn run() {
                 }
             });
         })
+        // Documents (md/txt, and the PDF full-file fallback) served to the
+        // webview. Scope-checked (only paths inside a picked root) with a
+        // doc-appropriate MIME, and honoring HTTP Range so the fallback path is
+        // also incremental. URL shape mirrors model://:
+        // http://doc.localhost/C:/Pack/design.pdf. (PDFs normally load via the
+        // pdf_range IPC command, which sidesteps custom-scheme Range entirely.)
+        .register_asynchronous_uri_scheme_protocol("doc", |ctx, req, responder| {
+            let app = ctx.app_handle().clone();
+            let uri = req.uri().clone();
+            let is_head = req.method() == tauri::http::Method::HEAD;
+            let range = req
+                .headers()
+                .get("range")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            std::thread::spawn(move || {
+                responder.respond(doc_response(&app, uri.path(), range.as_deref(), is_head));
+            });
+        })
         .setup(move |app| {
             // The engine thread owns the (!Send) rodio OutputStream for the
             // app's whole lifetime; it only ever hears from us via `rx`.
@@ -293,8 +489,12 @@ pub fn run() {
             portable::settings_export,
             portable::settings_import,
             winmode::set_fullscreen_smooth,
+            pdf_size,
+            pdf_range,
             scanner::start_scan,
             thumbs::request_thumbs,
+            thumbs::sprite_data,
+            thumbs::sprite_cels,
             thumbs::model_thumb_lookup,
             thumbs::model_thumb_store,
             modeltex::model_texture_hints,

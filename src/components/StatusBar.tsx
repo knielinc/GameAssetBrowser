@@ -29,6 +29,7 @@ const FACET_LABEL: Record<keyof TabFilterSettings, string> = {
   sampleRates: "Sample rate",
   favorite: "Favorite",
   collections: "Collections",
+  excludeTerms: "Excluded",
 };
 
 /** Comma-joined active facet names for the "· filtered" tooltip. */

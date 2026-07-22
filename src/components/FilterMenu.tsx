@@ -64,6 +64,8 @@ export default function FilterMenu({ kind }: { kind: AssetKind }): ReactElement 
         return rangeActive(filters.size) ? 1 : 0;
       case "modified":
         return rangeActive(filters.modified) ? 1 : 0;
+      case "exclude":
+        return filters.excludeTerms.size;
     }
   };
 

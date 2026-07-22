@@ -22,15 +22,16 @@
 import { schemeBase } from "./platform";
 
 /** Which lens (tab) a scanned file belongs to. */
-export type AssetKind = "audio" | "texture" | "model";
-export const ASSET_KINDS = ["audio", "texture", "model"] as const;
+export type AssetKind = "audio" | "texture" | "model" | "document";
+export const ASSET_KINDS = ["audio", "texture", "model", "document"] as const;
 
 /** Count-readout noun per kind ("623 of 11,501 files"). Shared by StatusBar
  *  and the filter popup so the two readouts can never disagree. */
 export const NOUN: Record<AssetKind, string> = {
   audio: "files",
-  texture: "textures",
+  texture: "images",
   model: "models",
+  document: "documents",
 };
 
 export interface FileEntry {
@@ -163,16 +164,20 @@ export type AudioExt = (typeof AUDIO_EXTENSIONS)[number];
 
 export const TEXTURE_EXTENSIONS = [
   "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp",
+  "kra", "aseprite", "ase", "psd", "psb", "afphoto", "afdesign", "afpub",
 ] as const;
 export const MODEL_EXTENSIONS = [
   "fbx", "obj", "gltf", "glb", "dae", "3ds", "ply", "stl", "blend",
 ] as const;
+/** Design docs, references, notes. Mirrors types.rs. */
+export const DOCUMENT_EXTENSIONS = ["pdf", "md", "markdown", "txt"] as const;
 
-/** Per-kind extension vocabularies. Mirrors the three lists in types.rs. */
+/** Per-kind extension vocabularies. Mirrors the four lists in types.rs. */
 export const EXTENSIONS: Record<AssetKind, readonly string[]> = {
   audio: AUDIO_EXTENSIONS,
   texture: TEXTURE_EXTENSIONS,
   model: MODEL_EXTENSIONS,
+  document: DOCUMENT_EXTENSIONS,
 };
 
 export type SortField = "name" | "size" | "modified" | "ext" | "duration";
@@ -188,6 +193,7 @@ export const SORT_FIELDS_BY_KIND: Record<AssetKind, readonly SortField[]> = {
   audio: ["name", "ext", "size", "modified", "duration"],
   texture: ["name", "ext", "size", "modified"],
   model: ["name", "ext", "size", "modified"],
+  document: ["name", "ext", "size", "modified"],
 };
 
 // ---- filter facets ----
@@ -290,6 +296,10 @@ export interface TabFilterSettings {
                                // members of ANY selected collection (OR within
                                // the facet, AND across facets). Dynamic
                                // vocabulary — validated by dedupe, not a table.
+  excludeTerms: string[];      // all kinds — hide files whose name contains ANY
+                               // term (substring, lowercased). OR within the
+                               // facet, AND across facets. Dynamic vocabulary
+                               // (free text) — validated by dedupe, not a table.
 }
 
 /**
@@ -298,9 +308,10 @@ export interface TabFilterSettings {
  * shown nor restored.
  */
 export const FILTER_FACETS_BY_KIND = {
-  audio: ["favorite", "collections", "duration", "audioChannels", "sampleRates", "modified"],
-  texture: ["favorite", "collections", "channels", "material", "colors", "res", "square", "pot", "modified"],
-  model: ["favorite", "collections", "size", "modified"],
+  audio: ["favorite", "collections", "duration", "audioChannels", "sampleRates", "modified", "excludeTerms"],
+  texture: ["favorite", "collections", "channels", "material", "colors", "res", "square", "pot", "modified", "excludeTerms"],
+  model: ["favorite", "collections", "size", "modified", "excludeTerms"],
+  document: ["favorite", "collections", "size", "modified", "excludeTerms"],
 } as const satisfies Record<AssetKind, readonly (keyof TabFilterSettings)[]>;
 
 /** Per-tab persisted view state. */
@@ -345,6 +356,10 @@ export interface ExternalAppSettings {
   kind: AssetKind;
   name: string;
   exe: string;
+  /** Restrict the entry to these file extensions (lowercase, no dot) — e.g.
+   *  an Aseprite editor only for ["aseprite","ase"] rather than every image.
+   *  Absent/empty means every file of `kind`, the pre-feature behaviour. */
+  exts?: string[];
 }
 
 export interface Settings {

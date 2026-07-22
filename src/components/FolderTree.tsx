@@ -19,7 +19,7 @@ export interface FolderNode {
   children: FolderNode[];
 }
 
-const emptyCounts = (): Record<AssetKind, number> => ({ audio: 0, texture: 0, model: 0 });
+const emptyCounts = (): Record<AssetKind, number> => ({ audio: 0, texture: 0, model: 0, document: 0 });
 
 /** Natural, case-insensitive folder ordering ("Kick 2" before "Kick 10"). */
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -210,7 +210,7 @@ function TreeNode({
   // Self-hidden, or excluded because an ancestor is hidden. Either way the
   // content is out of the query, so present the row the same muted way.
   const effectiveHidden = hidden || ancestorHidden;
-  const breakdown = `${node.counts.audio} audio · ${node.counts.texture} textures · ${node.counts.model} models`;
+  const breakdown = `${node.counts.audio} audio · ${node.counts.texture} images · ${node.counts.model} models · ${node.counts.document} documents`;
 
   // Every folder — root or subfolder — scopes the file list the same way: plain
   // click shows ONLY this folder's content, ctrl/cmd-click adds it to what's

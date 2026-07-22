@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
-import { AudioLines, Box, Copy, Image, Maximize2, Minimize2, Minus, Square, X } from "lucide-react";
+import { AudioLines, Box, Copy, FileText, Image, Maximize2, Minimize2, Minus, Square, X } from "lucide-react";
 import { scopePredicate, useLibraryStore } from "../stores/libraryStore";
 import { ASSET_KINDS, type AssetKind } from "../types";
 import { switchTab } from "../stores/tabs";
 import { toggleWindowFullscreen, toggleWindowMaximize } from "../hooks/useWindowFullscreen";
+import { useOverflowCollapse } from "../hooks/useOverflowCollapse";
 import SettingsMenu from "./SettingsMenu";
 
 /**
@@ -31,8 +32,9 @@ const win = getCurrentWindow();
 
 const TAB_META: Record<AssetKind, { label: string; icon: typeof Box; hue: string }> = {
   audio: { label: "Audio", icon: AudioLines, hue: "text-kind-audio" },
-  texture: { label: "Textures", icon: Image, hue: "text-kind-texture" },
+  texture: { label: "Images", icon: Image, hue: "text-kind-texture" },
   model: { label: "Models", icon: Box, hue: "text-kind-model" },
+  document: { label: "Docs", icon: FileText, hue: "text-kind-document" },
 };
 
 function ControlButton({
@@ -74,7 +76,7 @@ export default function TitleBar(): ReactElement {
   // three. Same derivation the tab row used before it moved up here.
   const counts = useMemo(() => {
     const inScope = scopePredicate(folderScopes, hiddenFolders);
-    const c: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0 };
+    const c: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0, document: 0 };
     for (const f of allFiles) {
       if (!inScope(f.path)) continue;
       c[f.kind]++;
@@ -105,8 +107,16 @@ export default function TitleBar(): ReactElement {
 
   const log = (what: string) => (err: unknown) => console.error(`window ${what} failed`, err);
 
+  // Collapse the tab labels/counts (and the branding text) to icons when the
+  // bar would otherwise overflow — otherwise the window controls on the right
+  // get pushed off the edge in a narrow window.
+  const { ref: barRef, compact } = useOverflowCollapse();
+
   return (
-    <div className="flex h-10 shrink-0 select-none items-center gap-2 bg-header pr-0">
+    <div
+      ref={barRef}
+      className="flex h-10 shrink-0 select-none items-center gap-2 bg-header pr-0"
+    >
       {/* App branding. Draggable; icon/text are pointer-events-none so the drag
           handler still receives the pointer. */}
       <div data-tauri-drag-region className="flex h-full shrink-0 items-center gap-2 pl-3 pr-1">
@@ -130,9 +140,11 @@ export default function TitleBar(): ReactElement {
             WebkitMaskPosition: "center",
           }}
         />
-        <span className="pointer-events-none text-[12px] font-semibold tracking-tight">
-          Game Asset Browser
-        </span>
+        {!compact && (
+          <span className="pointer-events-none text-[12px] font-semibold tracking-tight">
+            Game Asset Browser
+          </span>
+        )}
       </div>
 
       <SettingsMenu />
@@ -147,23 +159,28 @@ export default function TitleBar(): ReactElement {
             <button
               key={kind}
               type="button"
-              title={`${label} — Ctrl+${i + 1}`}
+              title={`${label} · ${counts[kind].toLocaleString()} — Ctrl+${i + 1}`}
               className={clsx(
-                "flex h-[26px] items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium transition-[background-color,color] duration-[120ms]",
+                "flex h-[26px] items-center rounded-full text-[11px] font-medium transition-[background-color,color] duration-[120ms]",
+                compact ? "w-8 justify-center" : "gap-1.5 px-2.5",
                 active ? "bg-raised text-text shadow-e1" : "text-dim hover:text-text",
               )}
               onClick={() => switchTab(kind)}
             >
               <Icon size={13} className={clsx(hue, !active && "opacity-60")} />
-              {label}
-              <span
-                className={clsx(
-                  "rounded-full px-1.5 text-[10px] tabular-nums",
-                  active ? "bg-accent/15 text-accent" : "bg-overlay text-dim",
-                )}
-              >
-                {counts[kind].toLocaleString()}
-              </span>
+              {!compact && (
+                <>
+                  {label}
+                  <span
+                    className={clsx(
+                      "rounded-full px-1.5 text-[10px] tabular-nums",
+                      active ? "bg-accent/15 text-accent" : "bg-overlay text-dim",
+                    )}
+                  >
+                    {counts[kind].toLocaleString()}
+                  </span>
+                </>
+              )}
             </button>
           );
         })}

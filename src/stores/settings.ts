@@ -55,6 +55,7 @@ function defaultFilterSettings(): TabFilterSettings {
     sampleRates: [],
     favorite: false,
     collections: [],
+    excludeTerms: [],
   };
 }
 
@@ -63,7 +64,7 @@ function defaultTabSettings(kind: AssetKind): TabSettings {
     sortField: "name",
     sortDir: "asc",
     extFilter: [],
-    viewMode: kind === "audio" ? "list" : "grid",
+    viewMode: kind === "audio" || kind === "document" ? "list" : "grid",
     cellSize: 132,
     groupMaterials: true,
     filters: defaultFilterSettings(),
@@ -83,6 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
     audio: defaultTabSettings("audio"),
     texture: defaultTabSettings("texture"),
     model: defaultTabSettings("model"),
+    document: defaultTabSettings("document"),
   },
   folderScopes: [],
   hiddenFolders: [],
@@ -173,6 +175,11 @@ function sanitizeFilters(kind: AssetKind, raw: unknown): TabFilterSettings {
     // simply matches nothing until it's cleared; onCollectionRenamed prunes the
     // live ones on rename/delete.
     collections: [...new Set(strArray(raw.collections, []))],
+    // Free-text terms — normalize to trimmed lowercase (so they compare
+    // directly against nameLower) and dedupe. Same no-table path as collections.
+    excludeTerms: [
+      ...new Set(strArray(raw.excludeTerms, []).map((s) => s.trim().toLowerCase()).filter(Boolean)),
+    ],
   };
   // The sortField gate, generalized: a texture-only facet that somehow landed
   // in the audio tab's settings degrades to off, never to an invisible
@@ -220,6 +227,7 @@ function upgradeV1(old: SettingsV1): Record<string, unknown> {
       },
       texture: defaultTabSettings("texture"),
       model: defaultTabSettings("model"),
+      document: defaultTabSettings("document"),
     },
   };
 }
@@ -248,6 +256,7 @@ export function sanitize(raw: unknown): Settings {
       audio: sanitizeTab("audio", tabs.audio),
       texture: sanitizeTab("texture", tabs.texture),
       model: sanitizeTab("model", tabs.model),
+      document: sanitizeTab("document", tabs.document),
     },
     // Absent in files written before this feature → default to empty. Stale
     // entries (folders since deleted) are pruned after the next scan by
@@ -266,7 +275,8 @@ export function sanitize(raw: unknown): Settings {
 }
 
 /** Entries need a valid kind, a non-empty name, and a non-empty exe path —
- *  anything else is dropped, the sanitizer stays total. */
+ *  anything else is dropped, the sanitizer stays total. `exts` is optional; an
+ *  absent/empty list means the entry applies to every file of its kind. */
 function sanitizeExternalApps(raw: unknown): ExternalAppSettings[] {
   if (!Array.isArray(raw)) return [];
   const out: ExternalAppSettings[] = [];
@@ -275,7 +285,16 @@ function sanitizeExternalApps(raw: unknown): ExternalAppSettings[] {
     if (typeof v.kind !== "string" || !(ASSET_KINDS as readonly string[]).includes(v.kind)) continue;
     if (typeof v.name !== "string" || v.name.trim() === "") continue;
     if (typeof v.exe !== "string" || v.exe === "") continue;
-    out.push({ kind: v.kind as AssetKind, name: v.name, exe: v.exe });
+    const kind = v.kind as AssetKind;
+    // Keep only real extensions of this kind, lowercased and dot-stripped; drop
+    // the field entirely when nothing survives so the entry matches all files.
+    const allowed = new Set<string>(EXTENSIONS[kind]);
+    const exts = strArray(v.exts, [])
+      .map((e) => e.toLowerCase().replace(/^\./, ""))
+      .filter((e) => allowed.has(e));
+    const app: ExternalAppSettings = { kind, name: v.name, exe: v.exe };
+    if (exts.length > 0) app.exts = [...new Set(exts)];
+    out.push(app);
   }
   return out;
 }
@@ -346,6 +365,7 @@ function tabToSettings(t: TabState): TabSettings {
       audioChannels: [...t.filters.audioChannels],
       sampleRates: [...t.filters.sampleRates],
       collections: [...t.filters.collections],
+      excludeTerms: [...t.filters.excludeTerms],
     },
   };
 }
@@ -367,6 +387,7 @@ function currentSettings(): Settings {
       audio: tabToSettings(lib.tabs.audio),
       texture: tabToSettings(lib.tabs.texture),
       model: tabToSettings(lib.tabs.model),
+      document: tabToSettings(lib.tabs.document),
     },
     folderScopes: lib.folderScopes,
     hiddenFolders: lib.hiddenFolders,
@@ -503,6 +524,7 @@ function applySettings(settings: Settings): void {
         audioChannels: new Set(p.filters.audioChannels as AudioChannelGroup[]),
         sampleRates: new Set(p.filters.sampleRates as SampleRateBucket[]),
         collections: new Set(p.filters.collections),
+        excludeTerms: new Set(p.filters.excludeTerms),
       },
     };
   }

@@ -6,8 +6,14 @@ import ModelViewport from "./model/ModelViewport";
 import ModelLightControls from "./model/ModelLightControls";
 import TexturePreview, { type MeshMode } from "./texture/TexturePreview";
 import Sprite2DView from "./texture/Sprite2DView";
+import SpriteArtView, { isSpriteArt } from "./texture/SpriteArtView";
 import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
 import { keysForFile, keysForMaterial } from "./texture/TextureInspector";
+import DocumentPreview from "./document/DocumentPreview";
+import { docIsPdf, docIsPsd, docIsTextual, docSupportsZoom } from "./document/doc";
+import DocViewControls from "./document/DocViewControls";
+import PdfLayoutControls from "./document/PdfLayoutControls";
+import ReadWidthControls from "./document/ReadWidthControls";
 
 export interface FullscreenPreviewProps {
   file: LibFile;
@@ -85,15 +91,28 @@ export default function FullscreenPreview({
           {file.name}
         </span>
         <span className="truncate font-mono text-[10px] text-dim">{file.path}</span>
-        <span className="ml-auto shrink-0 text-[10px] text-dim">Space or Esc to close</span>
-        <button type="button" className="icon-btn shrink-0" title="Close" onClick={onClose}>
-          <X size={14} />
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          {file.kind === "document" && docIsPdf(file.ext) && <PdfLayoutControls />}
+          {file.kind === "document" && docIsTextual(file.ext) && <ReadWidthControls />}
+          {file.kind === "document" && docSupportsZoom(file.ext) && <DocViewControls />}
+          <span className="text-[10px] text-dim">Space or Esc to close</span>
+          <button type="button" className="icon-btn" title="Close" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         <div className="min-h-0 flex-1">
-          {file.kind === "model" ? (
+          {file.kind === "document" || (file.kind === "texture" && docIsPsd(file.ext)) ? (
+            <div className="flex h-full w-full flex-col overflow-hidden rounded-xl bg-panel shadow-e1">
+              <DocumentPreview key={file.path} path={file.path} ext={file.ext} autoFocusPdf />
+            </div>
+          ) : file.kind === "texture" && isSpriteArt(file.ext) ? (
+            <div className="flex h-full w-full flex-col overflow-hidden rounded-xl bg-panel shadow-e1">
+              <SpriteArtView key={file.path} path={file.path} />
+            </div>
+          ) : file.kind === "model" ? (
             <ModelViewport path={file.path} />
           ) : use2D ? (
             <div className="relative h-full w-full overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
@@ -135,7 +154,7 @@ export default function FullscreenPreview({
             </div>
           )}
         </div>
-        {file.kind === "texture" && (Object.keys(keys).length > 0 || use2D) && (
+        {file.kind === "texture" && !isSpriteArt(file.ext) && !docIsPsd(file.ext) && (Object.keys(keys).length > 0 || use2D) && (
           <div className="shrink-0">
             <PreviewControls
               value={preview3d}
@@ -158,7 +177,7 @@ export default function FullscreenPreview({
         )}
       </div>
 
-      {file.kind === "texture" && thumb?.info != null && (
+      {file.kind === "texture" && !isSpriteArt(file.ext) && !docIsPsd(file.ext) && thumb?.info != null && (
         <div className="flex h-8 shrink-0 items-center gap-4 px-4 text-[11px] text-dim">
           <span className="tabular-nums">
             thumbnail {thumb.info.width}×{thumb.info.height}

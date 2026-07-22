@@ -96,7 +96,7 @@ export interface FacetCounts {
   res: RangeHistogram | null;                  // texture only
   /** texture only; null otherwise. */
   shape: { square: ShapeRow; pot: ShapeRow } | null;
-  size: RangeHistogram | null;                 // model only
+  size: RangeHistogram | null;                 // model + document
   /** All kinds — the single "Favorite" row (starred file), self-excluded. */
   favorite: ShapeRow;
   /** All kinds — one row per collection present in scope ∪ selected, in the
@@ -233,6 +233,10 @@ export function useFacetCounts(
     const hasQuery = q !== "";
     const inScope = scopePredicate(folderScopes, hiddenFolders);
     const flt = filters;
+    // Mirror useVisibleFiles: exclusion narrows the pool that every OTHER
+    // facet's counts are measured against, exactly as the query does.
+    const excludeList = [...flt.excludeTerms];
+    const hasExclude = excludeList.length > 0;
 
     // Same kind-gating as useVisibleFiles' facet gates.
     const extActive = extFilter.size > 0;
@@ -242,7 +246,7 @@ export function useFacetCounts(
     const resActive = kind === "texture" && rangeActive(flt.res);
     const sqActive = kind === "texture" && flt.square;
     const potActive = kind === "texture" && flt.pot;
-    const sizeActive = kind === "model" && rangeActive(flt.size);
+    const sizeActive = (kind === "model" || kind === "document") && rangeActive(flt.size);
     const modActive = rangeActive(flt.modified);
     const colorActive = kind === "texture" && flt.colors.size > 0;
     const achanActive = kind === "audio" && flt.audioChannels.size > 0;
@@ -359,12 +363,13 @@ export function useFacetCounts(
       if (rb !== null) presentRates.add(rb);
       if (d !== undefined) widen(durDomain, d);
       if (edge !== null) widen(resDomain, edge);
-      if (kind === "model") widen(sizeDomain, f.size / MIB);
+      if (kind === "model" || kind === "document") widen(sizeDomain, f.size / MIB);
       // mtime 0/negative marks a stat error (see scanner.rs unix_seconds) —
       // one 1970 outlier would flatten the whole date axis.
       if (f.modified > 0) widen(modDomain, f.modified);
 
       if (hasQuery && !f.nameLower.includes(q)) continue;
+      if (hasExclude && excludeList.some((ex) => f.nameLower.includes(ex))) continue;
       // Looked up for every scoped texture while the popup holds a map, not
       // only when the facet is active — the Material rows need counts before
       // anything is selected.
@@ -404,7 +409,8 @@ export function useFacetCounts(
         if (dm[0] === dm[1] && (mask | SQ) === FULL) sqCount++;
         if (isPot(dm[0]) && isPot(dm[1]) && (mask | POT) === FULL) potCount++;
       }
-      if (kind === "model" && (mask | SIZE) === FULL) sizeValues.push(f.size / MIB);
+      if ((kind === "model" || kind === "document") && (mask | SIZE) === FULL)
+        sizeValues.push(f.size / MIB);
       if (f.modified > 0 && (mask | MOD) === FULL) modValues.push(f.modified);
       if (favorites.has(f.path) && (mask | FAV) === FULL) favCount++;
       if ((mask | COL) === FULL) {
@@ -485,7 +491,10 @@ export function useFacetCounts(
               square: { count: sqCount, selected: flt.square },
               pot: { count: potCount, selected: flt.pot },
             },
-      size: kind !== "model" ? null : histogram(sizeValues, true, asRangeDomain(sizeDomain)),
+      size:
+        kind === "model" || kind === "document"
+          ? histogram(sizeValues, true, asRangeDomain(sizeDomain))
+          : null,
       favorite: { count: favCount, selected: flt.favorite },
       modified: histogram(modValues, false, asRangeDomain(modDomain)),
       visible,

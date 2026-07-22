@@ -28,11 +28,20 @@ export const useExternalAppsStore = create<ExternalAppsState>()((set) => ({
   removeApp: (index) => set((s) => ({ apps: s.apps.filter((_, i) => i !== index) })),
 }));
 
-/** The apps offered on a file of `kind` — context menus filter through here so
- *  a model editor never shows up on an audio row. */
+/** The apps offered on a file of `kind` (and optional `ext`) — context menus
+ *  filter through here so a model editor never shows up on an audio row, and a
+ *  format-restricted entry (e.g. Aseprite) only on its extensions. An entry
+ *  with no `exts` matches every file of the kind. `ext` is compared
+ *  case-insensitively and expected without a leading dot (FileEntry.ext). */
 export function appsForKind(
   apps: readonly ExternalAppSettings[],
   kind: AssetKind,
+  ext?: string,
 ): ExternalAppSettings[] {
-  return apps.filter((a) => a.kind === kind);
+  const e = ext?.toLowerCase();
+  return apps.filter(
+    (a) =>
+      a.kind === kind &&
+      (a.exts === undefined || a.exts.length === 0 || (e !== undefined && a.exts.includes(e))),
+  );
 }

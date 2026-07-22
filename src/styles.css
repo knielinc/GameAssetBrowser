@@ -31,6 +31,7 @@
   --color-kind-audio: #45c58a;
   --color-kind-texture: #66c6dc;
   --color-kind-model: #ffb454;
+  --color-kind-document: #b79cff;
 
   /* PBR channel palette — functional colour on the material channel strip.
      Normal is periwinkle (like an actual tangent-space normal map), so a
@@ -97,11 +98,15 @@ textarea {
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-raised);
-  border-radius: 5px;
-  border: 2px solid var(--color-bg);
+  border-radius: 6px;
+  /* Transparent border + padding-box clip insets the thumb WITHOUT painting a
+     coloured ring — so it reads the same on any surface (no outline). */
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a2a38;
+  background: #3a3d4a;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
@@ -111,7 +116,39 @@ textarea {
    raised panel — step it one tone up. */
 .facet-scroll::-webkit-scrollbar-thumb {
   background: var(--color-overlay);
-  border-color: var(--color-raised);
+}
+
+/* Markdown preview: use the app background instead of GitHub's own, so it
+   matches the main window and the shared scrollbar's bg-coloured border blends
+   into the track (no visible outline). The `.doc-markdown` descendant selector
+   outranks github-markdown-css's `.markdown-body` background. */
+.doc-markdown,
+.doc-markdown .markdown-body {
+  background: var(--color-bg);
+}
+/* Transparency checkerboard behind a PSD composite. Two dark greys so it reads
+   on the dark chrome without shouting. */
+.doc-checker {
+  background-color: #191920;
+  background-image:
+    linear-gradient(45deg, #23232b 25%, transparent 25%),
+    linear-gradient(-45deg, #23232b 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #23232b 75%),
+    linear-gradient(-45deg, transparent 75%, #23232b 75%);
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+}
+
+/* github-markdown-css sets `.markdown-body { margin: 0 }`, which cancels the
+   readable-mode `mx-auto` centering (same specificity, but it loads later).
+   Restore auto side-margins at higher specificity; in full-width mode the body
+   is 100% wide so the auto margins collapse to zero on their own. */
+.doc-markdown .markdown-body {
+  margin-inline: auto;
 }
 
 /* ---------------------------------------------------------- components --- */

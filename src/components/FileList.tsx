@@ -477,7 +477,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
             },
             // One entry per registered app of this kind (External apps…),
             // single-target: an editor opens one document, not a selection.
-            ...appsForKind(externalApps, kind).map((a) => ({
+            ...appsForKind(externalApps, kind, menu.file.ext).map((a) => ({
               label: `Open with ${a.name}`,
               icon: ExternalLink,
               onClick: () => {

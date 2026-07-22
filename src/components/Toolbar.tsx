@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactElement,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
 import {
   ArrowDown,
@@ -33,6 +26,7 @@ import { useRenderPrefs } from "../stores/renderPrefs";
 import { usePanelPrefs } from "../stores/panelPrefs";
 import { shuffleVisible, useShuffleStore } from "../stores/shuffle";
 import { MAX_CELL, MIN_CELL } from "../stores/settings";
+import { useOverflowCollapse } from "../hooks/useOverflowCollapse";
 
 /** A folder/inspector panel toggle, sitting next to the panel it opens. */
 function PanelToggle({
@@ -141,8 +135,9 @@ const SORT_LABELS: Record<SortField, string> = {
 
 const PLACEHOLDER: Record<AssetKind, string> = {
   audio: "Search samples…",
-  texture: "Search textures…",
+  texture: "Search images…",
   model: "Search models…",
+  document: "Search documents…",
 };
 
 /** Close a popup on outside-click or Escape. Escape is captured + stopped so it
@@ -167,49 +162,6 @@ function useDismiss(open: boolean, close: () => void, ref: React.RefObject<HTMLE
   }, [open, close, ref]);
 }
 
-/**
- * Flip to `compact` when the toolbar's inline controls no longer fit, and back
- * when there's room again. Detection is genuine overflow (scrollWidth vs
- * clientWidth) rather than a guessed pixel breakpoint, so it adapts to whichever
- * controls a given tab actually shows. A hysteresis margin on the way back out
- * stops it oscillating around the threshold.
- */
-function useOverflowCollapse(): { ref: React.RefObject<HTMLDivElement | null>; compact: boolean } {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [compact, setCompact] = useState(false);
-  const compactRef = useRef(false);
-  const collapseWidthRef = useRef(0);
-  compactRef.current = compact;
-
-  const measure = useCallback((): void => {
-    const el = ref.current;
-    if (el === null) return;
-    if (!compactRef.current) {
-      // Expanded: collapse once the controls spill past the available width.
-      if (el.scrollWidth > el.clientWidth + 1) {
-        collapseWidthRef.current = el.clientWidth;
-        setCompact(true);
-      }
-    } else if (el.clientWidth > collapseWidthRef.current + 64) {
-      // Compact: expand again once we've clearly grown past where we collapsed.
-      setCompact(false);
-    }
-  }, []);
-
-  // Re-measure after every commit — an expand that still overflows re-collapses
-  // on the next pass and settles (collapseWidth only ratchets up, so it converges).
-  useLayoutEffect(measure);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (el === null) return;
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [measure]);
-
-  return { ref, compact };
-}
 
 export interface ToolbarProps {
   kind: AssetKind;
@@ -249,7 +201,8 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const { ref: barRef, compact } = useOverflowCollapse();
 
   const { query, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
-  // Audio has no grid implementation — never render a control that does nothing.
+  // Audio has no grid implementation — never render a grid control that does
+  // nothing. Documents support both (grid shows PDF/PSD thumbnails).
   const canGrid = kind !== "audio";
   const showInfo = canGrid && viewMode === "grid";
 

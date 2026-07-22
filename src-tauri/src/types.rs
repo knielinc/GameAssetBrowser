@@ -5,11 +5,14 @@ use serde::Serialize;
 
 pub const AUDIO_EXTENSIONS: [&str; 7] = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4a"];
 
-/// `psd` is deliberately absent: Synty and freestylized ship PSD *sources*,
-/// which would roughly double the texture grid with files that aren't assets.
 /// `gif` and `webp` are here for 2D artists — animated GIFs preview and play.
-pub const TEXTURE_EXTENSIONS: [&str; 12] = [
-    "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp",
+/// `kra`/`aseprite`/`ase`/`psd`/`psb` are layered art sources decoded to their
+/// flattened image (see thumbs::decode_image); the preview shows their layers.
+/// `afphoto`/`afdesign`/`afpub` (Affinity) are closed-format art whose only
+/// readable pixels are the embedded PNG preview — decoded flat, no layer panel.
+pub const TEXTURE_EXTENSIONS: [&str; 20] = [
+    "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp", "kra",
+    "aseprite", "ase", "psd", "psb", "afphoto", "afdesign", "afpub",
 ];
 
 /// `blend` is scanned but not previewable — listing it beats it silently
@@ -17,6 +20,11 @@ pub const TEXTURE_EXTENSIONS: [&str; 12] = [
 pub const MODEL_EXTENSIONS: [&str; 9] = [
     "fbx", "obj", "gltf", "glb", "dae", "3ds", "ply", "stl", "blend",
 ];
+
+/// Documents game devs keep alongside assets — design docs, references, notes.
+/// pdf/md/txt render in the webview directly. (Photoshop psd/psb moved to the
+/// Images tab, where they preview with a layer panel like kra/aseprite.)
+pub const DOCUMENT_EXTENSIONS: [&str; 4] = ["pdf", "md", "markdown", "txt"];
 
 /// Directories never worth walking.
 ///
@@ -83,13 +91,14 @@ pub struct ThumbBatch {
 }
 
 /// Which lens (tab) a scanned file belongs to. Serializes as
-/// `"audio" | "texture" | "model"`.
+/// `"audio" | "texture" | "model" | "document"`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AssetKind {
     Audio,
     Texture,
     Model,
+    Document,
 }
 
 #[derive(Clone, Serialize)]

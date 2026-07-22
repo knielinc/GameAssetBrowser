@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type ReactElement } from "react";
-import { AudioLines, Box, Image as ImageIcon, X } from "lucide-react";
+import { AudioLines, Box, FileText, Image as ImageIcon, X } from "lucide-react";
 import { showInExplorer } from "../ipc/commands";
 import { basename, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { ASSET_KINDS, type AssetKind } from "../types";
@@ -7,8 +7,9 @@ import { humanSize } from "./FileRow";
 
 const KIND_META: Record<AssetKind, { label: string; icon: typeof Box; hue: string }> = {
   audio: { label: "Audio", icon: AudioLines, hue: "text-kind-audio" },
-  texture: { label: "Textures", icon: ImageIcon, hue: "text-kind-texture" },
+  texture: { label: "Images", icon: ImageIcon, hue: "text-kind-texture" },
   model: { label: "Models", icon: Box, hue: "text-kind-model" },
+  document: { label: "Docs", icon: FileText, hue: "text-kind-document" },
 };
 
 interface Agg {
@@ -41,6 +42,7 @@ function computeStats(files: readonly LibFile[], roots: readonly string[]): Stat
     audio: { count: 0, bytes: 0 },
     texture: { count: 0, bytes: 0 },
     model: { count: 0, bytes: 0 },
+    document: { count: 0, bytes: 0 },
   };
   const rootAggs = new Map<string, Agg>(roots.map((r) => [r, { count: 0, bytes: 0 }]));
   // Trimmed roots longest-first so the most specific one wins the prefix test.

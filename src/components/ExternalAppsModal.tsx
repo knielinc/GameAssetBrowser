@@ -1,18 +1,24 @@
 import { useEffect, useState, type ReactElement } from "react";
 import clsx from "clsx";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AudioLines, Box, FileSearch, Image as ImageIcon, Plus, X } from "lucide-react";
-import { ASSET_KINDS, type AssetKind } from "../types";
+import { AudioLines, Box, FileSearch, FileText, Image as ImageIcon, Plus, X } from "lucide-react";
+import { ASSET_KINDS, EXTENSIONS, type AssetKind } from "../types";
 import { useExternalAppsStore } from "../stores/externalApps";
 import { useLibraryStore } from "../stores/libraryStore";
 import { IS_WINDOWS } from "../platform";
 
 /** Kind labels/icons for the picker chips and the per-entry badge. */
-const KIND_LABEL: Record<AssetKind, string> = { audio: "Audio", texture: "Texture", model: "Model" };
+const KIND_LABEL: Record<AssetKind, string> = {
+  audio: "Audio",
+  texture: "Image",
+  model: "Model",
+  document: "Document",
+};
 const KIND_ICON: Record<AssetKind, typeof AudioLines> = {
   audio: AudioLines,
   texture: ImageIcon,
   model: Box,
+  document: FileText,
 };
 
 /** Filename without directory or a trailing `.exe`/`.app` — the default app
@@ -38,6 +44,18 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
   const [kind, setKind] = useState<AssetKind>(useLibraryStore.getState().activeTab);
   const [exe, setExe] = useState<string | null>(null);
   const [name, setName] = useState("");
+  // Format restriction for the draft: extensions the entry is limited to.
+  // Empty = every file of the kind (the default). Reset whenever the kind
+  // changes, since a texture's extensions mean nothing for an audio entry.
+  const [exts, setExts] = useState<string[]>([]);
+
+  const pickKind = (k: AssetKind): void => {
+    setKind(k);
+    setExts([]);
+  };
+  const toggleExt = (x: string): void => {
+    setExts((cur) => (cur.includes(x) ? cur.filter((e) => e !== x) : [...cur, x]));
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -75,9 +93,11 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
   const canAdd = exe !== null && name.trim() !== "";
   const add = (): void => {
     if (exe === null || name.trim() === "") return;
-    addApp({ kind, name: name.trim(), exe });
+    // Omit `exts` when unrestricted so the entry matches every file of the kind.
+    addApp({ kind, name: name.trim(), exe, ...(exts.length > 0 ? { exts } : {}) });
     setExe(null);
     setName("");
+    setExts([]);
   };
 
   return (
@@ -119,13 +139,24 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
                       a.kind === "audio" && "text-kind-audio",
                       a.kind === "texture" && "text-kind-texture",
                       a.kind === "model" && "text-kind-model",
+                      a.kind === "document" && "text-kind-document",
                     )}
                   >
                     <Icon size={11} />
                     {KIND_LABEL[a.kind]}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[12px] text-text">{a.name}</div>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="truncate text-[12px] text-text">{a.name}</span>
+                      {a.exts !== undefined && a.exts.length > 0 && (
+                        <span
+                          className="shrink-0 truncate text-[10px] text-dim"
+                          title={`Only ${a.exts.map((x) => `.${x}`).join(", ")}`}
+                        >
+                          {a.exts.map((x) => `.${x}`).join(" ")}
+                        </span>
+                      )}
+                    </div>
                     <div className="truncate font-mono text-[10px] text-faint" title={a.exe}>
                       {a.exe}
                     </div>
@@ -154,7 +185,7 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
                 key={k}
                 type="button"
                 className={clsx("chip", k === kind && "chip-active")}
-                onClick={() => setKind(k)}
+                onClick={() => pickKind(k)}
               >
                 {KIND_LABEL[k]}
               </button>
@@ -165,6 +196,25 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
                 {exe === null ? "Choose .exe…" : "Change…"}
               </span>
             </button>
+          </div>
+
+          {/* Optional format gate: pick specific extensions so the entry only
+              shows on, say, .aseprite or .kra instead of every image. None
+              selected = all formats of the kind (the common case). */}
+          <div className="mb-2 flex flex-wrap items-center gap-1">
+            <span className="mr-0.5 text-[10px] uppercase tracking-wide text-faint">
+              {exts.length === 0 ? "All formats" : "Formats"}
+            </span>
+            {EXTENSIONS[kind].map((x) => (
+              <button
+                key={x}
+                type="button"
+                className={clsx("chip", exts.includes(x) && "chip-active")}
+                onClick={() => toggleExt(x)}
+              >
+                .{x}
+              </button>
+            ))}
           </div>
           {exe !== null && (
             <div className="mb-2 truncate font-mono text-[10px] text-faint" title={exe}>

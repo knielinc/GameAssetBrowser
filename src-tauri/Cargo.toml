@@ -47,6 +47,13 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.flate2]
 opt-level = 3
+# Layered-art decoders (kra/aseprite/psd) — same reasoning as the image codecs.
+[profile.dev.package.ah-asefile]
+opt-level = 3
+[profile.dev.package.zip]
+opt-level = 3
+[profile.dev.package.psd]
+opt-level = 3
 # Audio decode and waveform peaks are the same shape of work.
 [profile.dev.package.symphonia]
 opt-level = 3
@@ -109,6 +116,26 @@ image = { version = "0.25", default-features = false, features = [
 # libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
 # animated WebP (launcher assets, etc.); libwebp reads them.
 webp = "0.3"
+# Layered art sources shown in the Images tab. Krita (.kra) is a ZIP holding a
+# flattened `mergedimage.png`; Aseprite (.aseprite/.ase) is a sprite format
+# asefile composites into an RGBA frame. Both feed the normal thumbnail path
+# once decoded.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Actively-maintained asefile fork: the original 0.3.8 panics compositing
+# tilemap cels (out-of-bounds slice), which many real .aseprite files use.
+ah-asefile = "0.4"
+# Photoshop (.psd/.psb) shown in the Images tab: `psd` flattens the document to
+# an RGBA image for the thumbnail/preview (its own layer-tree API is read via the
+# ag-psd panel in the frontend, so we only need the composite here).
+psd = "0.3"
+# Krita (.kra) layer extraction for the layer show/hide panel. roxmltree walks
+# maindoc.xml for the layer tree; the per-layer pixels are decoded by our own
+# tile reader (thumbs::kra_assemble_layer) — a small, self-contained LZF +
+# planar-tile decoder. We used to lean on the `krita` crate for this, but it
+# hard-depended on minidom → quick-xml 0.17 (a future-incompat dep we never
+# actually ran) plus a second, old copy of zip; decoding the tiles ourselves
+# drops that whole subtree. roxmltree has no transitive deps.
+roxmltree = "0.20"
 # Duplicate finder (dupes.rs): xxh3 for the two-stage content hash — not
 # cryptographic on purpose, it only needs to be fast and collision-checked by
 # the full-file confirm pass.

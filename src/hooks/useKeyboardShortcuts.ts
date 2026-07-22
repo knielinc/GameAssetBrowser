@@ -72,7 +72,7 @@ export function useKeyboardShortcuts(
         }
       }
 
-      if (e.ctrlKey && ["Digit1", "Digit2", "Digit3"].includes(e.code)) {
+      if (e.ctrlKey && ["Digit1", "Digit2", "Digit3", "Digit4"].includes(e.code)) {
         e.preventDefault();
         const next = ASSET_KINDS[Number(e.code.slice(-1)) - 1];
         if (next !== undefined) switchTab(next);

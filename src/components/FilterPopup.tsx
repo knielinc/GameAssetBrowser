@@ -58,12 +58,13 @@ function parseDate(s: string, end: boolean): number | null {
  *  `material` hosts both the membership toggle and the channel rows). */
 export type FacetId =
   | "format" | "favorite" | "collections" | "duration" | "audioChannels" | "sampleRate"
-  | "material" | "color" | "res" | "shape" | "size" | "modified";
+  | "material" | "color" | "res" | "shape" | "size" | "modified" | "exclude";
 
 export const FACET_ORDER: Record<AssetKind, readonly FacetId[]> = {
-  audio: ["format", "favorite", "collections", "duration", "audioChannels", "sampleRate", "modified"],
-  texture: ["format", "favorite", "collections", "material", "color", "res", "shape", "modified"],
-  model: ["format", "favorite", "collections", "size", "modified"],
+  audio: ["format", "favorite", "collections", "duration", "audioChannels", "sampleRate", "modified", "exclude"],
+  texture: ["format", "favorite", "collections", "material", "color", "res", "shape", "modified", "exclude"],
+  model: ["format", "favorite", "collections", "size", "modified", "exclude"],
+  document: ["format", "favorite", "collections", "size", "modified", "exclude"],
 };
 
 const FACET_LABEL: Record<FacetId, string> = {
@@ -79,6 +80,7 @@ const FACET_LABEL: Record<FacetId, string> = {
   shape: "Shape",
   size: "File size",
   modified: "Modified",
+  exclude: "Exclude names",
 };
 
 /** Swatch fills for the color facet — representative, not exact: a bucket
@@ -300,6 +302,69 @@ function RangeInput({
         if (parse(text) !== value) setText(value === null ? "" : format(value));
       }}
     />
+  );
+}
+
+/**
+ * Free-text exclude list: type a word, Enter (or comma) adds it as a chip; a
+ * file is hidden if its name contains ANY chip. Terms are normalized to trimmed
+ * lowercase before commit so they compare directly against nameLower and never
+ * duplicate on case. Empty/duplicate commits are no-ops (the Set dedups). The
+ * chips are also mirrored as removable header tokens — this body copy is where
+ * you ADD; either place removes.
+ */
+function ExcludeInput({
+  terms,
+  onAdd,
+  onRemove,
+}: {
+  terms: ReadonlySet<string>;
+  onAdd: (term: string) => void;
+  onRemove: (term: string) => void;
+}): ReactElement {
+  const [text, setText] = useState("");
+  const commit = (): void => {
+    const t = text.trim().toLowerCase();
+    if (t !== "") onAdd(t);
+    setText("");
+  };
+  return (
+    <div className="px-2.5 pb-1.5 pt-0.5">
+      <input
+        type="text"
+        spellCheck={false}
+        value={text}
+        placeholder="type a word, press ↵"
+        className="h-7 w-full min-w-0 rounded-lg bg-bg px-2 text-[12px] text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-overlay focus:ring-2 focus:ring-accent/35"
+        onChange={(e) => setText(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            commit();
+          }
+        }}
+        // Adding on blur would surprise; only Enter/comma commit. But a lone
+        // typed word left behind on close is discarded, matching RangeInput's
+        // "unparseable text never commits" rule.
+      />
+      {terms.size > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {[...terms].map((term) => (
+            <button
+              key={term}
+              type="button"
+              onClick={() => onRemove(term)}
+              className="group flex h-6 items-center gap-1 rounded-full bg-accent-fill pl-2.5 pr-1 text-[11px] font-medium text-accent-fg transition-colors duration-[120ms] hover:brightness-110"
+            >
+              −{term}
+              <span className="flex h-4 w-4 items-center justify-center rounded-full text-accent-fg/60 transition-colors duration-[120ms] group-hover:bg-accent/25 group-hover:text-accent-fg">
+                <X size={11} />
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -714,6 +779,17 @@ export default function FilterPopup({
           });
         }
         break;
+      case "exclude":
+        // Leading minus marks these as SUBTRACTIVE — the inverse of the
+        // include-style tokens above them.
+        for (const term of filters.excludeTerms) {
+          tokens.push({
+            key: `exclude:${term}`,
+            label: `−${term}`,
+            remove: () => apply({ excludeTerms: toggled(filters.excludeTerms, term) }),
+          });
+        }
+        break;
     }
   }
 
@@ -923,6 +999,14 @@ export default function FilterPopup({
           </>
         );
       }
+      case "exclude":
+        return (
+          <ExcludeInput
+            terms={filters.excludeTerms}
+            onAdd={(term) => apply({ excludeTerms: new Set(filters.excludeTerms).add(term) })}
+            onRemove={(term) => apply({ excludeTerms: toggled(filters.excludeTerms, term) })}
+          />
+        );
     }
   };
 
