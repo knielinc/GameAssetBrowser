@@ -202,12 +202,9 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const { ref: barRef, compact } = useOverflowCollapse();
 
   const { query, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
-  // Every kind now supports grid (audio shows cover art / a waveform; "all"
-  // shows a mixed grid) and every kind has an inspector (audio shows its
-  // cover/waveform + probe details; "all" dispatches on the selected file).
-  const canGrid = true;
-  const hasInspector = true;
-  const showInfo = canGrid && viewMode === "grid";
+  // Every kind supports grid + an inspector, so those controls always render;
+  // the info pills only make sense over a grid.
+  const showInfo = viewMode === "grid";
 
   const smoothPill = (menu: boolean): ReactElement => (
     <PillToggle
@@ -444,38 +441,34 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           </div>
         )}
 
-        {canGrid && (
-          <div className="ml-1 flex items-center gap-0.5 rounded-full bg-bg p-0.5">
-            {(["grid", "list"] as const).map((mode) => {
-              const Icon = mode === "grid" ? LayoutGrid : List;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  title={mode === "grid" ? "Grid" : "List"}
-                  className={clsx(
-                    "flex h-7 w-8 items-center justify-center rounded-full transition-[background-color,color] duration-[120ms]",
-                    viewMode === mode
-                      ? "bg-raised text-accent shadow-e1"
-                      : "text-faint hover:text-text",
-                  )}
-                  onClick={() => patchTab(kind, { viewMode: mode })}
-                >
-                  <Icon size={13} />
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <div className="ml-1 flex items-center gap-0.5 rounded-full bg-bg p-0.5">
+          {(["grid", "list"] as const).map((mode) => {
+            const Icon = mode === "grid" ? LayoutGrid : List;
+            return (
+              <button
+                key={mode}
+                type="button"
+                title={mode === "grid" ? "Grid" : "List"}
+                className={clsx(
+                  "flex h-7 w-8 items-center justify-center rounded-full transition-[background-color,color] duration-[120ms]",
+                  viewMode === mode
+                    ? "bg-raised text-accent shadow-e1"
+                    : "text-faint hover:text-text",
+                )}
+                onClick={() => patchTab(kind, { viewMode: mode })}
+              >
+                <Icon size={13} />
+              </button>
+            );
+          })}
+        </div>
       </div>
-      {hasInspector && (
-        <PanelToggle
-          on={rightOpen}
-          onClick={toggleRight}
-          icon={PanelRight}
-          title={rightOpen ? "Hide inspector" : "Show inspector"}
-        />
-      )}
+      <PanelToggle
+        on={rightOpen}
+        onClick={toggleRight}
+        icon={PanelRight}
+        title={rightOpen ? "Hide inspector" : "Show inspector"}
+      />
     </div>
   );
 }

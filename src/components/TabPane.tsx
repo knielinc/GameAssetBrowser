@@ -382,9 +382,6 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   // draw call); everything else stays on the classic <img> path. Falls back to
   // <img> if this WebView somehow lacks WebGL2.
   const glThumbs = kind === "texture" && hasWebGL2();
-  // Every kind now has an inspector: audio shows its cover/waveform + probe
-  // details, and the "all" tab dispatches on the SELECTED file's own kind.
-  const hasInspector = true;
 
   let content: ReactElement;
   if (scanning && !anyFiles) {
@@ -586,7 +583,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         {/* Hidden while the fullscreen preview is up: both host a WebGL
             context, and there is no reason to pay for two. Drag the handle to
             resize, just like the left sidebar; double-click resets the width. */}
-        {hasInspector && inspectorOpen && preview === null && (
+        {inspectorOpen && preview === null && (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -599,7 +596,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             context, not two). Reserve its width with a spacer so the grid keeps
             the same column count — otherwise it reflows open then reflows back
             on Escape, snapping the scroll to a fresh row-aligned offset. */}
-        {hasInspector && inspectorOpen && preview !== null && (
+        {inspectorOpen && preview !== null && (
           <div aria-hidden className="shrink-0" style={{ width: inspector.width }} />
         )}
       </div>

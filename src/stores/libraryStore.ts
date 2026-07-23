@@ -802,18 +802,6 @@ export function thumbInfos(): Map<number, ThumbInfo> {
   return out;
 }
 
-/** Files of one kind. The single O(n) pass callers already do is cheap enough
- *  that pre-partitioning by kind would be speculative — `useVisibleFiles`
- *  folds this into its existing filter loop. */
-export function countByKind(files: readonly LibFile[]): Record<AssetKind, number> {
-  const counts: Record<AssetKind, number> = { all: 0, audio: 0, texture: 0, model: 0, document: 0 };
-  for (const f of files) {
-    counts[f.kind]++;
-    counts.all++;
-  }
-  return counts;
-}
-
 export { ASSET_KINDS };
 
 /** Last path segment of a file or folder path (Windows or POSIX separators). */

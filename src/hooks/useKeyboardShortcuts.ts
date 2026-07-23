@@ -40,7 +40,7 @@ const AUTOPLAY_DEBOUNCE_MS = 60;
  *   ←/→        seek ±2 s (audio list) · move ∓1 cell (grid)
  *   Space      play/pause · Enter replay · L loop
  *   F          toggle favorite (whole selection when the focused item is in it)
- *   Ctrl+1/2/3 switch tab
+ *   Ctrl+1–5  switch tab (All / Audio / Images / Models / Docs)
  *   Ctrl+A     select all visible · Escape collapse multi-selection
  */
 export function useKeyboardShortcuts(

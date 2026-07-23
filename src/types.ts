@@ -30,10 +30,9 @@ import { schemeBase } from "./platform";
 export type AssetKind = "all" | "audio" | "texture" | "model" | "document";
 export const ASSET_KINDS = ["all", "audio", "texture", "model", "document"] as const;
 /** The four real, file-backed kinds — everything except the "all" pseudo-tab.
- *  Use this (and RealAssetKind) for anything keyed by a file's actual kind:
- *  per-kind stat tables, external-app targets, folder-tree counts. */
+ *  Iterate this for anything keyed by a file's actual kind: per-kind stat
+ *  tables, external-app targets, folder-tree counts. */
 export const REAL_ASSET_KINDS = ["audio", "texture", "model", "document"] as const;
-export type RealAssetKind = (typeof REAL_ASSET_KINDS)[number];
 
 /** Count-readout noun per kind ("623 of 11,501 files"). Shared by StatusBar
  *  and the filter popup so the two readouts can never disagree. */
