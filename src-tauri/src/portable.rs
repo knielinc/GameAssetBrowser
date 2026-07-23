@@ -24,8 +24,10 @@ impl DataHome {
         self.dir.join("settings.json")
     }
 
-    /// WebView2 user-data folder. Only used in portable mode; installed
-    /// copies keep tauri's default `%LOCALAPPDATA%` location.
+    /// WebView2 user-data folder. Only used in portable mode on Windows;
+    /// installed copies keep tauri's default `%LOCALAPPDATA%` location, and
+    /// the concept doesn't exist off Windows — hence the `cfg`.
+    #[cfg(windows)]
     pub fn webview_dir(&self) -> PathBuf {
         self.dir.join("webview")
     }
