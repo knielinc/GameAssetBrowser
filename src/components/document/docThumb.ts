@@ -109,17 +109,119 @@ async function textThumb(path: string): Promise<string | null> {
   return canvas.toDataURL("image/webp", 0.85);
 }
 
-/** Ebook → its embedded cover, downscaled. foliate parses the whole (small)
- *  archive to reach the cover; some books carry none, so this may be null and
- *  the cell falls back to a book icon. The named File lets foliate detect the
- *  container format (see EbookView). */
+/** First string in a foliate language-map (title/author values can be a bare
+ *  string or a `{ [lang]: value }` map). Empty string when there's nothing. */
+function langStr(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v !== null && typeof v === "object") {
+    for (const val of Object.values(v as Record<string, unknown>)) {
+      if (typeof val === "string") return val;
+    }
+  }
+  return "";
+}
+
+/** foliate `author` is `unknown` — a string, a `{ name }` contributor, or an
+ *  array of either. Flatten to a comma-joined display string. */
+function authorStr(a: unknown): string {
+  const one = (x: unknown): string =>
+    typeof x === "string" ? x : langStr((x as { name?: unknown } | null)?.name);
+  return (Array.isArray(a) ? a.map(one) : [one(a)]).filter(Boolean).join(", ");
+}
+
+/** Wrap `text` to at most `maxLines` lines within `maxW` px; the last line is
+ *  ellipsised if text remains. */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number, maxLines: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (ctx.measureText(test).width > maxW && cur) {
+      lines.push(cur);
+      cur = w;
+      if (lines.length === maxLines) {
+        cur = "";
+        break;
+      }
+    } else {
+      cur = test;
+    }
+  }
+  if (cur && lines.length < maxLines) lines.push(cur);
+  // Signal truncation on the last line if words are left over.
+  const shown = lines.join(" ").split(/\s+/).filter(Boolean).length;
+  if (shown < words.length && lines.length > 0) {
+    let last = lines[lines.length - 1]!;
+    while (last.length > 1 && ctx.measureText(`${last}…`).width > maxW) last = last.slice(0, -1);
+    lines[lines.length - 1] = `${last}…`;
+  }
+  return lines;
+}
+
+/** A generated "cover" for an ebook that carries no cover image: the title (and
+ *  author) drawn on a themed card, so the grid cell reads as that book rather
+ *  than a generic icon. */
+function ebookTitleCard(
+  meta: { title?: string | Record<string, string>; author?: unknown } | undefined,
+  path: string,
+): string | null {
+  const title = langStr(meta?.title) || basename(path).replace(/\.[^.]+$/, "");
+  const author = authorStr(meta?.author);
+  const W = 200;
+  const H = 260;
+  const dpr = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) return null;
+  ctx.scale(dpr, dpr);
+  const cs = getComputedStyle(document.documentElement);
+  const bg = cs.getPropertyValue("--color-panel").trim() || "#1a1c24";
+  const fg = cs.getPropertyValue("--color-text").trim() || "#edeff4";
+  const dim = cs.getPropertyValue("--color-dim").trim() || "#9a9aae";
+  const accent = cs.getPropertyValue("--color-accent").trim() || "#7c9cff";
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  // A spine-like accent bar on the left edge — the "this is a book" cue.
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, 0, 5, H);
+  ctx.textBaseline = "top";
+  const pad = 16;
+  const maxW = W - pad * 2 - 4;
+  ctx.fillStyle = fg;
+  ctx.font = "600 16px system-ui, -apple-system, 'Segoe UI', sans-serif";
+  const titleLines = wrapText(ctx, title, maxW, 7);
+  let y = pad + 10;
+  for (const line of titleLines) {
+    ctx.fillText(line, pad, y);
+    y += 20;
+  }
+  if (author) {
+    ctx.fillStyle = dim;
+    ctx.font = "12px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    const authorLines = wrapText(ctx, author, maxW, 2);
+    let ay = H - pad - authorLines.length * 15;
+    for (const line of authorLines) {
+      ctx.fillText(line, pad, ay);
+      ay += 15;
+    }
+  }
+  return canvas.toDataURL("image/webp", 0.85);
+}
+
+/** Ebook → its embedded cover, downscaled; if the book carries none, a
+ *  generated title card so the cell still reads as that specific book. foliate
+ *  parses the whole (small) archive to reach the cover/metadata. The named File
+ *  lets foliate detect the container format (see EbookView). */
 async function ebookThumb(path: string): Promise<string | null> {
   const blob = await (await fetch(docUrl(path))).blob();
   const file = new File([blob], basename(path));
   const { makeBook } = await import("../../vendor/foliate-js/view.js");
   const book = await makeBook(file);
   const cover = await book.getCover?.();
-  if (cover == null) return null;
+  if (cover == null) return ebookTitleCard(book.metadata, path);
   const bmp = await createImageBitmap(cover);
   try {
     const scale = Math.min(1, TARGET / bmp.width);
