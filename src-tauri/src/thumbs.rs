@@ -1016,9 +1016,19 @@ fn decode_raw(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
     let mut file = std::fs::File::open(p).map_err(|e| e.to_string())?;
     let len = file.metadata().map_err(|e| e.to_string())?.len();
 
-    // Fast path: container parse + a single targeted read.
+    // Fast path: container parse + a single targeted read (TIFF-based RAW & RAF).
     if let Some(img) = fast_raw_preview(&mut file, len, max_edge) {
         return Ok(img);
+    }
+
+    // CR3 (ISO-BMFF): lift the JPEG straight from the THMB/PRVW boxes. The
+    // generic byte scan below is UNUSABLE for CR3 — the 20-30 MB CRAW sensor
+    // payload in `mdat` is riddled with coincidental FFD8/FFD9 runs (a real file
+    // yields ~270 false "JPEGs"), so choose_preview would pick sensor garbage.
+    if is_cr3(&mut file) {
+        if let Some(img) = cr3_preview(&mut file, len, max_edge) {
+            return Ok(img);
+        }
     }
 
     // Fallback: slurp and byte-scan for any embedded JPEG.
@@ -1034,6 +1044,137 @@ fn decode_raw(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
         image::load_from_memory_with_format(&bytes[c.off..c.off + c.len], image::ImageFormat::Jpeg)
             .map_err(|e| format!("raw preview: {e}"))?;
     Ok(apply_orientation(img, 1))
+}
+
+/// True iff this is a Canon CR3 (`ftyp` brand `crx `). CR3 is the one RAW we
+/// support that isn't TIFF/RAF, so it needs its own extractor.
+fn is_cr3(file: &mut std::fs::File) -> bool {
+    let mut h = [0u8; 12];
+    read_exact_at(file, 0, &mut h).is_some() && &h[4..8] == b"ftyp" && &h[8..12] == b"crx "
+}
+
+/// Extract a CR3 preview by walking its ISO-BMFF boxes rather than byte-scanning
+/// the whole file. Both JPEG previews — `THMB` (small, inside moov/uuid) and
+/// `PRVW` (large, in a top-level uuid) — sit BEFORE the `mdat` sensor payload,
+/// so we read only `[0, mdat)` and locate each box by its FourCC, taking its
+/// JPEG by the box's own byte bounds (immune to nested EXIF thumbnails and to
+/// the FFD8/FFD9 noise in `mdat`).
+fn cr3_preview(file: &mut std::fs::File, len: u64, max_edge: Option<u32>) -> Option<DynamicImage> {
+    // No mdat found → hand back to the generic fallback rather than guess.
+    let mdat = mdat_offset(file, len)?;
+    // The preview region is small (a few hundred KB to a few MB); the cap is a
+    // pure safety net against a malformed box chain, never hit in practice.
+    let limit = mdat.min(len).min(32 * 1024 * 1024) as usize;
+    if limit < 8 {
+        return None;
+    }
+    let mut buf = vec![0u8; limit];
+    read_exact_at(file, 0, &mut buf)?;
+
+    let mut cands: Vec<Cand> = Vec::new();
+    for tag in [&b"THMB"[..], &b"PRVW"[..]] {
+        let mut from = 0usize;
+        while let Some(rel) = find_bytes(&buf[from..], tag) {
+            let q = from + rel; // start of the 4-char box type
+            from = q + 4;
+            if q < 4 {
+                continue;
+            }
+            // The box's 32-bit big-endian size sits in the 4 bytes before the type.
+            let box_start = q - 4;
+            let size = match rd_u32(&buf, box_start, false) {
+                Some(v) => v as usize,
+                None => continue,
+            };
+            let box_end = match box_start.checked_add(size) {
+                Some(e) if size >= 16 && e <= buf.len() => e,
+                _ => continue,
+            };
+            // The JPEG is the first FFD8 in the box and runs to the box boundary.
+            if let Some(soi) = find_bytes(&buf[q..box_end], &[0xFF, 0xD8]) {
+                let off = q + soi;
+                let (w, h) = parse_sof(&buf[off..box_end]).unwrap_or((0, 0));
+                cands.push(Cand { off, len: box_end - off, w, h });
+            }
+        }
+    }
+
+    let idx = choose_preview(&cands, max_edge)?;
+    let c = cands[idx];
+    let img =
+        image::load_from_memory_with_format(&buf[c.off..c.off + c.len], image::ImageFormat::Jpeg)
+            .ok()?;
+    Some(apply_orientation(img, cr3_orientation(&buf)))
+}
+
+/// Byte offset of the top-level `mdat` box — the compressed sensor payload.
+/// Everything the previews need precedes it. Walks the box chain by size,
+/// bounded so a malformed file can't loop or run past EOF.
+fn mdat_offset(file: &mut std::fs::File, len: u64) -> Option<u64> {
+    let mut pos: u64 = 0;
+    let mut hops = 0;
+    while pos + 8 <= len && hops < 256 {
+        hops += 1;
+        let mut hdr = [0u8; 8];
+        read_exact_at(file, pos, &mut hdr)?;
+        if &hdr[4..8] == b"mdat" {
+            return Some(pos);
+        }
+        let mut size = rd_u32(&hdr, 0, false)? as u64;
+        if size == 1 {
+            // 64-bit size in the 8 bytes following the header.
+            let mut ext = [0u8; 8];
+            read_exact_at(file, pos + 8, &mut ext)?;
+            size = u64::from_be_bytes(ext);
+        }
+        // size 0 ("to EOF") or a size smaller than its header is unusable here.
+        if size < 8 {
+            return None;
+        }
+        pos = pos.checked_add(size)?;
+    }
+    None
+}
+
+/// CR3 keeps EXIF in a `CMT1` box whose payload is a self-contained TIFF stream.
+/// Pull just the Orientation tag (0x0112) from its IFD0 so portrait shots aren't
+/// shown sideways; default to 1 (no rotation) on any miss.
+fn cr3_orientation(buf: &[u8]) -> u16 {
+    let rel = match find_bytes(buf, b"CMT1") {
+        Some(r) => r,
+        None => return 1,
+    };
+    let tiff = rel + 4; // the TIFF header follows the FourCC
+    let le = match buf.get(tiff..tiff + 2) {
+        Some(b"II") => true,
+        Some(b"MM") => false,
+        _ => return 1,
+    };
+    // IFD0 offset is relative to the TIFF header start.
+    let ifd0 = match rd_u32(buf, tiff + 4, le) {
+        Some(v) => tiff + v as usize,
+        None => return 1,
+    };
+    let count = match rd_u16(buf, ifd0, le) {
+        Some(c) => c as usize,
+        None => return 1,
+    };
+    for i in 0..count.min(4096) {
+        let e = ifd0 + 2 + i * 12;
+        if rd_u16(buf, e, le) == Some(0x0112) {
+            // Orientation is a SHORT stored left-justified in the value field.
+            return rd_u16(buf, e + 8, le).unwrap_or(1);
+        }
+    }
+    1
+}
+
+/// First index of `needle` in `hay` (small, allocation-free substring search).
+fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || hay.len() < needle.len() {
+        return None;
+    }
+    hay.windows(needle.len()).position(|w| w == needle)
 }
 
 /// A candidate embedded JPEG: where it lives and its decoded size (0 when the
