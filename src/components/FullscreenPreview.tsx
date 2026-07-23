@@ -142,8 +142,11 @@ export default function FullscreenPreview({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
+  // top-10 starts the overlay below the 40px (h-10) TitleBar so its drag region
+  // and the minimize/maximize/close controls stay reachable while an item is
+  // maximized — the overlay and the window chrome stack, never overlap.
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg/97 backdrop-blur-sm">
+    <div className="fixed inset-x-0 bottom-0 top-10 z-50 flex flex-col bg-bg/97 backdrop-blur-sm">
       <div className="flex h-11 shrink-0 items-center gap-3 px-4">
         <span className="truncate text-[13px] font-medium" title={audioFile.path}>
           {audioFile.name}
