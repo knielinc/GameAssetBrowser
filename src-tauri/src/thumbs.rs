@@ -1534,65 +1534,19 @@ fn apply_orientation(img: DynamicImage, orient: u16) -> DynamicImage {
 /// extended/animated WebP ("Invalid Chunk header") that libwebp decodes fine;
 /// layered art (kra/aseprite) has its own decoders; other formats go straight
 /// through `image`.
-/// Decode an EXR into a memory-bounded RGBA float image, downsampling inside
-/// the reader for very large files. `image::open` fully materializes the source
-/// (a 4096×16384 light bake is ~1 GB as RGBA f32, ~2 GB peak with the decoder's
-/// own buffers — enough to OOM or hang long before the thumbnail resize runs).
+/// Decode an EXR into a memory-bounded RGBA float image. `image::open` fully
+/// materializes the source (a 4096×16384 light bake is ~1 GB as RGBA f32, ~2 GB
+/// peak with the decoder's own buffers — enough to OOM or hang).
 ///
-/// Files up to `MAX_FULL` pixels decode at native resolution, so `build()` /
-/// `preview_png` still resize them with a good filter. Larger ones are
-/// nearest-neighbour subsampled straight to `max_edge` in the pixel setter, so
-/// only the small target buffer is ever allocated — a touch coarser, but it's a
-/// thumbnail of a giant map. The result stays float, so `to_ldr` tone-maps it
-/// exactly like any other HDR source.
+/// The actual decode + downsample lives in the `exrthumb` crate so its 67M-pixel
+/// setter is optimized in dev (inlined here at opt-level 0 it took ~17 s/file).
+/// The result stays float, so `to_ldr` tone-maps it like any other HDR source.
+/// `max_edge` None is the full-res "Copy image" path; bound it at the preview
+/// size so a 67 MP copy can't OOM.
 fn decode_exr(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
-    use exr::prelude::*;
-
-    // max_edge None is the full-res "Copy image" path; a 67 MP copy is
-    // unreasonable and would OOM, so bound it at the preview size.
     let cap = max_edge.unwrap_or(PREVIEW_EDGE) as usize;
-    // ~16 MP full RGBA f32 ≈ 256 MB transient — the ceiling for a native decode.
-    const MAX_FULL: usize = 16_000_000;
-
-    struct Target {
-        w: usize,
-        h: usize,
-        sw: usize,
-        sh: usize,
-        px: Vec<f32>,
-    }
-
-    let image = read_first_rgba_layer_from_file(
-        p,
-        move |res: Vec2<usize>, _: &RgbaChannels| {
-            let sw = res.0.max(1);
-            let sh = res.1.max(1);
-            let (w, h) = if sw.saturating_mul(sh) <= MAX_FULL {
-                (sw, sh) // decode native; the caller resizes with a good filter
-            } else {
-                let scale = cap as f64 / sw.max(sh) as f64; // < 1
-                (
-                    ((sw as f64 * scale).round() as usize).max(1),
-                    ((sh as f64 * scale).round() as usize).max(1),
-                )
-            };
-            Target { w, h, sw, sh, px: vec![0.0f32; w * h * 4] }
-        },
-        |t: &mut Target, pos: Vec2<usize>, (r, g, b, a): (f32, f32, f32, f32)| {
-            // Nearest-neighbour into the target cell; identity when w == sw.
-            let tx = (pos.0 * t.w / t.sw).min(t.w - 1);
-            let ty = (pos.1 * t.h / t.sh).min(t.h - 1);
-            let i = (ty * t.w + tx) * 4;
-            t.px[i] = r;
-            t.px[i + 1] = g;
-            t.px[i + 2] = b;
-            t.px[i + 3] = a;
-        },
-    )
-    .map_err(|e| format!("exr: {e}"))?;
-
-    let t = image.layer_data.channel_data.pixels;
-    image::Rgba32FImage::from_raw(t.w as u32, t.h as u32, t.px)
+    let (w, h, px) = exrthumb::decode_downsampled(&p.to_string_lossy(), cap)?;
+    image::Rgba32FImage::from_raw(w, h, px)
         .map(DynamicImage::ImageRgba32F)
         .ok_or_else(|| "exr: pixel buffer size mismatch".to_string())
 }

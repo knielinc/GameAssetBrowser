@@ -54,6 +54,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.psd]
 opt-level = 3
+# The EXR downsampling decode's per-pixel setter runs tens of millions of times;
+# it lives in its own crate precisely so this override optimizes it in dev
+# without dragging our own crate off opt-level 0.
+[profile.dev.package.exrthumb]
+opt-level = 3
 # Audio decode and waveform peaks are the same shape of work.
 [profile.dev.package.symphonia]
 opt-level = 3
@@ -116,11 +121,11 @@ image = { version = "0.25", default-features = false, features = [
 # libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
 # animated WebP (launcher assets, etc.); libwebp reads them.
 webp = "0.3"
-# Direct handle on the same `exr` crate `image` already pulls in (via its "exr"
-# feature), so no new tree. Used to decode huge EXRs (e.g. 4K×16K light bakes)
-# straight into a bounded, downsampled buffer — image::open would materialize
-# the full-res RGBA float image (~2 GB) and OOM/hang before the resize.
-exr = "1.74"
+# Bounded, downsampling EXR decode. In its OWN crate so its 67M-pixel setter is
+# compiled at opt-level 3 (see the profile override below) even in dev — inlined
+# into this opt-0 crate it took ~17 s per 67 MP file; in exrthumb, ~0.85 s.
+# image::open would also materialize the full-res RGBA float (~2 GB) and OOM.
+exrthumb = { path = "exrthumb" }
 # Layered art sources shown in the Images tab. Krita (.kra) is a ZIP holding a
 # flattened `mergedimage.png`; Aseprite (.aseprite/.ase) is a sprite format
 # asefile composites into an RGBA frame. Both feed the normal thumbnail path

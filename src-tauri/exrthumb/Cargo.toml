@@ -1,0 +1,9 @@
+[package]
+name = "exrthumb"
+version = "0.0.0"
+edition = "2021"
+description = "Bounded, downsampling EXR decode split into its own crate so its 67M-pixel hot loop is optimized even in dev (the parent crate stays opt-level 0 for fast incremental builds)."
+
+[dependencies]
+# Same exr the parent already pulls in transitively via image's exr feature.
+exr = "1.74"

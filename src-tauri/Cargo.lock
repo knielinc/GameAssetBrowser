@@ -1037,6 +1037,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "exrthumb"
+version = "0.0.0"
+dependencies = [
+ "exr",
+]
+
+[[package]]
 name = "extended"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1231,7 +1238,7 @@ dependencies = [
  "arboard",
  "base64 0.22.1",
  "crossbeam-channel",
- "exr",
+ "exrthumb",
  "image",
  "lofty",
  "lru",
