@@ -100,6 +100,8 @@ export interface FileRowProps {
   /** Mousedown that may become a native drag-out (see dragOut.armDragOut) —
    *  under the movement threshold the press stays a plain click. */
   onDragOut?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  /** Double-click → open the fullscreen preview ("open big"). */
+  onActivate?: (index: number) => void;
 }
 
 function FileRowInner({
@@ -119,6 +121,7 @@ function FileRowInner({
   onSelect,
   onContextMenu,
   onDragOut,
+  onActivate,
 }: FileRowProps): ReactElement {
   return (
     <div
@@ -129,6 +132,7 @@ function FileRowInner({
         focused && "row-focused",
       )}
       onClick={(e) => onSelect(index, e)}
+      onDoubleClick={onActivate === undefined ? undefined : () => onActivate(index)}
       onMouseDown={onDragOut === undefined ? undefined : (e) => onDragOut(index, e)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -206,6 +210,8 @@ export interface MaterialRowProps {
   onContextMenu: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   /** See FileRowProps.onDragOut — a material drags all of its member maps. */
   onDragOut?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  /** See FileRowProps.onActivate — double-click opens the material fullscreen. */
+  onActivate?: (index: number) => void;
 }
 
 /** A grouped material as a single list row: the name column carries a layers
@@ -220,6 +226,7 @@ function MaterialRowInner({
   onSelect,
   onContextMenu,
   onDragOut,
+  onActivate,
 }: MaterialRowProps): ReactElement {
   let size = 0;
   let modified = 0;
@@ -237,6 +244,7 @@ function MaterialRowInner({
         focused && "row-focused",
       )}
       onClick={(e) => onSelect(index, e)}
+      onDoubleClick={onActivate === undefined ? undefined : () => onActivate(index)}
       onMouseDown={onDragOut === undefined ? undefined : (e) => onDragOut(index, e)}
       onContextMenu={(e) => {
         e.preventDefault();

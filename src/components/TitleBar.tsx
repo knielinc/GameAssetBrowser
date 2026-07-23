@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
-import { AudioLines, Box, Copy, FileText, Image, Maximize2, Minimize2, Minus, Square, X } from "lucide-react";
+import { AudioLines, Box, Copy, FileText, Image, LayoutGrid, Maximize2, Minimize2, Minus, Square, X } from "lucide-react";
 import { scopePredicate, useLibraryStore } from "../stores/libraryStore";
 import { ASSET_KINDS, type AssetKind } from "../types";
 import { switchTab } from "../stores/tabs";
@@ -31,6 +31,7 @@ import SettingsMenu from "./SettingsMenu";
 const win = getCurrentWindow();
 
 const TAB_META: Record<AssetKind, { label: string; icon: typeof Box; hue: string }> = {
+  all: { label: "All", icon: LayoutGrid, hue: "text-accent" },
   audio: { label: "Audio", icon: AudioLines, hue: "text-kind-audio" },
   texture: { label: "Images", icon: Image, hue: "text-kind-texture" },
   model: { label: "Models", icon: Box, hue: "text-kind-model" },
@@ -76,10 +77,11 @@ export default function TitleBar(): ReactElement {
   // three. Same derivation the tab row used before it moved up here.
   const counts = useMemo(() => {
     const inScope = scopePredicate(folderScopes, hiddenFolders);
-    const c: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0, document: 0 };
+    const c: Record<AssetKind, number> = { all: 0, audio: 0, texture: 0, model: 0, document: 0 };
     for (const f of allFiles) {
       if (!inScope(f.path)) continue;
       c[f.kind]++;
+      c.all++; // the "All" tab's badge is the whole in-scope library
     }
     return c;
   }, [allFiles, folderScopes, hiddenFolders]);

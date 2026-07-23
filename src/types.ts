@@ -21,13 +21,24 @@
 
 import { schemeBase } from "./platform";
 
-/** Which lens (tab) a scanned file belongs to. */
-export type AssetKind = "audio" | "texture" | "model" | "document";
-export const ASSET_KINDS = ["audio", "texture", "model", "document"] as const;
+/**
+ * Which lens (tab) a scanned file belongs to. `"all"` is a PSEUDO-kind: no
+ * `FileEntry` ever carries it — it's only ever a tab identity, showing files
+ * of every real kind at once (useVisibleFiles bypasses its `f.kind === kind`
+ * filter for it). It leads the list so it's the default landing tab.
+ */
+export type AssetKind = "all" | "audio" | "texture" | "model" | "document";
+export const ASSET_KINDS = ["all", "audio", "texture", "model", "document"] as const;
+/** The four real, file-backed kinds — everything except the "all" pseudo-tab.
+ *  Use this (and RealAssetKind) for anything keyed by a file's actual kind:
+ *  per-kind stat tables, external-app targets, folder-tree counts. */
+export const REAL_ASSET_KINDS = ["audio", "texture", "model", "document"] as const;
+export type RealAssetKind = (typeof REAL_ASSET_KINDS)[number];
 
 /** Count-readout noun per kind ("623 of 11,501 files"). Shared by StatusBar
  *  and the filter popup so the two readouts can never disagree. */
 export const NOUN: Record<AssetKind, string> = {
+  all: "files",
   audio: "files",
   texture: "images",
   model: "models",
@@ -183,8 +194,11 @@ export const DOCUMENT_EXTENSIONS = [
   "epub", "mobi", "azw", "azw3", "fb2", "fbz", "cbz",
 ] as const;
 
-/** Per-kind extension vocabularies. Mirrors the four lists in types.rs. */
+/** Per-kind extension vocabularies. Mirrors the four lists in types.rs. The
+ *  "all" entry is the union — the four real kinds' extensions are disjoint, so
+ *  no dedupe is needed; it drives the All tab's format facet + ext sanitizer. */
 export const EXTENSIONS: Record<AssetKind, readonly string[]> = {
+  all: [...AUDIO_EXTENSIONS, ...TEXTURE_EXTENSIONS, ...MODEL_EXTENSIONS, ...DOCUMENT_EXTENSIONS],
   audio: AUDIO_EXTENSIONS,
   texture: TEXTURE_EXTENSIONS,
   model: MODEL_EXTENSIONS,
@@ -201,6 +215,9 @@ export type ViewMode = "list" | "grid";
  * inapplicable field can neither be shown nor restored from disk.
  */
 export const SORT_FIELDS_BY_KIND: Record<AssetKind, readonly SortField[]> = {
+  // "all" mixes kinds, so only the fields every file has — "duration" is
+  // audio-only and would be meaningless on a texture.
+  all: ["name", "ext", "size", "modified"],
   audio: ["name", "ext", "size", "modified", "duration"],
   texture: ["name", "ext", "size", "modified"],
   model: ["name", "ext", "size", "modified"],
@@ -319,6 +336,9 @@ export interface TabFilterSettings {
  * shown nor restored.
  */
 export const FILTER_FACETS_BY_KIND = {
+  // "all" mixes kinds, so only the kind-agnostic facets apply (a channel or
+  // resolution filter is meaningless across a mixed list).
+  all: ["favorite", "collections", "modified", "excludeTerms"],
   audio: ["favorite", "collections", "duration", "audioChannels", "sampleRates", "modified", "excludeTerms"],
   texture: ["favorite", "collections", "channels", "material", "colors", "res", "square", "pot", "modified", "excludeTerms"],
   model: ["favorite", "collections", "size", "modified", "excludeTerms"],

@@ -42,6 +42,12 @@ export function useThumbRequests(files: readonly LibFile[], enabled: boolean): (
     for (let i = start; i < end; i++) {
       const f = filesRef.current[i];
       if (f === undefined) continue;
+      // Only kinds whose thumbnail is a Rust decode go through request_thumbs:
+      // textures (image decode) and audio (cover art / waveform). Models render
+      // in the webview (useModelThumbs) and documents render in-cell — skipping
+      // them here matters for the mixed "all" grid, which drives both hooks over
+      // the same visible range.
+      if (f.kind !== "texture" && f.kind !== "audio") continue;
       if (have.has(f.id) || asked.current.has(f.id)) continue;
       asked.current.add(f.id);
       items.push([f.id, f.path]);

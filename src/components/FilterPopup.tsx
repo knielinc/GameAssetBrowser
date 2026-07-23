@@ -61,6 +61,9 @@ export type FacetId =
   | "material" | "color" | "res" | "shape" | "size" | "modified" | "exclude";
 
 export const FACET_ORDER: Record<AssetKind, readonly FacetId[]> = {
+  // "all" mixes kinds → only the kind-agnostic facets (plus the format chips,
+  // which span every present extension across kinds).
+  all: ["format", "favorite", "collections", "modified", "exclude"],
   audio: ["format", "favorite", "collections", "duration", "audioChannels", "sampleRate", "modified", "exclude"],
   texture: ["format", "favorite", "collections", "material", "color", "res", "shape", "modified", "exclude"],
   model: ["format", "favorite", "collections", "size", "modified", "exclude"],

@@ -19,7 +19,9 @@ export interface FolderNode {
   children: FolderNode[];
 }
 
-const emptyCounts = (): Record<AssetKind, number> => ({ audio: 0, texture: 0, model: 0, document: 0 });
+// `all` tracks the whole-subtree total so the "All" tab's folder rows light up
+// on any content; the real-kind counts drive the per-lens dimming + breakdown.
+const emptyCounts = (): Record<AssetKind, number> => ({ all: 0, audio: 0, texture: 0, model: 0, document: 0 });
 
 /** Natural, case-insensitive folder ordering ("Kick 2" before "Kick 10"). */
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -95,6 +97,7 @@ export function buildFolderTree(files: readonly LibFile[], roots: readonly strin
     if (owner === undefined) continue;
 
     owner.node.counts[f.kind]++;
+    owner.node.counts.all++;
     let parent = owner.node;
     let segStart = owner.trimmed.length + 1;
     for (;;) {
@@ -108,6 +111,7 @@ export function buildFolderTree(files: readonly LibFile[], roots: readonly strin
         parent.children.push(node);
       }
       node.counts[f.kind]++;
+      node.counts.all++;
       parent = node;
       segStart = sep + 1;
     }

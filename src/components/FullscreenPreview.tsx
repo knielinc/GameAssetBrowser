@@ -1,6 +1,10 @@
 import { useEffect, type ReactElement } from "react";
-import { X } from "lucide-react";
+import { AudioLines, X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { useThumbSrc } from "../hooks/useThumbSrc";
+import { requestThumbs } from "../ipc/commands";
+import { humanSize } from "./FileRow";
+import { formatTime } from "./player/TimeDisplay";
 import type { TextureItem } from "../material/classify";
 import ModelViewport from "./model/ModelViewport";
 import ModelLightControls from "./model/ModelLightControls";
@@ -43,8 +47,37 @@ export default function FullscreenPreview({
   onClose,
 }: FullscreenPreviewProps): ReactElement {
   useLibraryStore((s) => s.thumbsVersion);
+  useLibraryStore((s) => s.durationsVersion);
+  useLibraryStore((s) => s.audioMetaVersion);
   const thumbs = useLibraryStore.getState().thumbs;
   const thumb = thumbs.get(file.id);
+
+  // Audio has no source to render; its fullscreen is the big cover art /
+  // waveform (the "a"-keyed thumbnail) plus the probe details. Same optimistic
+  // path AudioCell uses; request it here too so it shows even when fullscreen
+  // is opened from the list (where no grid drove the request).
+  const audioThumb = useThumbSrc(file, "a");
+  const isAudio = file.kind === "audio";
+  useEffect(() => {
+    if (isAudio && !useLibraryStore.getState().thumbs.has(file.id)) {
+      void requestThumbs([[file.id, file.path]]).catch(() => {});
+    }
+  }, [isAudio, file.id, file.path]);
+  const audioMetaLine = ((): string => {
+    if (!isAudio) return "";
+    const parts: string[] = [file.ext.toUpperCase()];
+    const secs = useLibraryStore.getState().durations.get(file.id);
+    if (secs !== undefined) parts.push(formatTime(secs));
+    const m = useLibraryStore.getState().audioMeta.get(file.id);
+    if (m !== undefined) {
+      const [rate, ch, bits] = m;
+      if (rate > 0) parts.push(`${rate / 1000} kHz`);
+      if (bits > 0) parts.push(`${bits}-bit`);
+      if (ch > 0) parts.push(ch === 1 ? "Mono" : ch === 2 ? "Stereo" : `${ch}ch`);
+    }
+    parts.push(humanSize(file.size));
+    return parts.join(" · ");
+  })();
 
   const keys =
     item === null
@@ -117,6 +150,29 @@ export default function FullscreenPreview({
             </div>
           ) : file.kind === "model" ? (
             <ModelViewport path={file.path} />
+          ) : isAudio ? (
+            <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-panel shadow-e1">
+              <div className="flex max-h-full flex-col items-center gap-5 p-6">
+                <div className="aspect-square w-[min(62vh,62vw)] overflow-hidden rounded-xl bg-raised shadow-e1">
+                  {audioThumb.src !== null ? (
+                    <img
+                      key={audioThumb.imgKey}
+                      src={audioThumb.src}
+                      alt=""
+                      draggable={false}
+                      onError={audioThumb.onError}
+                      onLoad={audioThumb.onLoad}
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <AudioLines size={56} className="text-kind-audio opacity-30" />
+                    </div>
+                  )}
+                </div>
+                <div className="text-center text-[12px] tabular-nums text-dim">{audioMetaLine}</div>
+              </div>
+            </div>
           ) : use2D ? (
             <div className="relative h-full w-full overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
               <Sprite2DView

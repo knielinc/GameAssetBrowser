@@ -275,7 +275,8 @@ function defaultTab(kind: AssetKind): TabState {
     selectionAnchor: null,
     // Audio's list is the workflow that already works; visual assets are
     // scanned by eye, so they default to the grid. Documents are read by name
-    // (and previewed one at a time), so they list like audio.
+    // (and previewed one at a time), so they list like audio. "all" is a visual
+    // mixed browse → grid.
     viewMode: kind === "audio" || kind === "document" ? "list" : "grid",
     cellSize: 132,
     groupMaterials: true,
@@ -286,6 +287,7 @@ function defaultTab(kind: AssetKind): TabState {
 
 export function defaultTabs(): Record<AssetKind, TabState> {
   return {
+    all: defaultTab("all"),
     audio: defaultTab("audio"),
     texture: defaultTab("texture"),
     model: defaultTab("model"),
@@ -365,7 +367,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   folderScopes: [],
   hiddenFolders: [],
   collectionScopes: [],
-  activeTab: "audio",
+  activeTab: "all",
   tabs: defaultTabs(),
 
   setRoots: (roots) => set({ roots }),
@@ -804,8 +806,11 @@ export function thumbInfos(): Map<number, ThumbInfo> {
  *  that pre-partitioning by kind would be speculative — `useVisibleFiles`
  *  folds this into its existing filter loop. */
 export function countByKind(files: readonly LibFile[]): Record<AssetKind, number> {
-  const counts: Record<AssetKind, number> = { audio: 0, texture: 0, model: 0, document: 0 };
-  for (const f of files) counts[f.kind]++;
+  const counts: Record<AssetKind, number> = { all: 0, audio: 0, texture: 0, model: 0, document: 0 };
+  for (const f of files) {
+    counts[f.kind]++;
+    counts.all++;
+  }
   return counts;
 }
 

@@ -9,6 +9,7 @@ import {
   FolderTree as FolderTreeIcon,
   Image as ImageIcon,
   Loader2,
+  X,
 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { usePanelWidth } from "../hooks/usePanelWidth";
@@ -18,7 +19,7 @@ import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
 import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { soleUserCollectionName, useFavoritesStore } from "../stores/favoritesStore";
-import { audioVisibleRef, useAudioListStore } from "../stores/playerStore";
+import { audioVisibleRef, loadAndSelect, useAudioListStore } from "../stores/playerStore";
 import { publishShuffleSource } from "../stores/shuffle";
 import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
 import { revealInNavigator } from "../stores/revealFolder";
@@ -34,12 +35,14 @@ import { hasWebGL2 } from "./grid/thumbGL";
 import TextureCell from "./grid/TextureCell";
 import MaterialCell from "./grid/MaterialCell";
 import ModelCell from "./grid/ModelCell";
+import AudioCell from "./grid/AudioCell";
 import DocumentCell from "./document/DocumentCell";
 import ModelInspector from "./model/ModelInspector";
 import TextureInspector from "./texture/TextureInspector";
 import SpriteArtInspector from "./texture/SpriteArtInspector";
 import { isSpriteArt } from "./texture/SpriteArtView";
 import DocumentInspector from "./document/DocumentInspector";
+import AudioInspector from "./audio/AudioInspector";
 import { docIsPsd } from "./document/doc";
 import type { PreviewState } from "./texture/PreviewControls";
 import FullscreenPreview from "./FullscreenPreview";
@@ -138,10 +141,39 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     },
     [grouped, kind],
   );
+  // Double-click / activation → fullscreen the CURRENT selection (the click
+  // that precedes the double-click already selected it). Reading selection live
+  // from the store rather than a stale closure keeps it correct after that
+  // click's state update. This is the universal "open big" gesture — it works
+  // for every kind on every tab, including auditioning-Space's audio tab.
+  const previewSelection = useCallback(() => {
+    const t = useLibraryStore.getState().tabs[kind];
+    const f = visible.find((x) => x.path === t.selectedPath) ?? visible[t.selectedIndex] ?? visible[0];
+    if (f !== undefined) onPreview(f);
+  }, [visible, kind, onPreview]);
   useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview, visibleKeys);
-  const onTextureRange = useThumbRequests(visible, kind === "texture");
-  const onModelRange = useModelThumbs(visible, kind === "model");
-  const onVisibleRange = kind === "model" ? onModelRange : onTextureRange;
+  // Thumbnail sourcing splits by how each kind is produced: request_thumbs
+  // decodes textures + audio (cover art / waveform) in Rust; models render in
+  // the webview. Both hooks run for the "all" tab and each ignores files it
+  // doesn't own (see the per-hook kind guards). Documents render in-cell.
+  const onTextureRange = useThumbRequests(
+    visible,
+    kind === "texture" || kind === "audio" || kind === "all",
+  );
+  const onModelRange = useModelThumbs(visible, kind === "model" || kind === "all");
+  const onVisibleRange = useCallback(
+    (start: number, end: number) => {
+      if (kind === "all") {
+        onTextureRange(start, end);
+        onModelRange(start, end);
+        return;
+      }
+      if (kind === "model") return onModelRange(start, end);
+      // texture + audio (document renders in-cell, so the range is a no-op there)
+      return onTextureRange(start, end);
+    },
+    [kind, onTextureRange, onModelRange],
+  );
 
   // `paths`/`count`: snapshot of the selection the menu acts on (materials
   // expand to member paths), taken at open time so it survives churn.
@@ -203,7 +235,10 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     );
   }, [tab.selectedPath]);
   // Plain click focuses + collapses to one; Ctrl toggles membership; Shift
-  // range-selects from the anchor over the visible order.
+  // range-selects from the anchor over the visible order. On the Audio tab a
+  // plain click also auditions the cell, exactly like an audio list row — the
+  // player bar is present there. NOT on the "all" tab: it has no player bar, so
+  // audio there stays browse-only (select), matching the list behaviour.
   const onCellSelect = useCallback(
     (index: number, e: MouseEvent<HTMLDivElement>) => {
       const file = visible[index];
@@ -212,6 +247,8 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         rangeSelect(kind, index, file.path, visibleKeys);
       } else if (e.ctrlKey || e.metaKey) {
         toggleSelect(kind, index, file.path);
+      } else if (kind === "audio") {
+        loadAndSelect(file, index);
       } else {
         select(kind, index, file.path);
       }
@@ -345,6 +382,9 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   // draw call); everything else stays on the classic <img> path. Falls back to
   // <img> if this WebView somehow lacks WebGL2.
   const glThumbs = kind === "texture" && hasWebGL2();
+  // Every kind now has an inspector: audio shows its cover/waveform + probe
+  // details, and the "all" tab dispatches on the SELECTED file's own kind.
+  const hasInspector = true;
 
   let content: ReactElement;
   if (scanning && !anyFiles) {
@@ -354,7 +394,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         <p className="text-xs">Scanning folders…</p>
       </div>
     );
-  } else if (visible.length === 0 && tab.viewMode === "grid" && kind !== "audio") {
+  } else if (visible.length === 0 && tab.viewMode === "grid") {
     content = (
       <div className="flex flex-1 flex-col items-center justify-center text-xs text-dim">
         {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
@@ -379,6 +419,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         onSelect={onGroupSelect}
         onContextMenu={onGroupContextMenu}
         onCellMouseDown={onGroupDragOut}
+        onCellDoubleClick={() => previewSelection()}
         onVisibleRange={onGroupedRange}
         glThumbs={glThumbs}
         renderCell={(it) =>
@@ -399,7 +440,26 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         }
       />
     );
-  } else if (tab.viewMode === "grid" && kind !== "audio") {
+  } else if (tab.viewMode === "grid") {
+    // On the "all" tab each cell dispatches on the FILE's own kind; every other
+    // tab is homogeneous, so the tab kind decides. Textures only get the WebGL
+    // path on their own tab (glThumbs is texture-only); in the mixed grid they
+    // fall back to the <img> path like every other cell.
+    const renderCell = (f: LibFile): ReactElement => {
+      const cellKind = kind === "all" ? f.kind : kind;
+      const selected = tab.selectedPaths.has(f.path);
+      const focused = multiSelect && f.path === tab.selectedPath;
+      switch (cellKind) {
+        case "audio":
+          return <AudioCell file={f} selected={selected} focused={focused} />;
+        case "document":
+          return <DocumentCell file={f} selected={selected} focused={focused} />;
+        case "model":
+          return <ModelCell file={f} selected={selected} focused={focused} />;
+        default:
+          return <TextureCell file={f} selected={selected} focused={focused} gl={glThumbs} />;
+      }
+    };
     content = (
       <AssetGrid
         items={visible}
@@ -409,45 +469,109 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         onSelect={onCellSelect}
         onContextMenu={onCellContextMenu}
         onCellMouseDown={onCellDragOut}
+        onCellDoubleClick={() => previewSelection()}
         onVisibleRange={onVisibleRange}
         glThumbs={glThumbs}
-        renderCell={(f) =>
-          kind === "texture" ? (
-            <TextureCell
-              file={f}
-              selected={tab.selectedPaths.has(f.path)}
-              focused={multiSelect && f.path === tab.selectedPath}
-              gl={glThumbs}
-            />
-          ) : kind === "document" ? (
-            <DocumentCell
-              file={f}
-              selected={tab.selectedPaths.has(f.path)}
-              focused={multiSelect && f.path === tab.selectedPath}
-            />
-          ) : (
-            <ModelCell
-              file={f}
-              selected={tab.selectedPaths.has(f.path)}
-              focused={multiSelect && f.path === tab.selectedPath}
-            />
-          )
-        }
+        renderCell={renderCell}
       />
     );
   } else {
-    content = <FileList kind={kind} files={visible} items={grouped ?? undefined} />;
+    content = (
+      <FileList
+        kind={kind}
+        files={visible}
+        items={grouped ?? undefined}
+        onActivate={previewSelection}
+      />
+    );
   }
 
   const selectedFile = visible.find((f) => f.path === tab.selectedPath) ?? null;
 
   // The texture inspector works on the grid ITEM (a material or a lone file),
-  // not the raw file — grouping is the whole point of the preview.
+  // not the raw file — grouping is the whole point of the preview. On the "all"
+  // tab a selected texture is never grouped, so it's always a lone-file item.
   const selectedItem: TextureItem | null =
-    kind !== "texture"
+    selectedFile === null || selectedFile.kind !== "texture"
       ? null
       : (grouped?.find((i) => i.key === tab.selectedPath) ??
-        (selectedFile !== null ? { kind: "file", file: selectedFile, key: selectedFile.path } : null));
+        { kind: "file", file: selectedFile, key: selectedFile.path });
+
+  // Which inspector to show: on the "all" tab it follows the selected file's own
+  // kind (null when nothing is selected); every other tab is homogeneous.
+  const inspectorKind = kind === "all" ? (selectedFile?.kind ?? null) : kind;
+  const renderInspector = (): ReactElement => {
+    const commonWidth = inspector.width;
+    switch (inspectorKind) {
+      case "audio":
+        return <AudioInspector file={selectedFile} onClose={toggleInspector} width={commonWidth} />;
+      case "model":
+        return (
+          <ModelInspector
+            path={selectedFile?.path ?? null}
+            size={selectedFile?.size ?? null}
+            onClose={toggleInspector}
+            width={commonWidth}
+          />
+        );
+      case "texture":
+        // Sprite sheets and PSDs get their bespoke inspectors; everything else
+        // is the standard texture preview.
+        return isSpriteArt(selectedFile?.ext) ? (
+          <SpriteArtInspector
+            path={selectedFile?.path ?? null}
+            ext={selectedFile?.ext ?? null}
+            size={selectedFile?.size ?? null}
+            onClose={toggleInspector}
+            width={commonWidth}
+          />
+        ) : docIsPsd(selectedFile?.ext ?? "") ? (
+          <DocumentInspector
+            path={selectedFile?.path ?? null}
+            ext={selectedFile?.ext ?? null}
+            size={selectedFile?.size ?? null}
+            onClose={toggleInspector}
+            width={commonWidth}
+          />
+        ) : (
+          <TextureInspector
+            item={selectedItem}
+            preview={preview3d}
+            onPreviewChange={patchPreview}
+            onClose={toggleInspector}
+            width={commonWidth}
+          />
+        );
+      case "document":
+        return (
+          <DocumentInspector
+            path={selectedFile?.path ?? null}
+            ext={selectedFile?.ext ?? null}
+            size={selectedFile?.size ?? null}
+            onClose={toggleInspector}
+            width={commonWidth}
+          />
+        );
+      default:
+        // "all" tab with nothing selected — keep the panel (and its resizer)
+        // present rather than orphaning the handle.
+        return (
+          <aside style={{ width: commonWidth }} className="flex shrink-0 flex-col bg-panel">
+            <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-bg px-2.5">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-dim">
+                Inspector
+              </span>
+              <button type="button" className="icon-btn" title="Close" onClick={toggleInspector}>
+                <X size={13} />
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center p-3">
+              <p className="text-[11px] text-dim">Select a file to inspect it.</p>
+            </div>
+          </aside>
+        );
+    }
+  };
 
   return (
     <>
@@ -462,7 +586,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
         {/* Hidden while the fullscreen preview is up: both host a WebGL
             context, and there is no reason to pay for two. Drag the handle to
             resize, just like the left sidebar; double-click resets the width. */}
-        {kind !== "audio" && inspectorOpen && preview === null && (
+        {hasInspector && inspectorOpen && preview === null && (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -470,56 +594,12 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             {...inspector.handleProps}
           />
         )}
-        {kind === "model" && inspectorOpen && preview === null && (
-          <ModelInspector
-            path={selectedFile?.path ?? null}
-            size={selectedFile?.size ?? null}
-            onClose={toggleInspector}
-            width={inspector.width}
-          />
-        )}
-        {kind === "texture" &&
-          inspectorOpen &&
-          preview === null &&
-          (isSpriteArt(selectedFile?.ext) ? (
-            <SpriteArtInspector
-              path={selectedFile?.path ?? null}
-              ext={selectedFile?.ext ?? null}
-              size={selectedFile?.size ?? null}
-              onClose={toggleInspector}
-              width={inspector.width}
-            />
-          ) : docIsPsd(selectedFile?.ext ?? "") ? (
-            <DocumentInspector
-              path={selectedFile?.path ?? null}
-              ext={selectedFile?.ext ?? null}
-              size={selectedFile?.size ?? null}
-              onClose={toggleInspector}
-              width={inspector.width}
-            />
-          ) : (
-            <TextureInspector
-              item={selectedItem}
-              preview={preview3d}
-              onPreviewChange={patchPreview}
-              onClose={toggleInspector}
-              width={inspector.width}
-            />
-          ))}
-        {kind === "document" && inspectorOpen && preview === null && (
-          <DocumentInspector
-            path={selectedFile?.path ?? null}
-            ext={selectedFile?.ext ?? null}
-            size={selectedFile?.size ?? null}
-            onClose={toggleInspector}
-            width={inspector.width}
-          />
-        )}
+        {inspectorOpen && preview === null && renderInspector()}
         {/* While the fullscreen preview is up the inspector unmounts (one WebGL
             context, not two). Reserve its width with a spacer so the grid keeps
             the same column count — otherwise it reflows open then reflows back
             on Escape, snapping the scroll to a fresh row-aligned offset. */}
-        {kind !== "audio" && inspectorOpen && preview !== null && (
+        {hasInspector && inspectorOpen && preview !== null && (
           <div aria-hidden className="shrink-0" style={{ width: inspector.width }} />
         )}
       </div>

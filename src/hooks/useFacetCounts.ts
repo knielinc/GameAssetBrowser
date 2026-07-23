@@ -232,6 +232,7 @@ export function useFacetCounts(
     const q = debouncedQuery.trim().toLowerCase();
     const hasQuery = q !== "";
     const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const allKind = kind === "all";
     const flt = filters;
     // Mirror useVisibleFiles: exclusion narrows the pool that every OTHER
     // facet's counts are measured against, exactly as the query does.
@@ -321,7 +322,7 @@ export function useFacetCounts(
     const anyScope = hasFolderScope || hasCollScope;
 
     for (const f of allFiles) {
-      if (f.kind !== kind) continue;
+      if (!allKind && f.kind !== kind) continue;
       // Scope = union of the selected folders and collections, matching
       // useVisibleFiles.
       if (anyScope) {

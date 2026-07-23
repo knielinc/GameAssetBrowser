@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
-import { thumbKeyFor } from "../thumbKey";
+import { thumbKeyFor, type ThumbKind } from "../thumbKey";
 import { thumbUrl, type ThumbInfo } from "../types";
 
 export interface ThumbSrc {
@@ -26,13 +26,13 @@ export interface ThumbSrc {
  * (and to decode a genuine miss); when that lands, `info` fills in the badges,
  * and a cell that 404'd on the optimistic try is retried exactly once.
  */
-export function useThumbSrc(file: LibFile): ThumbSrc {
+export function useThumbSrc(file: LibFile, kind: ThumbKind = "t"): ThumbSrc {
   useLibraryStore((s) => s.thumbsVersion); // re-render when a batch lands
   const stored = useLibraryStore.getState().thumbs.get(file.id);
 
   const derived = useMemo(
-    () => thumbKeyFor(file.path, file.size, file.modified),
-    [file.path, file.size, file.modified],
+    () => thumbKeyFor(file.path, file.size, file.modified, kind),
+    [file.path, file.size, file.modified, kind],
   );
 
   const [attempt, setAttempt] = useState(0);

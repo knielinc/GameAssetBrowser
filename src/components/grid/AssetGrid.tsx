@@ -30,6 +30,8 @@ export interface AssetGridProps<T> {
   /** Mousedown that may become a native drag-out (see dragOut.armDragOut);
    *  under the movement threshold the press remains a plain click/select. */
   onCellMouseDown?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
+  /** Double-click a cell — the "open big" gesture (fullscreen preview). */
+  onCellDoubleClick?: (index: number, e: MouseEvent<HTMLDivElement>) => void;
   /** Flat [start, end) item range currently rendered (incl. overscan). Drives
    *  lazy thumbnail requests — decoding 2000 textures eagerly is not an
    *  option at any concurrency. */
@@ -57,6 +59,7 @@ export default function AssetGrid<T>({
   onSelect,
   onContextMenu,
   onCellMouseDown,
+  onCellDoubleClick,
   onVisibleRange,
   glThumbs,
 }: AssetGridProps<T>): ReactElement {
@@ -209,6 +212,9 @@ export default function AssetGrid<T>({
                     key={getKey(item)}
                     data-selected={index === selectedIndex || undefined}
                     onClick={(e) => onSelect(index, e)}
+                    onDoubleClick={
+                      onCellDoubleClick === undefined ? undefined : (e) => onCellDoubleClick(index, e)
+                    }
                     onMouseDown={
                       onCellMouseDown === undefined ? undefined : (e) => onCellMouseDown(index, e)
                     }

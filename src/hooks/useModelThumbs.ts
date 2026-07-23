@@ -44,7 +44,9 @@ export function useModelThumbs(files: readonly LibFile[], enabled: boolean): (st
 
   const flush = useCallback(() => {
     const [start, end] = range.current;
-    const window = filesRef.current.slice(start, end);
+    // Only model files render as 3D thumbnails; on the mixed "all" grid this
+    // hook sees every kind in the range, so filter to models before the queue.
+    const window = filesRef.current.slice(start, end).filter((f) => f.kind === "model");
     if (window.length === 0) return;
     void import("../model/thumbQueue").then(async (m) => {
       // Disk cache first — a hit costs one fs::metadata, a miss costs a full

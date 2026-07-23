@@ -1,20 +1,24 @@
 import { useEffect, useState, type ReactElement } from "react";
 import clsx from "clsx";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AudioLines, Box, FileSearch, FileText, Image as ImageIcon, Plus, X } from "lucide-react";
-import { ASSET_KINDS, EXTENSIONS, type AssetKind } from "../types";
+import { AudioLines, Box, FileSearch, FileText, Image as ImageIcon, LayoutGrid, Plus, X } from "lucide-react";
+import { REAL_ASSET_KINDS, EXTENSIONS, type AssetKind } from "../types";
 import { useExternalAppsStore } from "../stores/externalApps";
 import { useLibraryStore } from "../stores/libraryStore";
 import { IS_WINDOWS } from "../platform";
 
 /** Kind labels/icons for the picker chips and the per-entry badge. */
+// "all" is not a real external-app target (the picker offers only real kinds),
+// but the maps stay keyed by the full AssetKind so `app.kind` indexes cleanly.
 const KIND_LABEL: Record<AssetKind, string> = {
+  all: "All",
   audio: "Audio",
   texture: "Image",
   model: "Model",
   document: "Document",
 };
 const KIND_ICON: Record<AssetKind, typeof AudioLines> = {
+  all: LayoutGrid,
   audio: AudioLines,
   texture: ImageIcon,
   model: Box,
@@ -41,7 +45,12 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
   const removeApp = useExternalAppsStore((s) => s.removeApp);
 
   // Draft entry being added; exe === null means "not picked yet".
-  const [kind, setKind] = useState<AssetKind>(useLibraryStore.getState().activeTab);
+  // Default to the active tab, but never the "all" pseudo-kind — an app targets
+  // one real kind, so fall back to audio when browsing All.
+  const [kind, setKind] = useState<AssetKind>(() => {
+    const active = useLibraryStore.getState().activeTab;
+    return active === "all" ? "audio" : active;
+  });
   const [exe, setExe] = useState<string | null>(null);
   const [name, setName] = useState("");
   // Format restriction for the draft: extensions the entry is limited to.
@@ -180,7 +189,7 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
             Add app
           </div>
           <div className="mb-2 flex items-center gap-1.5">
-            {ASSET_KINDS.map((k) => (
+            {REAL_ASSET_KINDS.map((k) => (
               <button
                 key={k}
                 type="button"

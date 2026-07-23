@@ -79,8 +79,9 @@ export const DEFAULT_SETTINGS: Settings = {
   autoplay: true,
   autoAdvance: false,
   shuffle: false,
-  activeTab: "audio",
+  activeTab: "all",
   tabs: {
+    all: defaultTabSettings("all"),
     audio: defaultTabSettings("audio"),
     texture: defaultTabSettings("texture"),
     model: defaultTabSettings("model"),
@@ -219,6 +220,7 @@ function upgradeV1(old: SettingsV1): Record<string, unknown> {
     autoplay: old.autoplay,
     activeTab: "audio",
     tabs: {
+      all: defaultTabSettings("all"),
       audio: {
         ...defaultTabSettings("audio"),
         sortField: old.sortField,
@@ -253,6 +255,7 @@ export function sanitize(raw: unknown): Settings {
     shuffle: bool(v2.shuffle, d.shuffle),
     activeTab: oneOf<AssetKind>(v2.activeTab, ASSET_KINDS, d.activeTab),
     tabs: {
+      all: sanitizeTab("all", tabs.all),
       audio: sanitizeTab("audio", tabs.audio),
       texture: sanitizeTab("texture", tabs.texture),
       model: sanitizeTab("model", tabs.model),
@@ -384,6 +387,7 @@ function currentSettings(): Settings {
     shuffle: player.shuffle,
     activeTab: lib.activeTab,
     tabs: {
+      all: tabToSettings(lib.tabs.all),
       audio: tabToSettings(lib.tabs.audio),
       texture: tabToSettings(lib.tabs.texture),
       model: tabToSettings(lib.tabs.model),

@@ -15,15 +15,19 @@
 // MUST match the constants in thumbs.rs.
 const CACHE_VERSION = 2;
 const THUMB_EDGE = 256;
-const KIND = "t";
+
+/** Cache-key namespace, mirroring the `kind` prefix in `thumbs::hash_key`:
+ *  "t" = texture image decode, "a" = audio cover art / rendered waveform. */
+export type ThumbKind = "t" | "a";
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;
 const MASK64 = (1n << 64n) - 1n;
 
-/** FNV-1a/64 over the UTF-8 bytes of `t:1:256:{size}:{mtime}:{path}`. */
-export function thumbKeyFor(path: string, size: number, mtime: number): string {
-  const raw = `${KIND}:${CACHE_VERSION}:${THUMB_EDGE}:${size}:${mtime}:${path}`;
+/** FNV-1a/64 over the UTF-8 bytes of `{kind}:2:256:{size}:{mtime}:{path}` —
+ *  an exact port of `hash_key`/`hex_key` in thumbs.rs. */
+export function thumbKeyFor(path: string, size: number, mtime: number, kind: ThumbKind = "t"): string {
+  const raw = `${kind}:${CACHE_VERSION}:${THUMB_EDGE}:${size}:${mtime}:${path}`;
   const bytes = new TextEncoder().encode(raw);
   let h = FNV_OFFSET;
   for (const b of bytes) {

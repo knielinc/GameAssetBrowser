@@ -2,10 +2,13 @@ import { useEffect, useMemo, type ReactElement } from "react";
 import { AudioLines, Box, FileText, Image as ImageIcon, X } from "lucide-react";
 import { showInExplorer } from "../ipc/commands";
 import { basename, useLibraryStore, type LibFile } from "../stores/libraryStore";
-import { ASSET_KINDS, type AssetKind } from "../types";
+import { REAL_ASSET_KINDS, type AssetKind } from "../types";
 import { humanSize } from "./FileRow";
 
+// Keyed by the full AssetKind so `perKind[f.kind]` indexes cleanly; the "all"
+// row is never rendered (the breakdown iterates REAL_ASSET_KINDS).
 const KIND_META: Record<AssetKind, { label: string; icon: typeof Box; hue: string }> = {
+  all: { label: "All", icon: Box, hue: "text-accent" },
   audio: { label: "Audio", icon: AudioLines, hue: "text-kind-audio" },
   texture: { label: "Images", icon: ImageIcon, hue: "text-kind-texture" },
   model: { label: "Models", icon: Box, hue: "text-kind-model" },
@@ -39,6 +42,7 @@ interface Stats {
  */
 function computeStats(files: readonly LibFile[], roots: readonly string[]): Stats {
   const perKind: Record<AssetKind, Agg> = {
+    all: { count: 0, bytes: 0 },
     audio: { count: 0, bytes: 0 },
     texture: { count: 0, bytes: 0 },
     model: { count: 0, bytes: 0 },
@@ -129,7 +133,7 @@ export default function StatsModal({ onClose }: { onClose: () => void }): ReactE
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
-  const totalBytes = ASSET_KINDS.reduce((sum, k) => sum + stats.perKind[k].bytes, 0);
+  const totalBytes = REAL_ASSET_KINDS.reduce((sum, k) => sum + stats.perKind[k].bytes, 0);
   const maxPackBytes = stats.packs.reduce((m, p) => Math.max(m, p.bytes), 0);
 
   return (
@@ -152,7 +156,7 @@ export default function StatsModal({ onClose }: { onClose: () => void }): ReactE
 
         <div className="facet-scroll min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           <SectionLabel>By kind</SectionLabel>
-          {ASSET_KINDS.map((kind) => {
+          {REAL_ASSET_KINDS.map((kind) => {
             const { label, icon: Icon, hue } = KIND_META[kind];
             const agg = stats.perKind[kind];
             return (

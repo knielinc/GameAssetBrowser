@@ -274,10 +274,12 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     const hasMod = rangeActive(flt.modified);
 
     // Always a filtering pass now — every tab shows a subset by kind — so the
-    // old "copy the whole array" fast path can't apply.
+    // old "copy the whole array" fast path can't apply. The "all" tab is the one
+    // exception to the per-kind narrowing: it shows every real kind at once.
+    const allKind = kind === "all";
     const files: LibFile[] = [];
     for (const f of allFiles) {
-      if (f.kind !== kind) continue;
+      if (!allKind && f.kind !== kind) continue;
       // Scope = union of the selected folders and collections. With nothing
       // selected, only the hidden filter applies (empty folderScopes).
       if (anyScope) {
@@ -370,9 +372,10 @@ export function usePresentExts(kind: AssetKind): { ext: string; count: number }[
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
   return useMemo(() => {
     const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const allKind = kind === "all";
     const counts = new Map<string, number>();
     for (const f of allFiles) {
-      if (f.kind !== kind) continue;
+      if (!allKind && f.kind !== kind) continue;
       if (!inScope(f.path)) continue;
       counts.set(f.ext, (counts.get(f.ext) ?? 0) + 1);
     }
@@ -440,12 +443,13 @@ export function useScopeCount(kind: AssetKind): number {
   const collMembers = useCollectionMembers();
   return useMemo(() => {
     const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const allKind = kind === "all";
     const hasFolderScope = folderScopes.length > 0;
     const hasCollScope = collMembers !== null;
     const anyScope = hasFolderScope || hasCollScope;
     let n = 0;
     for (const f of allFiles) {
-      if (f.kind !== kind) continue;
+      if (!allKind && f.kind !== kind) continue;
       if (anyScope) {
         const inFolders = hasFolderScope && inScope(f.path);
         const inColls = hasCollScope && collMembers.has(f.path);

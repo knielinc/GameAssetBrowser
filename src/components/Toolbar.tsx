@@ -134,6 +134,7 @@ const SORT_LABELS: Record<SortField, string> = {
 };
 
 const PLACEHOLDER: Record<AssetKind, string> = {
+  all: "Search files…",
   audio: "Search samples…",
   texture: "Search images…",
   model: "Search models…",
@@ -201,9 +202,11 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
   const { ref: barRef, compact } = useOverflowCollapse();
 
   const { query, sortField, sortDir, viewMode, cellSize, groupMaterials } = tab;
-  // Audio has no grid implementation — never render a grid control that does
-  // nothing. Documents support both (grid shows PDF/PSD thumbnails).
-  const canGrid = kind !== "audio";
+  // Every kind now supports grid (audio shows cover art / a waveform; "all"
+  // shows a mixed grid) and every kind has an inspector (audio shows its
+  // cover/waveform + probe details; "all" dispatches on the selected file).
+  const canGrid = true;
+  const hasInspector = true;
   const showInfo = canGrid && viewMode === "grid";
 
   const smoothPill = (menu: boolean): ReactElement => (
@@ -465,7 +468,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           </div>
         )}
       </div>
-      {canGrid && (
+      {hasInspector && (
         <PanelToggle
           on={rightOpen}
           onClick={toggleRight}

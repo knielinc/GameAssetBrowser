@@ -90,6 +90,9 @@ export interface FileListProps {
   /** When set (texture list + grouping on), rows are grouped materials + loose
    *  files instead of the flat file list; selection keys off each item's key. */
   items?: TextureItem[];
+  /** Double-click a row → open the fullscreen preview (the "open big" gesture).
+   *  The preceding click already selected the row, so this takes no target. */
+  onActivate?: () => void;
 }
 
 /**
@@ -129,7 +132,7 @@ interface RowMenu {
   count: number;
 }
 
-export default function FileList({ kind, files, items }: FileListProps): ReactElement {
+export default function FileList({ kind, files, items, onActivate }: FileListProps): ReactElement {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -137,6 +140,10 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
   itemsRef.current = items;
   const kindRef = useRef(kind);
   kindRef.current = kind;
+  // Ref so the stable row callback below never changes identity (memo'd rows).
+  const onActivateRef = useRef(onActivate);
+  onActivateRef.current = onActivate;
+  const onRowActivate = useCallback((_index: number) => onActivateRef.current?.(), []);
   const rowCount = items ? items.length : files.length;
 
   const tab = useLibraryStore((s) => s.tabs[kind]);
@@ -373,6 +380,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         onSelect={onSelect}
                         onContextMenu={onRowContextMenu}
                         onDragOut={onRowDragOut}
+                        onActivate={onRowActivate}
                       />
                     ) : (
                       <FileRow
@@ -392,6 +400,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                         onSelect={onSelect}
                         onContextMenu={onRowContextMenu}
                         onDragOut={onRowDragOut}
+                        onActivate={onRowActivate}
                       />
                     )
                   ) : (
@@ -414,6 +423,7 @@ export default function FileList({ kind, files, items }: FileListProps): ReactEl
                       onSelect={onSelect}
                       onContextMenu={onRowContextMenu}
                       onDragOut={onRowDragOut}
+                      onActivate={onRowActivate}
                     />
                   )}
                 </div>
