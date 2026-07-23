@@ -88,7 +88,10 @@ pub async fn request_waveform(app: AppHandle, path: String, bins: u32) {
     };
 
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        let peaks = match decode_peaks(&app, &path, bins, gen) {
+        // A newer request wins: bail between packets. Borrows `app` immutably,
+        // as does the cache/emit below — all reads, so they coexist fine.
+        let is_stale = || app.state::<WaveformState>().generation.load(Ordering::SeqCst) != gen;
+        let peaks = match decode_peaks(&path, bins, &is_stale) {
             Ok(p) => p,
             Err(DecodeAbort::Stale) => return,
             Err(DecodeAbort::Failed(msg)) => {
@@ -107,17 +110,25 @@ pub async fn request_waveform(app: AppHandle, path: String, bins: u32) {
     });
 }
 
+/// One-shot peak decode for the audio grid thumbnail — full decode, no
+/// cancellation and no cache (the thumbnail blob already caches the rendered
+/// result). `None` on any failure so the caller can fall back to cover art or
+/// nothing. Shares the exact decoder below so the grid waveform can never
+/// diverge from the player-bar one.
+pub(crate) fn peaks_blocking(path: &str, bins: u32) -> Option<Vec<f32>> {
+    let bins = bins.clamp(16, 8192);
+    decode_peaks(path, bins, &|| false).ok()
+}
+
 /// Full decode → mono mix → fine min/max chunks → refold to exactly `bins`
-/// interleaved (min, max) pairs.
+/// interleaved (min, max) pairs. `is_stale` is polled between packets so a
+/// caller can cancel a superseded decode (the player bar does; the one-shot
+/// thumbnail path passes a closure that is always false).
 fn decode_peaks(
-    app: &AppHandle,
     path: &str,
     bins: u32,
-    gen: u32,
+    is_stale: &dyn Fn() -> bool,
 ) -> Result<Vec<f32>, DecodeAbort> {
-    let state = app.state::<WaveformState>();
-    let is_stale = || state.generation.load(Ordering::SeqCst) != gen;
-
     let file =
         File::open(path).map_err(|e| DecodeAbort::Failed(format!("could not open file: {e}")))?;
     let mut hint = Hint::new();

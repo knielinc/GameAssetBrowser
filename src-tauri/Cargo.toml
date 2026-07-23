@@ -116,6 +116,11 @@ image = { version = "0.25", default-features = false, features = [
 # libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
 # animated WebP (launcher assets, etc.); libwebp reads them.
 webp = "0.3"
+# Direct handle on the same `exr` crate `image` already pulls in (via its "exr"
+# feature), so no new tree. Used to decode huge EXRs (e.g. 4K×16K light bakes)
+# straight into a bounded, downsampled buffer — image::open would materialize
+# the full-res RGBA float image (~2 GB) and OOM/hang before the resize.
+exr = "1.74"
 # Layered art sources shown in the Images tab. Krita (.kra) is a ZIP holding a
 # flattened `mergedimage.png`; Aseprite (.aseprite/.ase) is a sprite format
 # asefile composites into an RGBA frame. Both feed the normal thumbnail path
@@ -151,6 +156,7 @@ tauri-plugin-drag = "2"
 # "Copy image" context action (workflow.rs): full-RGBA clipboard write, so a
 # DDS/TGA/EXR pastes into any editor without an export step.
 arboard = "3"
+lofty = "0.24.0"
 
 # Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs).
 # Same 0.61 tauri/tao already use, so no new crate in the tree.

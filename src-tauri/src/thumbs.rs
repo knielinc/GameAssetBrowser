@@ -1534,12 +1534,78 @@ fn apply_orientation(img: DynamicImage, orient: u16) -> DynamicImage {
 /// extended/animated WebP ("Invalid Chunk header") that libwebp decodes fine;
 /// layered art (kra/aseprite) has its own decoders; other formats go straight
 /// through `image`.
+/// Decode an EXR into a memory-bounded RGBA float image, downsampling inside
+/// the reader for very large files. `image::open` fully materializes the source
+/// (a 4096×16384 light bake is ~1 GB as RGBA f32, ~2 GB peak with the decoder's
+/// own buffers — enough to OOM or hang long before the thumbnail resize runs).
+///
+/// Files up to `MAX_FULL` pixels decode at native resolution, so `build()` /
+/// `preview_png` still resize them with a good filter. Larger ones are
+/// nearest-neighbour subsampled straight to `max_edge` in the pixel setter, so
+/// only the small target buffer is ever allocated — a touch coarser, but it's a
+/// thumbnail of a giant map. The result stays float, so `to_ldr` tone-maps it
+/// exactly like any other HDR source.
+fn decode_exr(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
+    use exr::prelude::*;
+
+    // max_edge None is the full-res "Copy image" path; a 67 MP copy is
+    // unreasonable and would OOM, so bound it at the preview size.
+    let cap = max_edge.unwrap_or(PREVIEW_EDGE) as usize;
+    // ~16 MP full RGBA f32 ≈ 256 MB transient — the ceiling for a native decode.
+    const MAX_FULL: usize = 16_000_000;
+
+    struct Target {
+        w: usize,
+        h: usize,
+        sw: usize,
+        sh: usize,
+        px: Vec<f32>,
+    }
+
+    let image = read_first_rgba_layer_from_file(
+        p,
+        move |res: Vec2<usize>, _: &RgbaChannels| {
+            let sw = res.0.max(1);
+            let sh = res.1.max(1);
+            let (w, h) = if sw.saturating_mul(sh) <= MAX_FULL {
+                (sw, sh) // decode native; the caller resizes with a good filter
+            } else {
+                let scale = cap as f64 / sw.max(sh) as f64; // < 1
+                (
+                    ((sw as f64 * scale).round() as usize).max(1),
+                    ((sh as f64 * scale).round() as usize).max(1),
+                )
+            };
+            Target { w, h, sw, sh, px: vec![0.0f32; w * h * 4] }
+        },
+        |t: &mut Target, pos: Vec2<usize>, (r, g, b, a): (f32, f32, f32, f32)| {
+            // Nearest-neighbour into the target cell; identity when w == sw.
+            let tx = (pos.0 * t.w / t.sw).min(t.w - 1);
+            let ty = (pos.1 * t.h / t.sh).min(t.h - 1);
+            let i = (ty * t.w + tx) * 4;
+            t.px[i] = r;
+            t.px[i + 1] = g;
+            t.px[i + 2] = b;
+            t.px[i + 3] = a;
+        },
+    )
+    .map_err(|e| format!("exr: {e}"))?;
+
+    let t = image.layer_data.channel_data.pixels;
+    image::Rgba32FImage::from_raw(t.w as u32, t.h as u32, t.px)
+        .map(DynamicImage::ImageRgba32F)
+        .ok_or_else(|| "exr: pixel buffer size mismatch".to_string())
+}
+
 fn decode_image_inner(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
     match p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("kra") => return decode_kra(p),
         Some("aseprite") | Some("ase") => return decode_aseprite(p),
         Some("psd") | Some("psb") => return decode_psd(p),
         Some("afphoto") | Some("afdesign") | Some("afpub") => return decode_affinity(p),
+        // EXR gets a bounded, downsampling decode — a huge light bake would OOM
+        // through image::open's full-resolution float path (see decode_exr).
+        Some("exr") => return decode_exr(p, max_edge),
         Some(ext) if crate::types::RAW_EXTENSIONS.contains(&ext) => return decode_raw(p, max_edge),
         _ => {}
     }
@@ -1570,6 +1636,12 @@ fn decode_image_inner(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, S
 /// stats. NO PNG is produced: the grid uploads this RGBA straight to the GPU.
 fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> {
     let p = Path::new(path);
+    // Audio has no image to decode: its thumbnail is embedded cover art or a
+    // rendered waveform. Routed here (by extension) so request_thumbs stays one
+    // uniform command for every kind.
+    if is_audio_path(p) {
+        return build_audio(path, p, cache);
+    }
     let (size, mtime) = file_stamp(p);
     let h = hash_key("t", path, size, mtime);
     let key = hex_key(h);
@@ -1617,6 +1689,113 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
         },
     );
     Ok((key, info))
+}
+
+/// True for the audio formats whose thumbnail comes from cover art / a
+/// waveform rather than an image decode. Mirrors `AUDIO_EXTENSIONS`.
+fn is_audio_path(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| crate::types::AUDIO_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// Audio grid thumbnail: embedded cover art if the file has any, else a
+/// rendered waveform. Keyed `"a"` so it lives in the same cache/blob and is
+/// served over the same `thumb://`/`tex://` path as textures, but can never
+/// collide with a texture key for the same path.
+fn build_audio(path: &str, p: &Path, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> {
+    let (size, mtime) = file_stamp(p);
+    let h = hash_key("a", path, size, mtime);
+    let key = hex_key(h);
+
+    // Warm blob hit: recompute the (unused-for-audio) stats from the stored
+    // RGBA rather than re-decoding cover art or re-running the waveform.
+    if let Some(px) = cache.get(h) {
+        let (sw, sh) = (px.src_w, px.src_h);
+        if let Some(buf) = image::RgbaImage::from_raw(px.width, px.height, px.rgba) {
+            let mut info = analyze(&DynamicImage::ImageRgba8(buf));
+            info.source_width = sw;
+            info.source_height = sh;
+            return Ok((key, info));
+        }
+    }
+
+    // Cover art first (it IS a picture); the waveform is the fallback for the
+    // many game-audio files that ship untagged.
+    let img = audio_cover(p)
+        .or_else(|| audio_waveform_image(path))
+        .ok_or_else(|| format!("{path}: no cover art and no decodable waveform"))?;
+    let (w, ih) = img.dimensions();
+    if w == 0 || ih == 0 {
+        return Err(format!("{path}: zero-sized audio thumb"));
+    }
+    let thumb = if w.max(ih) > THUMB_EDGE {
+        img.resize(THUMB_EDGE, THUMB_EDGE, FilterType::Triangle)
+    } else {
+        img
+    };
+    let mut info = analyze(&thumb);
+    info.source_width = w;
+    info.source_height = ih;
+    let rgba = thumb.to_rgba8();
+    cache.put(
+        h,
+        Pixels {
+            width: rgba.width(),
+            height: rgba.height(),
+            src_w: w,
+            src_h: ih,
+            rgba: rgba.into_raw(),
+        },
+    );
+    Ok((key, info))
+}
+
+/// Embedded cover art via lofty — ID3 APIC (mp3/wav/aiff), FLAC/OGG PICTURE,
+/// MP4 `covr` — decoded through the same `image` path textures use. `None` when
+/// the file carries no tag or no picture.
+fn audio_cover(p: &Path) -> Option<DynamicImage> {
+    use lofty::prelude::TaggedFileExt;
+    let tagged = lofty::read_from_path(p).ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    let pic = tag.pictures().first()?;
+    image::load_from_memory(pic.data()).ok()
+}
+
+/// A square waveform rendered from the audio peaks — the fallback thumbnail
+/// when there's no embedded art. Transparent background so the cell's own
+/// colour shows through; a single accent colour, centred on the midline. The
+/// peaks come from the same decoder the player-bar waveform uses.
+fn audio_waveform_image(path: &str) -> Option<DynamicImage> {
+    const SIZE: u32 = 256;
+    const BINS: u32 = 96;
+    let peaks = crate::waveform::peaks_blocking(path, BINS)?;
+    let bins = (peaks.len() / 2) as u32;
+    if bins == 0 {
+        return None;
+    }
+    let mut img = image::RgbaImage::new(SIZE, SIZE); // zero-filled = transparent
+    let mid = SIZE as f32 / 2.0;
+    let amp = mid * 0.9;
+    // Matches the app's waveform tint; opaque bars over the transparent bg.
+    let color = image::Rgba([96u8, 165, 250, 255]);
+    for x in 0..SIZE {
+        let bin = (x * bins / SIZE) as usize;
+        let hi = peaks[bin * 2 + 1]; // max → above the midline
+        let lo = peaks[bin * 2]; // min → below
+        let mut top = (mid - hi * amp).round();
+        let mut bot = (mid - lo * amp).round();
+        if top > bot {
+            std::mem::swap(&mut top, &mut bot);
+        }
+        let y0 = top.clamp(0.0, SIZE as f32 - 1.0) as u32;
+        let y1 = bot.clamp(0.0, SIZE as f32 - 1.0) as u32;
+        for y in y0..=y1 {
+            img.put_pixel(x, y, color);
+        }
+    }
+    Some(DynamicImage::ImageRgba8(img))
 }
 
 /// Queue thumbnails for the given (id, path) pairs, superseding the previous
