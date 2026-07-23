@@ -51,9 +51,18 @@ const PREVIEW_EDGE: u32 = 4096;
 /// gamma 2.2 -> accurate sRGB (see tonemap.rs).
 const CACHE_VERSION: u32 = 2;
 /// Decode threads. Higher than metadata.rs's 2 because this is CPU-bound
-/// decode rather than disk probes, but capped: each in-flight 4K RGBA decode
-/// is ~64 MB resident, so 4 workers is a ~256 MB ceiling.
-const DECODE_THREADS: usize = 4;
+/// decode rather than disk probes. Scales with the machine so a screenful of
+/// audio waveforms (each a full symphonia decode) actually renders in parallel
+/// instead of trickling four at a time, but stays floored at 4 and capped at 8:
+/// each in-flight 4K RGBA texture decode is ~64 MB resident, so 8 workers is a
+/// ~512 MB ceiling. Audio decodes are memory-light, so the cap only bites on
+/// texture-heavy grids.
+fn decode_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(4, 8)
+}
 const FLUSH_MS: u64 = 100;
 
 pub struct ThumbState {
@@ -1207,8 +1216,8 @@ fn audio_waveform_image(path: &str) -> Option<DynamicImage> {
 }
 
 /// Queue thumbnails for the given (id, path) pairs, superseding the previous
-/// request. **Returns the ids that were dropped unstarted**, so the caller can
-/// forget it ever asked for them.
+/// request when `supersede` is set. **Returns the ids that were dropped
+/// unstarted**, so the caller can forget it ever asked for them.
 ///
 /// That return value is the whole contract. Clearing the queue is how
 /// cancellation works â€” without it, scrolling a 2000-texture folder would
@@ -1221,11 +1230,21 @@ fn audio_waveform_image(path: &str) -> Option<DynamicImage> {
 ///
 /// Returning the dropped ids keeps both properties: the queue stays bounded,
 /// and nothing is lost. Cheap â€” it is a Vec<u32> of at most a screenful.
+///
+/// `supersede` distinguishes the two kinds of caller. The grid scroller owns
+/// the queue and supersedes (drops the previous window). A *pin* â€” the audio
+/// inspector or a fullscreen preview asking for one selected file â€” must NOT
+/// supersede: it shares the grid's queue but not its "asked" bookkeeping, so
+/// draining the grid's jobs here would report them dropped to the *pin's*
+/// promise, which discards them; the grid never re-asks and its cells strand.
+/// A pin therefore jumps to the front of the queue and drops nothing (returns
+/// empty), decoding its file next without disturbing the grid's window.
 #[tauri::command]
 pub async fn request_thumbs(
     app: AppHandle,
     state: State<'_, ThumbState>,
     items: Vec<(u32, String)>,
+    supersede: bool,
 ) -> Result<Vec<u32>, String> {
     let n = items.len();
     // Take BOTH locks before touching either, and hold `running` across the
@@ -1235,12 +1254,22 @@ pub async fn request_thumbs(
     let mut running = state.running.lock();
     let dropped: Vec<u32> = {
         let mut q = state.queue.lock();
-        // drain, not clear â€” we owe the caller the ids we are abandoning
-        let dropped = q.drain(..).map(|j| j.id).collect();
-        for (id, path) in items {
-            q.push(Job { id, path });
+        if supersede {
+            // drain, not clear â€” we owe the caller the ids we are abandoning
+            let dropped = q.drain(..).map(|j| j.id).collect();
+            for (id, path) in items {
+                q.push(Job { id, path });
+            }
+            dropped
+        } else {
+            // Pin: prepend so the selected file decodes next, keep the grid's
+            // window intact, and drop nothing. `.rev()` preserves caller order
+            // once the inserts stack up at the front.
+            for (id, path) in items.into_iter().rev() {
+                q.insert(0, Job { id, path });
+            }
+            Vec::new()
         }
-        dropped
     };
     #[cfg(debug_assertions)]
     eprintln!(
@@ -1261,8 +1290,9 @@ pub async fn request_thumbs(
 }
 
 fn drain(app: AppHandle) {
+    let threads = decode_threads();
     let pool = match rayon::ThreadPoolBuilder::new()
-        .num_threads(DECODE_THREADS)
+        .num_threads(threads)
         .thread_name(|i| format!("thumb-{i}"))
         .build()
     {
@@ -1286,7 +1316,7 @@ fn drain(app: AppHandle) {
         // is the topmost on-screen row, not a stale fly-over.
         let chunk: Vec<Job> = {
             let mut q = state.queue.lock();
-            let take = q.len().min(DECODE_THREADS * 2);
+            let take = q.len().min(threads * 2);
             q.drain(0..take).collect()
         };
         if chunk.is_empty() {

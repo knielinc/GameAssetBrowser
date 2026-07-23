@@ -5,9 +5,9 @@ import { create } from "zustand";
  * squeezes the wider-than-display float range into sRGB, and an exposure
  * offset in EV stops.
  *
- * ONE global choice, shared by the inspector drawer and the fullscreen overlay
- * (same rationale as envPrefs). Session-only: a viewing preference, not worth
- * persisting a possibly-changed default across launches.
+ * ONE global choice, shared by the inspector drawer and the fullscreen overlay.
+ * Session-only: a viewing preference, not worth persisting a possibly-changed
+ * default across launches.
  *
  * The operator ids are the wire tokens the `preview://…?tm=<id>&ev=<stops>`
  * query carries, and each maps to the identical three.js tone-mapping constant

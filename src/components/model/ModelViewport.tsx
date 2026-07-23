@@ -8,6 +8,7 @@ import { disposeModel } from "../../model/dispose";
 import { rescueTextures, type RescueResult } from "../../model/rescueTextures";
 import { packDirOf, useAtlasStore } from "../../stores/atlasStore";
 import { useRenderPrefs, type ModelLight } from "../../stores/renderPrefs";
+import { gradientBackground } from "../../model/gradientBg";
 
 /**
  * Build a light rig for `mode`. Every rig keeps a hemisphere fill so nothing
@@ -205,11 +206,12 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
     renderer.domElement.style.cssText = "width:100%;height:100%;display:block;cursor:grab;touch-action:none";
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0c0c12);
+    // Backdrop echoes the chosen light rig (swapped in the rig effect below).
+    scene.background = gradientBackground(useRenderPrefs.getState().modelLight);
 
     // RoomEnvironment is procedural — a few hundred lines of code, ZERO asset
     // bytes, no HDRI to ship and no license question. It is what three's own
-    // editor uses.
+    // editor uses, and gives PBR (glTF) meshes a neutral IBL fill.
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -367,7 +369,7 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
     };
   }, []);
 
-  // --- swap the light rig when the user changes it -------------------------
+  // --- swap the light rig (and its matching backdrop) when it changes -------
   useEffect(() => {
     const scene = sceneRef.current;
     if (scene === null) return;
@@ -375,6 +377,7 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
     const rig = buildLightRig(modelLight);
     for (const l of rig) scene.add(l);
     lightsRef.current = rig;
+    scene.background = gradientBackground(modelLight);
     dirtyRef.current = true;
   }, [modelLight]);
 

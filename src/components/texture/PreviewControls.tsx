@@ -1,9 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import clsx from "clsx";
-import { Check, ChevronDown } from "lucide-react";
 import { useRenderPrefs } from "../../stores/renderPrefs";
-import { basename, useLibraryStore } from "../../stores/libraryStore";
-import { useEnvPrefs } from "../../stores/envPrefs";
 import { EV_MAX, EV_MIN, EV_STEP, TONEMAPS, useTonemapPrefs } from "../../stores/tonemapPrefs";
 import {
   ISO_CHANNELS,
@@ -157,123 +154,6 @@ const Label = ({ children }: { children: string }): ReactElement => (
     {children}
   </div>
 );
-
-/** How many library HDRIs the environment dropdown lists. A library can hold
- *  thousands of .hdr files; past a couple hundred the popup helps no one. */
-const ENV_LIST_CAP = 200;
-
-/**
- * Library-HDRI environment picker: any .hdr/.exr in the library can light the
- * 3D preview (and back the env view). A custom dropdown, not <select> — the
- * native popup can't be themed in WebView2 (same reason as the Toolbar sort
- * menu). The choice lives in envPrefs: session-global, shared drawer ↔
- * fullscreen.
- */
-function EnvPicker({ up }: { up: boolean }): ReactElement {
-  const allFiles = useLibraryStore((s) => s.allFiles);
-  const envPath = useEnvPrefs((s) => s.envPath);
-  const setEnvPath = useEnvPrefs((s) => s.setEnvPath);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current !== null && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
-      // Capture + stop so closing the picker doesn't also collapse a selection.
-      e.stopPropagation();
-      setOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
-
-  const hdris = useMemo(
-    () =>
-      allFiles
-        .filter((f) => {
-          const e = f.ext.toLowerCase();
-          return e === "hdr" || e === "exr";
-        })
-        .slice(0, ENV_LIST_CAP),
-    [allFiles],
-  );
-
-  return (
-    <div ref={ref} className="relative flex min-w-[150px] flex-col gap-1">
-      <Label>Environment</Label>
-      <button
-        type="button"
-        aria-expanded={open}
-        title={envPath ?? "Lighting environment — Default is the built-in studio room"}
-        className="flex h-[23px] items-center justify-between gap-1 rounded-full bg-bg px-2.5 text-[10px] text-text transition-colors duration-[120ms] hover:bg-overlay"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="truncate">{envPath === null ? "Default" : basename(envPath)}</span>
-        <ChevronDown
-          size={11}
-          className={clsx("shrink-0 text-faint transition-transform duration-[120ms]", open && "rotate-180")}
-        />
-      </button>
-      {open && (
-        <div
-          className={clsx(
-            "absolute left-0 z-50 max-h-56 w-60 overflow-y-auto rounded-xl bg-raised p-1 shadow-e2",
-            // Fullscreen puts the controls at the window's bottom edge — open
-            // upward there; the drawer has room below.
-            up ? "bottom-[calc(100%+6px)]" : "top-[calc(100%+6px)]",
-          )}
-        >
-          <button
-            type="button"
-            className={clsx(
-              "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
-              envPath === null
-                ? "bg-accent-fill text-accent-fg"
-                : "text-dim hover:bg-overlay hover:text-text",
-            )}
-            onClick={() => {
-              setEnvPath(null);
-              setOpen(false);
-            }}
-          >
-            Default
-            {envPath === null && <Check size={13} className="shrink-0" />}
-          </button>
-          {hdris.map((f) => (
-            <button
-              key={f.path}
-              type="button"
-              title={f.path}
-              className={clsx(
-                "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
-                f.path === envPath
-                  ? "bg-accent-fill text-accent-fg"
-                  : "text-dim hover:bg-overlay hover:text-text",
-              )}
-              onClick={() => {
-                setEnvPath(f.path);
-                setOpen(false);
-              }}
-            >
-              <span className="truncate">{f.name}</span>
-              {f.path === envPath && <Check size={13} className="shrink-0" />}
-            </button>
-          ))}
-          {hdris.length === 0 && (
-            <div className="px-2.5 py-1.5 text-[11px] text-dim">No .hdr / .exr in the library</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** EV as a signed, half-stop label: "0 EV", "+1.5 EV", "−2 EV". */
 function fmtEv(ev: number): string {
@@ -562,9 +442,6 @@ export default function PreviewControls({
           ))}
         </Row>
       </div>
-      {/* Env-relevant everywhere in 3D: it's the IBL for plane/sphere/cube and
-          the backdrop in env mode. Fullscreen (inline) opens the list upward. */}
-      <EnvPicker up={inline === true} />
       {value.mesh === "plane" && channelsGroup}
       {hasHeight === true && value.mesh !== "env" && value.light !== "unlit" && (
         <div className="flex w-[160px] flex-col gap-1">

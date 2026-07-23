@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { isFloatPreview, modelUrl, sourceUrl } from "../../model/loadModel";
-import { useEnvPrefs } from "../../stores/envPrefs";
+import { isFloatPreview, sourceUrl } from "../../model/loadModel";
+import { gradientBackground } from "../../model/gradientBg";
 import { useTonemapPrefs, type TonemapId } from "../../stores/tonemapPrefs";
 import { applyParallax } from "./parallax";
 
@@ -217,14 +217,6 @@ export default function TexturePreview({
      *  already-loaded textures is what keeps that rebuild flicker-free —
      *  reloading async painted the mesh untextured for a few frames. */
     texCache: Map<string, THREE.Texture>;
-    /** Kept for the library-HDRI environment: the generator outlives init so
-     *  a later env switch can PMREM a new equirect without a new one. */
-    pmrem?: THREE.PMREMGenerator;
-    /** The built-in RoomEnvironment PMREM — what "Default" restores. */
-    defaultEnv?: THREE.Texture;
-    /** Last generated library-HDRI env, cached so toggling Default ↔ the same
-     *  file (or entering/leaving env mode) never re-decodes the HDR. */
-    customEnv?: { path: string; tex: THREE.Texture };
   }>({ lights: [], texCache: new Map() });
   const cam = useRef({ yaw: 0.6, pitch: 0.3, dist: 3.2, panX: 0, panY: 0 });
   const dirty = useRef(true);
@@ -257,17 +249,17 @@ export default function TexturePreview({
       "width:100%;height:100%;display:block;cursor:grab;touch-action:none";
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x07070b);
+    // Backdrop matches the chosen light rig (swapped in the lights effect).
+    scene.background = gradientBackground(light);
+    // RoomEnvironment gives the lit meshes a neutral IBL fill — procedural, so
+    // no HDRI to ship. environmentIntensity is zeroed for unlit in the rig effect.
     const pmrem = new THREE.PMREMGenerator(renderer);
-    const defaultEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environment = defaultEnv;
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
     refs.current.renderer = renderer;
     refs.current.scene = scene;
     refs.current.camera = camera;
-    refs.current.pmrem = pmrem;
-    refs.current.defaultEnv = defaultEnv;
     setReady(true);
 
     const ro = new ResizeObserver(() => {
@@ -358,8 +350,6 @@ export default function TexturePreview({
       refs.current.texCache.clear();
       refs.current.obj?.geometry.dispose();
       refs.current.mat?.dispose();
-      refs.current.customEnv?.tex.dispose();
-      refs.current.customEnv = undefined;
       pmrem.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
@@ -399,65 +389,11 @@ export default function TexturePreview({
     // Unlit means "show me the albedo honestly" — kill the IBL too, or the
     // environment keeps tinting what is supposed to be raw.
     scene.environmentIntensity = light === "unlit" ? 0 : 1;
+    // Backdrop echoes the rig. Set unconditionally: env mode hides it behind the
+    // panorama sphere, but leaving env mode must reveal the right gradient.
+    scene.background = gradientBackground(light);
     dirty.current = true;
   }, [light, ready]);
-
-  // --- library HDRI environment ---
-  // A .hdr/.exr picked from the library replaces the built-in room rig as the
-  // IBL for every 3D mode, and doubles as the backdrop in env mode. Loaded at
-  // source quality over model:// (the browser can't decode HDR — RGBELoader/
-  // EXRLoader parse the bytes themselves), then PMREM'd like any environment.
-  const envPath = useEnvPrefs((s) => s.envPath);
-  useEffect(() => {
-    const { scene, pmrem } = refs.current;
-    if (scene === undefined || pmrem === undefined) return;
-    const apply = (tex: THREE.Texture | undefined): void => {
-      scene.environment = tex ?? refs.current.defaultEnv ?? null;
-      // Backdrop only in env mode — the other meshes keep the neutral void, a
-      // busy background behind a roughness sphere reads as noise.
-      scene.background =
-        mesh === "env" && tex !== undefined ? tex : new THREE.Color(0x07070b);
-      dirty.current = true;
-    };
-    if (envPath === null) {
-      // Default: keep customEnv cached — flipping back is then instant.
-      apply(undefined);
-      return;
-    }
-    const cached = refs.current.customEnv;
-    if (cached !== undefined && cached.path === envPath) {
-      apply(cached.tex);
-      return;
-    }
-    let stale = false;
-    (async () => {
-      const ext = envPath.slice(envPath.lastIndexOf(".") + 1).toLowerCase();
-      // Lazy loader imports, same idiom as loadModel: a user who never picks
-      // an .exr environment never parses EXRLoader.
-      const loader =
-        ext === "exr"
-          ? new (await import("three/examples/jsm/loaders/EXRLoader.js")).EXRLoader()
-          : new (await import("three/examples/jsm/loaders/RGBELoader.js")).RGBELoader();
-      const equirect = await loader.loadAsync(modelUrl(envPath));
-      const env = pmrem.fromEquirectangular(equirect).texture;
-      equirect.dispose(); // PMREM copied it — the raw floats are dead weight
-      if (stale) {
-        env.dispose();
-        return;
-      }
-      refs.current.customEnv?.tex.dispose();
-      refs.current.customEnv = { path: envPath, tex: env };
-      apply(env);
-    })().catch((err: unknown) => {
-      // A truncated/exotic HDR must not kill the preview — silently keep the
-      // default rig, exactly what "Default" would have given.
-      console.warn("library HDRI failed to load — keeping default environment", err);
-      if (!stale) apply(undefined);
-    });
-    return () => {
-      stale = true;
-    };
-  }, [envPath, mesh, ready]);
 
   // The camera belongs to the USER: a rebuild triggered by lighting, tiling,
   // relief, or channel changes must not touch it. Only an actual geometry

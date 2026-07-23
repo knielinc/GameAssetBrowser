@@ -467,13 +467,17 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
   const selectedFile = visible.find((f) => f.path === tab.selectedPath) ?? null;
 
   // The texture inspector works on the grid ITEM (a material or a lone file),
-  // not the raw file — grouping is the whole point of the preview. On the "all"
-  // tab a selected texture is never grouped, so it's always a lone-file item.
+  // not the raw file — grouping is the whole point of the preview. A MATERIAL's
+  // selectedPath is its composite grouping key (never a real file path), so it
+  // resolves ONLY through grouped.find — try that FIRST, independent of
+  // selectedFile (which is null for a material, since no file has that path).
+  // Fall back to a lone-file item for an ungrouped texture (and the "all" tab,
+  // where textures are never grouped).
   const selectedItem: TextureItem | null =
-    selectedFile === null || selectedFile.kind !== "texture"
-      ? null
-      : (grouped?.find((i) => i.key === tab.selectedPath) ??
-        { kind: "file", file: selectedFile, key: selectedFile.path });
+    grouped?.find((i) => i.key === tab.selectedPath) ??
+    (selectedFile !== null && selectedFile.kind === "texture"
+      ? { kind: "file", file: selectedFile, key: selectedFile.path }
+      : null);
 
   return (
     <>

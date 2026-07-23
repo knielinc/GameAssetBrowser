@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import clsx from "clsx";
-import { Check, ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, Search, X } from "lucide-react";
 import {
   AUDIO_CHANNEL_GROUP_LABEL,
   CHANNEL_GROUP_LABEL,
@@ -592,6 +592,75 @@ function Histogram({ hist, range }: { hist: RangeHistogram; range: RangeFilter }
 const maxCount = (rows: readonly { count: number }[]): number =>
   rows.reduce((m, r) => Math.max(m, r.count), 0);
 
+/** How many options a facet must have before it grows a type-to-filter box.
+ *  Below this the list is short enough that a search field is just clutter. */
+const SEARCH_THRESHOLD = 8;
+
+interface FacetOption {
+  value: string;
+  count: number;
+  selected: boolean;
+}
+
+/**
+ * A multi-select facet rendered as a checkable OptionRow list, with a
+ * type-to-filter search box once it grows past [`SEARCH_THRESHOLD`] rows — the
+ * combobox behaviour for the facets whose vocabulary is large or unbounded
+ * (formats, collections), where scrolling dozens of rows was the pain. The
+ * bars/counts and multi-select toggle are unchanged; search only narrows what
+ * is shown, never what is selected (an off-screen match stays checked).
+ */
+function SearchableFacetList({
+  kind,
+  options,
+  labelOf,
+  onToggle,
+  placeholder,
+}: {
+  kind: AssetKind;
+  options: readonly FacetOption[];
+  /** Map a value to its display label; identity when the value IS the label. */
+  labelOf?: (value: string) => string;
+  onToggle: (value: string) => void;
+  placeholder: string;
+}): ReactElement {
+  const [query, setQuery] = useState("");
+  const label = labelOf ?? ((v: string) => v);
+  const q = query.trim().toLowerCase();
+  const rows = q === "" ? options : options.filter((o) => label(o.value).toLowerCase().includes(q));
+  const max = maxCount(options);
+  return (
+    <>
+      {options.length > SEARCH_THRESHOLD && (
+        <div className="relative mb-1 px-0.5">
+          <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            placeholder={placeholder}
+            className="h-[26px] w-full rounded-lg bg-bg pl-7 pr-2 text-[12px] text-text outline-none placeholder:text-faint focus:ring-1 focus:ring-accent"
+          />
+        </div>
+      )}
+      {rows.map((o) => (
+        <OptionRow
+          key={o.value}
+          kind={kind}
+          label={label(o.value)}
+          count={o.count}
+          max={max}
+          selected={o.selected}
+          onClick={() => onToggle(o.value)}
+        />
+      ))}
+      {rows.length === 0 && (
+        <div className="px-2.5 py-1.5 text-[11px] text-faint">No matches</div>
+      )}
+    </>
+  );
+}
+
 /** One active constraint in the header token row. */
 interface Token {
   key: string;
@@ -798,20 +867,15 @@ export default function FilterPopup({
 
   const renderRows = (id: FacetId): ReactNode => {
     switch (id) {
-      case "format": {
-        const max = maxCount(counts.format);
-        return counts.format.map((o) => (
-          <OptionRow
-            key={o.value}
+      case "format":
+        return (
+          <SearchableFacetList
             kind={kind}
-            label={o.value}
-            count={o.count}
-            max={max}
-            selected={o.selected}
-            onClick={() => toggleExt(kind, o.value)}
+            options={counts.format}
+            onToggle={(v) => toggleExt(kind, v)}
+            placeholder="Filter formats…"
           />
-        ));
-      }
+        );
       case "favorite":
         return (
           <OptionRow
@@ -831,18 +895,14 @@ export default function FilterPopup({
             </div>
           );
         }
-        const max = maxCount(counts.collections);
-        return counts.collections.map((o) => (
-          <OptionRow
-            key={o.value}
+        return (
+          <SearchableFacetList
             kind={kind}
-            label={o.value}
-            count={o.count}
-            max={max}
-            selected={o.selected}
-            onClick={() => apply({ collections: toggled(filters.collections, o.value) })}
+            options={counts.collections}
+            onToggle={(v) => apply({ collections: toggled(filters.collections, v) })}
+            placeholder="Filter collections…"
           />
-        ));
+        );
       }
       case "audioChannels": {
         const max = maxCount(counts.audioChannels);

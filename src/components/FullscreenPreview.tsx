@@ -55,17 +55,30 @@ export default function FullscreenPreview({
   const thumbs = useLibraryStore.getState().thumbs;
   const thumb = thumbs.get(file.id);
 
+  const isAudio = file.kind === "audio";
+  // The audio overlay follows the PLAYER, not the file it was opened with: the
+  // embedded transport's prev/next and auto-advance change the track under it,
+  // so the cover, title, and meta must track whatever is actually playing. The
+  // next/advance targets always come from audioVisibleRef, so it resolves; fall
+  // back to the opened file before the engine has loaded anything.
+  const currentPath = usePlayerStore((s) => s.currentPath);
+  const audioFile: LibFile =
+    isAudio && currentPath !== null && currentPath !== file.path
+      ? (audioVisibleRef.current.find((f) => f.path === currentPath) ?? file)
+      : file;
+
   // Audio has no source to render; its fullscreen is the big cover art /
   // waveform (the "a"-keyed thumbnail) plus the probe details. Same optimistic
   // path AudioCell uses; request it here too so it shows even when fullscreen
   // is opened from the list (where no grid drove the request).
-  const audioThumb = useThumbSrc(file, "a");
-  const isAudio = file.kind === "audio";
+  const audioThumb = useThumbSrc(audioFile, "a");
+  // A pin (supersede=false): decode this one file without dropping the grid's
+  // in-flight window behind the overlay, so its cells aren't stranded.
   useEffect(() => {
-    if (isAudio && !useLibraryStore.getState().thumbs.has(file.id)) {
-      void requestThumbs([[file.id, file.path]]).catch(() => {});
+    if (isAudio && !useLibraryStore.getState().thumbs.has(audioFile.id)) {
+      void requestThumbs([[audioFile.id, audioFile.path]], false).catch(() => {});
     }
-  }, [isAudio, file.id, file.path]);
+  }, [isAudio, audioFile.id, audioFile.path]);
   // Load the track into the engine so the embedded transport (and waveform)
   // control THIS file. Respects the autoplay pref, like selecting an audio row.
   useEffect(() => {
@@ -76,17 +89,17 @@ export default function FullscreenPreview({
   }, [isAudio, file]);
   const audioMetaLine = ((): string => {
     if (!isAudio) return "";
-    const parts: string[] = [file.ext.toUpperCase()];
-    const secs = useLibraryStore.getState().durations.get(file.id);
+    const parts: string[] = [audioFile.ext.toUpperCase()];
+    const secs = useLibraryStore.getState().durations.get(audioFile.id);
     if (secs !== undefined) parts.push(formatTime(secs));
-    const m = useLibraryStore.getState().audioMeta.get(file.id);
+    const m = useLibraryStore.getState().audioMeta.get(audioFile.id);
     if (m !== undefined) {
       const [rate, ch, bits] = m;
       if (rate > 0) parts.push(`${rate / 1000} kHz`);
       if (bits > 0) parts.push(`${bits}-bit`);
       if (ch > 0) parts.push(ch === 1 ? "Mono" : ch === 2 ? "Stereo" : `${ch}ch`);
     }
-    parts.push(humanSize(file.size));
+    parts.push(humanSize(audioFile.size));
     return parts.join(" · ");
   })();
 
@@ -132,10 +145,10 @@ export default function FullscreenPreview({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg/97 backdrop-blur-sm">
       <div className="flex h-11 shrink-0 items-center gap-3 px-4">
-        <span className="truncate text-[13px] font-medium" title={file.path}>
-          {file.name}
+        <span className="truncate text-[13px] font-medium" title={audioFile.path}>
+          {audioFile.name}
         </span>
-        <span className="truncate font-mono text-[10px] text-dim">{file.path}</span>
+        <span className="truncate font-mono text-[10px] text-dim">{audioFile.path}</span>
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {file.kind === "document" && docIsPdf(file.ext) && <PdfLayoutControls />}
           {file.kind === "document" && (docIsTextual(file.ext) || docIsEbook(file.ext)) && (
@@ -181,7 +194,15 @@ export default function FullscreenPreview({
                     </div>
                   )}
                 </div>
-                <div className="text-center text-[12px] tabular-nums text-dim">{audioMetaLine}</div>
+                <div className="flex flex-col items-center gap-1">
+                  <div
+                    className="max-w-[70vw] truncate text-center text-[15px] font-semibold tracking-tight"
+                    title={audioFile.name}
+                  >
+                    {audioFile.name}
+                  </div>
+                  <div className="text-center text-[12px] tabular-nums text-dim">{audioMetaLine}</div>
+                </div>
               </div>
               {/* Full transport — the fullscreen overlay covers the docked
                   PlayerBar, so play/seek live here while it's open. Controls the

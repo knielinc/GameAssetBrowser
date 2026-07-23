@@ -54,15 +54,21 @@ export function requestSpectrogram(path: string): Promise<void> {
 }
 
 /**
- * Queue thumbnails for `items` ([file id, path] pairs), superseding any
- * earlier request. Results arrive batched via `thumb:ready`; the pixels
- * themselves come over `thumb://`.
+ * Queue thumbnails for `items` ([file id, path] pairs). Results arrive batched
+ * via `thumb:ready`; the pixels themselves come over `thumb://`.
  *
- * Resolves to the ids that were DROPPED unstarted by this call. The caller
- * must forget it ever asked for those, or their cells strand forever.
+ * `supersede` (default true) is for the grid scroller, which owns the queue:
+ * each request drops the previous window. A *pin* — the inspector or a
+ * fullscreen preview asking for one selected file — must pass `false`, so it
+ * jumps the queue without dropping the grid's jobs (which it can't un-ask,
+ * stranding those cells). See the `request_thumbs` doc in thumbs.rs.
+ *
+ * Resolves to the ids that were DROPPED unstarted by this call (always empty
+ * for a pin). The caller must forget it ever asked for those, or their cells
+ * strand forever.
  */
-export function requestThumbs(items: [number, string][]): Promise<number[]> {
-  return invoke<number[]>("request_thumbs", { items });
+export function requestThumbs(items: [number, string][], supersede = true): Promise<number[]> {
+  return invoke<number[]>("request_thumbs", { items, supersede });
 }
 
 /**

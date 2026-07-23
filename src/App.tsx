@@ -22,9 +22,9 @@ export default function App(): ReactElement {
   const dropHover = useExternalDrop();
   const hasRoots = useLibraryStore((s) => s.roots.length > 0);
   const activeTab = useLibraryStore((s) => s.activeTab);
-  // The player bar is persistent: shown on the Audio tab (even empty), and on
-  // any other tab whenever a track is loaded — so audio started from the All
-  // tab or a fullscreen preview stays controllable instead of playing blind.
+  // The player bar shows only while a track is loaded — on any tab, so audio
+  // started from the All tab or a fullscreen preview stays controllable instead
+  // of playing blind, and the Audio tab isn't cluttered by an empty transport.
   const playerLoaded = usePlayerStore((s) => s.currentPath !== null);
   const leftOpen = usePanelPrefs((s) => s.left);
 
@@ -64,9 +64,9 @@ export default function App(): ReactElement {
           )}
         </main>
       </div>
-      {/* Persistent transport: always on the Audio tab, and on any other tab
-          while a track is loaded, so playback is never audible-but-hidden. */}
-      {(activeTab === "audio" || playerLoaded) && <PlayerBar />}
+      {/* Transport shows only while a track is loaded, so playback is never
+          audible-but-hidden and an idle Audio tab stays uncluttered. */}
+      {playerLoaded && <PlayerBar />}
       {/* Drop-to-add-root. pointer-events-none: the OS drives the drag, and
           the native drop event carries the paths — the overlay is pure
           feedback and must not swallow anything. */}

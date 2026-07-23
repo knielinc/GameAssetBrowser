@@ -62,10 +62,11 @@ function AudioInspectorBody({ file }: { file: LibFile }): ReactElement {
   const hasThumb = useLibraryStore.getState().thumbs.has(file.id);
 
   // In list mode there's no grid to request the thumbnail, so decode it here
-  // for the selected file. Guarded on `hasThumb` so we don't fight the grid's
-  // own request queue when a grid IS mounted.
+  // for the selected file. A pin (supersede=false): it jumps the queue without
+  // dropping the grid's window, so selecting a file never strands the grid's
+  // in-flight cells. Guarded on `hasThumb` to skip the round-trip when cached.
   useEffect(() => {
-    if (!hasThumb) void requestThumbs([[file.id, file.path]]).catch(() => {});
+    if (!hasThumb) void requestThumbs([[file.id, file.path]], false).catch(() => {});
   }, [file.id, file.path, hasThumb]);
 
   const [rate, channels, bits] = meta ?? [0, 0, 0];

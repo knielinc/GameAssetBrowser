@@ -12,8 +12,10 @@ use std::sync::Arc;
 
 use lru::LruCache;
 use parking_lot::Mutex;
-use symphonia::core::audio::SampleBuffer;
+use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal};
+use symphonia::core::conv::IntoSample;
 use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::sample::Sample;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::types::{events, WaveformReady};
@@ -119,6 +121,97 @@ pub(crate) fn peaks_blocking(path: &str, bins: u32) -> Option<Vec<f32>> {
     decode_peaks(path, bins, &|| false, Some(THUMB_MAX_FRAMES)).ok()
 }
 
+/// Streaming min/max fold: every `chunk` mono frames collapse to one (min, max)
+/// pair in `fine`. State is carried across packets, so a chunk that straddles a
+/// packet boundary yields exactly the bins one continuous sample stream would —
+/// the fold is oblivious to how the decoder happened to packetize the file.
+struct FineFold {
+    chunk: u64,
+    fine: Vec<(f32, f32)>,
+    cur_min: f32,
+    cur_max: f32,
+    frames_in_chunk: u64,
+}
+
+impl FineFold {
+    fn new(chunk: u64) -> Self {
+        Self {
+            chunk,
+            fine: Vec::new(),
+            cur_min: f32::MAX,
+            cur_max: f32::MIN,
+            frames_in_chunk: 0,
+        }
+    }
+
+    #[inline]
+    fn push(&mut self, mono: f32) {
+        self.cur_min = self.cur_min.min(mono);
+        self.cur_max = self.cur_max.max(mono);
+        self.frames_in_chunk += 1;
+        if self.frames_in_chunk >= self.chunk {
+            self.fine.push((self.cur_min, self.cur_max));
+            self.cur_min = f32::MAX;
+            self.cur_max = f32::MIN;
+            self.frames_in_chunk = 0;
+        }
+    }
+
+    /// Flush the trailing partial chunk (if any) and hand back the fine pairs.
+    fn finish(mut self) -> Vec<(f32, f32)> {
+        if self.frames_in_chunk > 0 {
+            self.fine.push((self.cur_min, self.cur_max));
+        }
+        self.fine
+    }
+}
+
+/// Fold one decoded packet straight from symphonia's *planar* buffer, mixing to
+/// mono and converting each sample to f32 with symphonia's own `IntoSample` —
+/// the very conversion the old `copy_interleaved_ref` used, so the numbers are
+/// bit-for-bit identical. The win is what it skips: no intermediate interleaved
+/// f32 `SampleBuffer`, so one pass over the samples instead of two and no
+/// per-packet allocation. Returns the frame count folded (for the length cap).
+fn fold_planar<S>(buf: &AudioBuffer<S>, fold: &mut FineFold) -> u64
+where
+    S: Sample + IntoSample<f32>,
+{
+    let channels = buf.spec().channels.count().max(1);
+    let frames = buf.frames();
+    match channels {
+        // Contiguous single channel: the min/max reduction can vectorize.
+        1 => {
+            for &s in buf.chan(0) {
+                let v: f32 = s.into_sample();
+                fold.push(v);
+            }
+        }
+        // The common stereo case, avoiding the general per-frame sum loop.
+        // `* 0.5` is bit-identical to the old `/ 2.0` (0.5 is exact).
+        2 => {
+            let (l, r) = (buf.chan(0), buf.chan(1));
+            for i in 0..frames {
+                let a: f32 = l[i].into_sample();
+                let b: f32 = r[i].into_sample();
+                fold.push((a + b) * 0.5);
+            }
+        }
+        // Surround et al.: sum the channels in index order and divide, exactly
+        // as the interleaved path did (same order → same f32 rounding).
+        c => {
+            for i in 0..frames {
+                let mut sum = 0.0f32;
+                for ch in 0..c {
+                    let v: f32 = buf.chan(ch)[i].into_sample();
+                    sum += v;
+                }
+                fold.push(sum / c as f32);
+            }
+        }
+    }
+    frames as u64
+}
+
 /// Full decode → mono mix → fine min/max chunks → refold to exactly `bins`
 /// interleaved (min, max) pairs. `is_stale` is polled between packets so a
 /// caller can cancel a superseded decode (the player bar does; the one-shot
@@ -148,12 +241,8 @@ fn decode_peaks(
         _ => 1024,
     };
 
-    let mut fine: Vec<(f32, f32)> = Vec::new();
-    let mut cur_min = f32::MAX;
-    let mut cur_max = f32::MIN;
-    let mut frames_in_chunk: u64 = 0;
+    let mut fold = FineFold::new(chunk);
     let mut total_frames: u64 = 0;
-    let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     loop {
         // Cancellation point between packets.
@@ -186,38 +275,26 @@ fn decode_peaks(
             Err(e) => return Err(DecodeAbort::Failed(format!("decode failed: {e}"))),
         };
 
-        let spec = *decoded.spec();
-        let channels = spec.channels.count().max(1);
-        let needed_samples = decoded.capacity() * channels;
-        if sample_buf
-            .as_ref()
-            .map_or(true, |b| b.capacity() < needed_samples)
-        {
-            sample_buf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
-        }
-        let buf = sample_buf.as_mut().expect("sample buffer just initialized");
-        buf.copy_interleaved_ref(decoded);
-
-        for frame in buf.samples().chunks_exact(channels) {
-            let mono = frame.iter().copied().sum::<f32>() / channels as f32;
-            cur_min = cur_min.min(mono);
-            cur_max = cur_max.max(mono);
-            frames_in_chunk += 1;
-            if frames_in_chunk >= chunk {
-                fine.push((cur_min, cur_max));
-                cur_min = f32::MAX;
-                cur_max = f32::MIN;
-                frames_in_chunk = 0;
-            }
-        }
-        total_frames += (buf.samples().len() / channels) as u64;
+        // Fold straight from the native buffer — no interleaved f32 copy. Every
+        // symphonia sample format so the match stays exhaustive.
+        total_frames += match &decoded {
+            AudioBufferRef::U8(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::U16(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::U24(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::U32(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::S8(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::S16(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::S24(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::S32(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::F32(b) => fold_planar(b, &mut fold),
+            AudioBufferRef::F64(b) => fold_planar(b, &mut fold),
+        };
         if max_frames.is_some_and(|m| total_frames >= m) {
             break; // thumbnail cap reached — see THUMB_MAX_FRAMES
         }
     }
-    if frames_in_chunk > 0 {
-        fine.push((cur_min, cur_max));
-    }
+
+    let fine = fold.finish();
     if fine.is_empty() {
         return Err(DecodeAbort::Failed("no audio frames decoded".into()));
     }
@@ -253,5 +330,62 @@ fn emit_ready(app: &AppHandle, path: &str, bins: u32, peaks: &Arc<Vec<f32>>) {
     };
     if let Err(e) = app.emit(events::WAVEFORM_READY, payload) {
         eprintln!("[waveform] failed to emit waveform:ready: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pre-refactor inline fold, verbatim — the reference `FineFold` must
+    /// reproduce exactly, so the native-buffer path can't drift from what the
+    /// interleaved-copy path produced.
+    fn reference_fine(mono: &[f32], chunk: u64) -> Vec<(f32, f32)> {
+        let mut fine = Vec::new();
+        let (mut cur_min, mut cur_max, mut n) = (f32::MAX, f32::MIN, 0u64);
+        for &m in mono {
+            cur_min = cur_min.min(m);
+            cur_max = cur_max.max(m);
+            n += 1;
+            if n >= chunk {
+                fine.push((cur_min, cur_max));
+                cur_min = f32::MAX;
+                cur_max = f32::MIN;
+                n = 0;
+            }
+        }
+        if n > 0 {
+            fine.push((cur_min, cur_max));
+        }
+        fine
+    }
+
+    #[test]
+    fn finefold_matches_reference_across_boundaries() {
+        // A jagged stream so min/max actually move; length is coprime with most
+        // chunk sizes so partial trailing chunks and mid-packet splits are hit.
+        let mono: Vec<f32> =
+            (0..997).map(|i| (((i * 37 % 101) as f32) / 50.0) - 1.0).collect();
+        // 1 = flush every frame; values around len exercise the trailing chunk.
+        for &chunk in &[1u64, 2, 3, 7, 64, 333, 996, 997, 998, 4096] {
+            let mut fold = FineFold::new(chunk);
+            // Feed in irregular packet-sized slices to prove cross-packet state
+            // matches one continuous stream.
+            for slice in mono.chunks(53) {
+                for &m in slice {
+                    fold.push(m);
+                }
+            }
+            assert_eq!(fold.finish(), reference_fine(&mono, chunk), "chunk={chunk}");
+        }
+    }
+
+    #[test]
+    fn stereo_mix_is_bit_identical_to_division() {
+        // fold_planar's stereo arm uses `* 0.5`; the general arm and the old
+        // path use `/ 2.0`. They must agree exactly for a 2-channel frame.
+        for &(a, b) in &[(0.3f32, -0.7), (1.0, -1.0), (0.123_456, 0.987_654), (0.0, 0.0)] {
+            assert_eq!((a + b) * 0.5, (a + b) / 2.0);
+        }
     }
 }
