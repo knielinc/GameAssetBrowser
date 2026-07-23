@@ -84,7 +84,7 @@ pub async fn request_waveform(app: AppHandle, path: String, bins: u32) {
         // A newer request wins: bail between packets. Borrows `app` immutably,
         // as does the cache/emit below — all reads, so they coexist fine.
         let is_stale = || app.state::<WaveformState>().generation.load(Ordering::SeqCst) != gen;
-        let peaks = match decode_peaks(&path, bins, &is_stale) {
+        let peaks = match decode_peaks(&path, bins, &is_stale, None) {
             Ok(p) => p,
             Err(DecodeAbort::Stale) => return,
             Err(DecodeAbort::Failed(msg)) => {
@@ -103,33 +103,47 @@ pub async fn request_waveform(app: AppHandle, path: String, bins: u32) {
     });
 }
 
-/// One-shot peak decode for the audio grid thumbnail — full decode, no
-/// cancellation and no cache (the thumbnail blob already caches the rendered
-/// result). `None` on any failure so the caller can fall back to cover art or
-/// nothing. Shares the exact decoder below so the grid waveform can never
-/// diverge from the player-bar one.
+/// Grid-thumbnail waveforms stop after this many frames (~3 min at 44.1 kHz).
+/// The thumbnail path can't be cancelled mid-decode (the thumb pool has no
+/// bail contract), so this bounds how long one pathologically long file can
+/// pin a decode thread. Normal-length game audio is far under it and decodes in
+/// full; the player-bar waveform (request_waveform) is never capped.
+const THUMB_MAX_FRAMES: u64 = 8_000_000;
+
+/// One-shot peak decode for the audio grid thumbnail — no cancellation and no
+/// cache (the thumbnail blob already caches the rendered result), and bounded
+/// by [`THUMB_MAX_FRAMES`]. `None` on any failure so the caller can fall back to
+/// cover art or nothing. Shares the exact decoder the player bar uses.
 pub(crate) fn peaks_blocking(path: &str, bins: u32) -> Option<Vec<f32>> {
     let bins = bins.clamp(16, 8192);
-    decode_peaks(path, bins, &|| false).ok()
+    decode_peaks(path, bins, &|| false, Some(THUMB_MAX_FRAMES)).ok()
 }
 
 /// Full decode → mono mix → fine min/max chunks → refold to exactly `bins`
 /// interleaved (min, max) pairs. `is_stale` is polled between packets so a
 /// caller can cancel a superseded decode (the player bar does; the one-shot
-/// thumbnail path passes a closure that is always false).
+/// thumbnail path passes a closure that is always false). `max_frames` caps the
+/// decode length (thumbnail path); `None` decodes the whole track (player bar).
 fn decode_peaks(
     path: &str,
     bins: u32,
     is_stale: &dyn Fn() -> bool,
+    max_frames: Option<u64>,
 ) -> Result<Vec<f32>, DecodeAbort> {
     let (mut format, track_id, mut decoder) =
         crate::audio_probe::open_default_track(path).map_err(DecodeAbort::Failed)?;
 
     let bins = bins as usize;
-    // Frames per fine accumulation chunk. With a known total length, aim ~4x
-    // finer than the requested bins (the refold sharpens edges); otherwise a
-    // fixed chunk keeps memory bounded for arbitrarily long files.
-    let chunk: u64 = match decoder.codec_params().n_frames {
+    // Frames per fine accumulation chunk. Aim ~4x finer than the requested bins
+    // (the refold sharpens edges) over the effective length — clamped to
+    // `max_frames` so a capped decode still fills all `bins`. Unknown length
+    // falls back to a fixed chunk that keeps memory bounded.
+    let effective_frames = match (decoder.codec_params().n_frames, max_frames) {
+        (Some(n), Some(m)) => Some(n.min(m)),
+        (Some(n), None) => Some(n),
+        _ => None,
+    };
+    let chunk: u64 = match effective_frames {
         Some(n) if n > 0 => (n / (bins as u64 * 4)).max(1),
         _ => 1024,
     };
@@ -138,6 +152,7 @@ fn decode_peaks(
     let mut cur_min = f32::MAX;
     let mut cur_max = f32::MIN;
     let mut frames_in_chunk: u64 = 0;
+    let mut total_frames: u64 = 0;
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     loop {
@@ -194,6 +209,10 @@ fn decode_peaks(
                 cur_max = f32::MIN;
                 frames_in_chunk = 0;
             }
+        }
+        total_frames += (buf.samples().len() / channels) as u64;
+        if max_frames.is_some_and(|m| total_frames >= m) {
+            break; // thumbnail cap reached — see THUMB_MAX_FRAMES
         }
     }
     if frames_in_chunk > 0 {
