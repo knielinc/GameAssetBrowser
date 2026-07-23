@@ -8,30 +8,20 @@ import {
   type ReactElement,
 } from "react";
 import clsx from "clsx";
-import {
-  BookmarkMinus,
-  BookmarkPlus,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  ExternalLink,
-  FolderOpen,
-  FolderTree as FolderTreeIcon,
-  Image as ImageIcon,
-} from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SORT_FIELDS_BY_KIND, type AssetKind, type SortField } from "../types";
-import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
 import { activeFilterCount, useLibraryStore, type LibFile } from "../stores/libraryStore";
-import { revealInNavigator } from "../stores/revealFolder";
 import { soleUserCollectionName, toggleFavoriteSmart, useFavoritesStore } from "../stores/favoritesStore";
-import { appsForKind, useExternalAppsStore } from "../stores/externalApps";
+import { useExternalAppsStore } from "../stores/externalApps";
 import { armDragOut } from "../dragOut";
 import { loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import type { TextureItem } from "../material/classify";
 import ContextMenu from "./ContextMenu";
 import CollectionPopup from "./CollectionPopup";
+import { buildFileMenuItems } from "./fileMenuItems";
+import EmptyState from "./EmptyState";
 import FileRow, { MaterialRow, rowGrid } from "./FileRow";
 
 const ROW_HEIGHT = 28;
@@ -340,14 +330,11 @@ export default function FileList({ kind, files, items, onActivate }: FileListPro
       </div>
 
       {rowCount === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center text-xs text-dim">
-          {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
-          {activeFilterCount(kind, tab) > 0 && (
-            <button type="button" className="chip mt-2" onClick={() => clearFilters(kind)}>
-              Clear filters
-            </button>
-          )}
-        </div>
+        <EmptyState
+          anyFiles={anyFiles}
+          hasFilters={activeFilterCount(kind, tab) > 0}
+          onClearFilters={() => clearFilters(kind)}
+        />
       ) : (
         <div
           ref={parentRef}
@@ -438,83 +425,14 @@ export default function FileList({ kind, files, items, onActivate }: FileListPro
           x={menu.x}
           y={menu.y}
           onClose={closeMenu}
-          items={[
-            {
-              label: "Show in Explorer",
-              icon: FolderOpen,
-              onClick: () => {
-                showInExplorer(menu.file.path).catch((err: unknown) => {
-                  console.error("show_in_explorer failed", err);
-                });
-              },
-            },
-            {
-              label: "Show in navigator",
-              icon: FolderTreeIcon,
-              onClick: () => revealInNavigator(menu.file.path),
-            },
-            {
-              // Acts on the whole selection; Show in Explorer above stays
-              // single-target (the clicked row) on purpose.
-              label: menu.count > 1 ? `Copy paths (${menu.count})` : "Copy path",
-              icon: Copy,
-              onClick: () => {
-                navigator.clipboard.writeText(menu.paths.join("\n")).catch((err: unknown) => {
-                  console.error("clipboard write failed", err);
-                });
-              },
-            },
-            // Textures only, single-target like Show in Explorer — the OS
-            // clipboard holds one image. HDR/EXR land tone-mapped (as shown).
-            // File kind, not tab kind, so it appears on the mixed "all" list too.
-            ...(menu.file.kind === "texture"
-              ? [
-                  {
-                    label: "Copy image",
-                    icon: ImageIcon,
-                    onClick: () => {
-                      copyImageToClipboard(menu.file.path).catch((err: unknown) => {
-                        console.warn("copy_image_to_clipboard failed", err);
-                      });
-                    },
-                  },
-                ]
-              : []),
-            {
-              // Whole selection, like Copy paths (materials expand to members).
-              label: menu.count > 1 ? `Add to collection… (${menu.count})` : "Add to collection…",
-              icon: BookmarkPlus,
-              onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
-            },
-            // One entry per registered app of this file's kind (External
-            // apps…), single-target: an editor opens one document, not a
-            // selection. File kind, not tab kind, so it works on the "all" tab.
-            ...appsForKind(externalApps, menu.file.kind, menu.file.ext).map((a) => ({
-              label: `Open with ${a.name}`,
-              icon: ExternalLink,
-              onClick: () => {
-                openWith(a.exe, menu.file.path).catch((err: unknown) => {
-                  console.error("open_with failed", err);
-                });
-              },
-            })),
-            // Only while browsing a single user collection — the one place
-            // "remove" has an unambiguous target. Favorites/Recent are not
-            // collections, and a multi-scope union names no single one.
-            ...(removeColName !== null
-              ? [
-                  {
-                    label: menu.count > 1 ? `Remove from collection (${menu.count})` : "Remove from collection",
-                    icon: BookmarkMinus,
-                    onClick: () => {
-                      useFavoritesStore
-                        .getState()
-                        .removeFromCollection(removeColName, menu.paths);
-                    },
-                  },
-                ]
-              : []),
-          ]}
+          items={buildFileMenuItems({
+            file: menu.file,
+            paths: menu.paths,
+            count: menu.count,
+            removeColName,
+            externalApps,
+            onAddToCollection: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
+          })}
         />
       )}
 

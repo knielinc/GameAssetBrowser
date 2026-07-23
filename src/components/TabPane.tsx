@@ -1,16 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactElement } from "react";
 import clsx from "clsx";
-import {
-  BookmarkMinus,
-  BookmarkPlus,
-  Copy,
-  ExternalLink,
-  FolderOpen,
-  FolderTree as FolderTreeIcon,
-  Image as ImageIcon,
-  Loader2,
-  X,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { usePanelWidth } from "../hooks/usePanelWidth";
 import { usePanelPrefs } from "../stores/panelPrefs";
@@ -21,12 +11,12 @@ import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "..
 import { soleUserCollectionName, useFavoritesStore } from "../stores/favoritesStore";
 import { audioVisibleRef, loadAndSelect, useAudioListStore } from "../stores/playerStore";
 import { publishShuffleSource } from "../stores/shuffle";
-import { copyImageToClipboard, openWith, showInExplorer } from "../ipc/commands";
-import { revealInNavigator } from "../stores/revealFolder";
-import { appsForKind, useExternalAppsStore } from "../stores/externalApps";
+import { useExternalAppsStore } from "../stores/externalApps";
 import { armDragOut } from "../dragOut";
 import type { AssetKind } from "../types";
 import CollectionPopup from "./CollectionPopup";
+import { buildFileMenuItems } from "./fileMenuItems";
+import EmptyState from "./EmptyState";
 import FileList, { selectionFilePaths } from "./FileList";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
@@ -37,13 +27,7 @@ import MaterialCell from "./grid/MaterialCell";
 import ModelCell from "./grid/ModelCell";
 import AudioCell from "./grid/AudioCell";
 import DocumentCell from "./document/DocumentCell";
-import ModelInspector from "./model/ModelInspector";
-import TextureInspector from "./texture/TextureInspector";
-import SpriteArtInspector from "./texture/SpriteArtInspector";
-import { isSpriteArt } from "./texture/SpriteArtView";
-import DocumentInspector from "./document/DocumentInspector";
-import AudioInspector from "./audio/AudioInspector";
-import { docIsPsd } from "./document/doc";
+import InspectorPanel from "./InspectorPanel";
 import type { PreviewState } from "./texture/PreviewControls";
 import FullscreenPreview from "./FullscreenPreview";
 import { groupTextures, type TextureItem } from "../material/classify";
@@ -393,14 +377,11 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     );
   } else if (visible.length === 0 && tab.viewMode === "grid") {
     content = (
-      <div className="flex flex-1 flex-col items-center justify-center text-xs text-dim">
-        {anyFiles ? "Nothing matches the current filters" : "Nothing found for this tab"}
-        {activeFilterCount(kind, tab) > 0 && (
-          <button type="button" className="chip mt-2" onClick={() => clearFilters(kind)}>
-            Clear filters
-          </button>
-        )}
-      </div>
+      <EmptyState
+        anyFiles={anyFiles}
+        hasFilters={activeFilterCount(kind, tab) > 0}
+        onClearFilters={() => clearFilters(kind)}
+      />
     );
   } else if (grouped !== null && tab.viewMode === "grid") {
     // Grouped textures: thumbnail requests still key off the FLAT file list,
@@ -494,82 +475,6 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
       : (grouped?.find((i) => i.key === tab.selectedPath) ??
         { kind: "file", file: selectedFile, key: selectedFile.path });
 
-  // Which inspector to show: on the "all" tab it follows the selected file's own
-  // kind (null when nothing is selected); every other tab is homogeneous.
-  const inspectorKind = kind === "all" ? (selectedFile?.kind ?? null) : kind;
-  const renderInspector = (): ReactElement => {
-    const commonWidth = inspector.width;
-    switch (inspectorKind) {
-      case "audio":
-        return <AudioInspector file={selectedFile} onClose={toggleInspector} width={commonWidth} />;
-      case "model":
-        return (
-          <ModelInspector
-            path={selectedFile?.path ?? null}
-            size={selectedFile?.size ?? null}
-            onClose={toggleInspector}
-            width={commonWidth}
-          />
-        );
-      case "texture":
-        // Sprite sheets and PSDs get their bespoke inspectors; everything else
-        // is the standard texture preview.
-        return isSpriteArt(selectedFile?.ext) ? (
-          <SpriteArtInspector
-            path={selectedFile?.path ?? null}
-            ext={selectedFile?.ext ?? null}
-            size={selectedFile?.size ?? null}
-            onClose={toggleInspector}
-            width={commonWidth}
-          />
-        ) : docIsPsd(selectedFile?.ext ?? "") ? (
-          <DocumentInspector
-            path={selectedFile?.path ?? null}
-            ext={selectedFile?.ext ?? null}
-            size={selectedFile?.size ?? null}
-            onClose={toggleInspector}
-            width={commonWidth}
-          />
-        ) : (
-          <TextureInspector
-            item={selectedItem}
-            preview={preview3d}
-            onPreviewChange={patchPreview}
-            onClose={toggleInspector}
-            width={commonWidth}
-          />
-        );
-      case "document":
-        return (
-          <DocumentInspector
-            path={selectedFile?.path ?? null}
-            ext={selectedFile?.ext ?? null}
-            size={selectedFile?.size ?? null}
-            onClose={toggleInspector}
-            width={commonWidth}
-          />
-        );
-      default:
-        // "all" tab with nothing selected — keep the panel (and its resizer)
-        // present rather than orphaning the handle.
-        return (
-          <aside style={{ width: commonWidth }} className="flex shrink-0 flex-col bg-panel">
-            <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-bg px-2.5">
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-dim">
-                Inspector
-              </span>
-              <button type="button" className="icon-btn" title="Close" onClick={toggleInspector}>
-                <X size={13} />
-              </button>
-            </div>
-            <div className="flex min-h-0 flex-1 items-center justify-center p-3">
-              <p className="text-[11px] text-dim">Select a file to inspect it.</p>
-            </div>
-          </aside>
-        );
-    }
-  };
-
   return (
     <>
       <div className="flex min-h-0 flex-1">
@@ -591,7 +496,17 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             {...inspector.handleProps}
           />
         )}
-        {inspectorOpen && preview === null && renderInspector()}
+        {inspectorOpen && preview === null && (
+          <InspectorPanel
+            kind={kind}
+            selectedFile={selectedFile}
+            selectedItem={selectedItem}
+            preview3d={preview3d}
+            onPreviewChange={patchPreview}
+            onClose={toggleInspector}
+            width={inspector.width}
+          />
+        )}
         {/* While the fullscreen preview is up the inspector unmounts (one WebGL
             context, not two). Reserve its width with a spacer so the grid keeps
             the same column count — otherwise it reflows open then reflows back
@@ -614,84 +529,14 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
-          items={[
-            {
-              label: "Show in Explorer",
-              icon: FolderOpen,
-              onClick: () => {
-                showInExplorer(menu.file.path).catch((err: unknown) => {
-                  console.error("show_in_explorer failed", err);
-                });
-              },
-            },
-            {
-              label: "Show in navigator",
-              icon: FolderTreeIcon,
-              onClick: () => revealInNavigator(menu.file.path),
-            },
-            {
-              // Acts on the whole selection; Show in Explorer above stays
-              // single-target (the clicked cell) on purpose.
-              label: menu.count > 1 ? `Copy paths (${menu.count})` : "Copy path",
-              icon: Copy,
-              onClick: () => {
-                navigator.clipboard.writeText(menu.paths.join("\n")).catch((err: unknown) => {
-                  console.error("clipboard write failed", err);
-                });
-              },
-            },
-            // Textures only, single-target like Show in Explorer — the OS
-            // clipboard holds one image. A material offers its face file. Gated
-            // on the FILE's kind, not the tab's, so it still appears for a
-            // texture browsed on the mixed "all" tab.
-            ...(menu.file.kind === "texture"
-              ? [
-                  {
-                    label: "Copy image",
-                    icon: ImageIcon,
-                    onClick: () => {
-                      copyImageToClipboard(menu.file.path).catch((err: unknown) => {
-                        console.warn("copy_image_to_clipboard failed", err);
-                      });
-                    },
-                  },
-                ]
-              : []),
-            {
-              // Whole selection, like Copy paths (materials expand to members).
-              label: menu.count > 1 ? `Add to collection… (${menu.count})` : "Add to collection…",
-              icon: BookmarkPlus,
-              onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
-            },
-            // One entry per registered app of this file's kind (External
-            // apps…), single-target: an editor opens one document, not a
-            // selection. File kind, not tab kind, so it works on the "all" tab.
-            ...appsForKind(externalApps, menu.file.kind, menu.file.ext).map((a) => ({
-              label: `Open with ${a.name}`,
-              icon: ExternalLink,
-              onClick: () => {
-                openWith(a.exe, menu.file.path).catch((err: unknown) => {
-                  console.error("open_with failed", err);
-                });
-              },
-            })),
-            // Only while browsing a single user collection — the one place
-            // "remove" has an unambiguous target. Favorites/Recent are not
-            // collections, and a multi-scope union names no single one.
-            ...(removeColName !== null
-              ? [
-                  {
-                    label: menu.count > 1 ? `Remove from collection (${menu.count})` : "Remove from collection",
-                    icon: BookmarkMinus,
-                    onClick: () => {
-                      useFavoritesStore
-                        .getState()
-                        .removeFromCollection(removeColName, menu.paths);
-                    },
-                  },
-                ]
-              : []),
-          ]}
+          items={buildFileMenuItems({
+            file: menu.file,
+            paths: menu.paths,
+            count: menu.count,
+            removeColName,
+            externalApps,
+            onAddToCollection: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
+          })}
         />
       )}
 
