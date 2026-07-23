@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -441,8 +442,51 @@ export default function PdfView({
   useEffect(() => {
     setJump(String(curPage));
   }, [curPage]);
-  const rowForPage = (p: number): number =>
-    layout === "spread" ? Math.floor((p - 1) / 2) : p - 1;
+  const rowForPage = useCallback(
+    (p: number): number => (layout === "spread" ? Math.floor((p - 1) / 2) : p - 1),
+    [layout],
+  );
+
+  // Keep your place across a layout-mode switch. `row` is a layout-DEPENDENT
+  // index (a page index in width/single, a spread-PAIR index in spread), and the
+  // fit-width container remounts at scrollTop 0 — so without this, switching
+  // jumped to page 1 or the wrong page. We track the live PAGE and, on a layout
+  // change, remap `row` to that same page; fit-width additionally queues a
+  // scroll (below) once its fresh container exists.
+  const pageRef = useRef(1);
+  const layoutRef = useRef(layout);
+  const pendingScrollPage = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (layoutRef.current === layout) {
+      pageRef.current = curPage; // stable layout — just remember where we are
+      return;
+    }
+    const page = pageRef.current; // the page we were on under the PREVIOUS layout
+    layoutRef.current = layout;
+    const r = Math.max(0, Math.min(Math.max(rowCount - 1, 0), rowForPage(page)));
+    targetRow.current = r;
+    setRow(r);
+    if (!framed) pendingScrollPage.current = page; // width: scroll after remount
+  }, [layout, curPage, framed, rowCount, rowForPage]);
+
+  // Fit-width: once the freshly-mounted scroll container and its row elements
+  // exist, jump (no glide) to the page we were reading. `isConnected` skips the
+  // one render where `root` still points at the just-unmounted framed container.
+  useLayoutEffect(() => {
+    const page = pendingScrollPage.current;
+    if (framed || page === null || root === null || !root.isConnected) return;
+    if (doc === null || size.w === 0) return;
+    pendingScrollPage.current = null;
+    const r = Math.max(0, Math.min(Math.max(rowCount - 1, 0), rowForPage(page)));
+    if (animRef.current !== null) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
+    root.scrollTop = rowScrollTarget(r);
+    targetRow.current = r;
+    setRow(r);
+  }, [framed, root, doc, size.w, rowCount, rowForPage, rowScrollTarget]);
+
   const commitJump = (): void => {
     const n = Math.max(1, Math.min(numPages, Math.round(Number(jump) || curPage)));
     const r = rowForPage(n);

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -166,6 +167,10 @@ export default function EbookView({
   const [state, setState] = useState<LoadState>("loading");
   const [progress, setProgress] = useState(0);
   const restoredRef = useRef(false);
+  // Live scroll ratio (mirrors `progress` without re-rendering) + the last
+  // applied font/width, so a reflow can re-pin the reading position by ratio.
+  const progressRef = useRef(0);
+  const reflowKeyRef = useRef("");
 
   const bookmark = useEbookBookmarks((s) => s.marks[path] ?? null);
   const setMark = useEbookBookmarks((s) => s.setMark);
@@ -181,6 +186,8 @@ export default function EbookView({
     setSections([]);
     setProgress(0);
     restoredRef.current = false;
+    reflowKeyRef.current = "";
+    progressRef.current = 0;
     hostsRef.current = [];
     metaRef.current = [];
 
@@ -293,8 +300,27 @@ export default function EbookView({
     const el = scrollRef.current;
     if (el === null) return;
     const max = el.scrollHeight - el.clientHeight;
-    setProgress(max > 0 ? el.scrollTop / max : 0);
+    const ratio = max > 0 ? el.scrollTop / max : 0;
+    progressRef.current = ratio;
+    setProgress(ratio);
   }, []);
+
+  // Changing the font size or column width reflows the text, which moves the
+  // same reading position to a different scrollTop. Re-pin by RATIO after each
+  // such change so you stay where you were reading. Keyed only on scale/full
+  // (not `progress`) so ordinary scrolling is never hijacked; the first settle
+  // per book just records the key and leaves the bookmark-restore effect alone.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el === null || state !== "ready") return;
+    const key = `${scale}|${full ? "full" : "col"}`;
+    if (reflowKeyRef.current === key) return;
+    const first = reflowKeyRef.current === "";
+    reflowKeyRef.current = key;
+    if (first) return; // initial layout — don't fight the bookmark restore
+    const max = el.scrollHeight - el.clientHeight;
+    el.scrollTop = max > 0 ? progressRef.current * max : 0;
+  }, [scale, full, state]);
 
   const scrollByScreen = useCallback((dir: 1 | -1): void => {
     const el = scrollRef.current;
