@@ -1,4 +1,5 @@
 mod audio;
+mod audio_probe;
 mod dupes;
 mod explorer;
 mod index;

@@ -10,9 +10,7 @@
 //! request-generation cancellation as waveform.rs: a newer request makes an
 //! in-flight decode bail between packets and never emit.
 
-use std::fs::File;
 use std::num::NonZeroUsize;
-use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -22,12 +20,7 @@ use parking_lot::Mutex;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::types::{events, SpectrogramReady};
@@ -139,32 +132,8 @@ fn decode_mono(app: &AppHandle, path: &str, gen: u32) -> Result<Vec<f32>, Decode
     let state = app.state::<SpectrogramState>();
     let is_stale = || state.generation.load(Ordering::SeqCst) != gen;
 
-    let file =
-        File::open(path).map_err(|e| DecodeAbort::Failed(format!("could not open file: {e}")))?;
-    let mut hint = Hint::new();
-    if let Some(ext) = Path::new(path).extension().and_then(|e| e.to_str()) {
-        hint.with_extension(&ext.to_ascii_lowercase());
-    }
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let probed = symphonia::default::get_probe()
-        .format(
-            &hint,
-            mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
-        )
-        .map_err(|e| DecodeAbort::Failed(format!("unrecognized format: {e}")))?;
-    let mut format = probed.format;
-
-    let (track_id, codec_params) = {
-        let track = format
-            .default_track()
-            .ok_or_else(|| DecodeAbort::Failed("no default audio track".into()))?;
-        (track.id, track.codec_params.clone())
-    };
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&codec_params, &DecoderOptions::default())
-        .map_err(|e| DecodeAbort::Failed(format!("no decoder for codec: {e}")))?;
+    let (mut format, track_id, mut decoder) =
+        crate::audio_probe::open_default_track(path).map_err(DecodeAbort::Failed)?;
 
     let mut mono: Vec<f32> = Vec::new();
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
