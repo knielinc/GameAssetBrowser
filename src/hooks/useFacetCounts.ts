@@ -218,14 +218,18 @@ export function useFacetCounts(
   const query = useLibraryStore((s) => s.tabs[kind].query);
   const extFilter = useLibraryStore((s) => s.tabs[kind].extFilter);
   const filters = useLibraryStore((s) => s.tabs[kind].filters);
+  // Same version-gating as useVisibleFiles: each counter only forces a recompute
+  // for the kind whose facets actually read that probe (durations/audioMeta →
+  // audio, dims/thumbs → texture). The popup only mounts for the active tab, so
+  // an audio popup no longer rebuilds on texture batches, and vice versa.
   const durations = useLibraryStore((s) => s.durations);
-  const durationsVersion = useLibraryStore((s) => s.durationsVersion);
+  const durationsVersion = useLibraryStore((s) => (kind === "audio" ? s.durationsVersion : 0));
   const dims = useLibraryStore((s) => s.dims);
-  const dimsVersion = useLibraryStore((s) => s.dimsVersion);
+  const dimsVersion = useLibraryStore((s) => (kind === "texture" ? s.dimsVersion : 0));
   const audioMeta = useLibraryStore((s) => s.audioMeta);
-  const audioMetaVersion = useLibraryStore((s) => s.audioMetaVersion);
+  const audioMetaVersion = useLibraryStore((s) => (kind === "audio" ? s.audioMetaVersion : 0));
   const thumbs = useLibraryStore((s) => s.thumbs);
-  const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
+  const thumbsVersion = useLibraryStore((s) => (kind === "texture" ? s.thumbsVersion : 0));
   const debouncedQuery = useDebounced(query, 100);
 
   return useMemo(() => {

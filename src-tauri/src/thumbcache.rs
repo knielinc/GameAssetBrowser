@@ -12,8 +12,11 @@
 
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::Arc;
 
 use parking_lot::Mutex;
+
+use crate::types::ThumbInfo;
 
 /// RAM budget for decoded thumbnails. RGBA at 256px is ~256 KB each, so this
 /// holds ~1500 thumbnails — comfortably more than any on-screen working set,
@@ -25,11 +28,11 @@ const BUDGET_BYTES: usize = 384 * 1024 * 1024;
 pub struct Pixels {
     pub width: u32,
     pub height: u32,
-    /// Source image dimensions before downscale — kept so a cache hit can still
-    /// report the real resolution without re-touching the original file.
-    pub src_w: u32,
-    pub src_h: u32,
     pub rgba: Vec<u8>,
+    /// Per-image stats computed once at decode time (the source dimensions live
+    /// here as source_width/height). Stored so a cache hit returns them directly
+    /// instead of re-running the per-pixel analyze().
+    pub info: ThumbInfo,
 }
 
 impl Pixels {
@@ -43,8 +46,10 @@ pub struct ThumbCache {
 }
 
 struct Inner {
-    /// key -> pixels. Insertion order in `order` drives LRU eviction.
-    map: HashMap<u64, Pixels>,
+    /// key -> pixels, held behind an `Arc` so `get`/`tex_bytes` hand out a
+    /// cheap refcount bump instead of memcpying a 256 KB+ buffer while the
+    /// mutex is held (the decode threads want that lock during scroll).
+    map: HashMap<u64, Arc<Pixels>>,
     /// Keys oldest-first. `get` moves the key to the back (most-recent).
     order: Vec<u64>,
     used: usize,
@@ -65,17 +70,16 @@ impl ThumbCache {
         self.inner.lock().map.contains_key(&key)
     }
 
-    pub fn get(&self, key: u64) -> Option<Pixels> {
+    pub fn get(&self, key: u64) -> Option<Arc<Pixels>> {
         let mut g = self.inner.lock();
-        if !g.map.contains_key(&key) {
-            return None;
-        }
+        // Clone the Arc (cheap) and drop the map borrow before touching `order`.
+        let px = g.map.get(&key)?.clone();
         // promote to most-recently-used
         if let Some(pos) = g.order.iter().position(|k| *k == key) {
             g.order.remove(pos);
             g.order.push(key);
         }
-        g.map.get(&key).cloned()
+        Some(px)
     }
 
     pub fn put(&self, key: u64, pixels: Pixels) {
@@ -95,7 +99,7 @@ impl ThumbCache {
             }
         }
         g.used += add;
-        g.map.insert(key, pixels);
+        g.map.insert(key, Arc::new(pixels));
         g.order.push(key);
     }
 
@@ -105,7 +109,9 @@ impl ThumbCache {
     /// directly. Rare enough that the encode is not worth caching.
     pub fn get_png(&self, key: u64) -> Option<Vec<u8>> {
         let p = self.get(key)?;
-        let buf = image::RgbaImage::from_raw(p.width, p.height, p.rgba)?;
+        // Rare path (fullscreen/inspector/swatches), so the one rgba clone to
+        // own the buffer for the PNG encoder is fine.
+        let buf = image::RgbaImage::from_raw(p.width, p.height, p.rgba.clone())?;
         let mut out = Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(buf)
             .write_to(&mut out, image::ImageFormat::Png)

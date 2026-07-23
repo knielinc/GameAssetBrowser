@@ -76,7 +76,7 @@ pub mod events {
 ///
 /// These SUPPLEMENT the name-based channel classifier, never override it: a
 /// filename is the author's stated intent, a histogram is an inference.
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ThumbInfo {
     /// Thumbnail dimensions, not the source's.

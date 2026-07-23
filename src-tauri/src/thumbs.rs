@@ -1646,16 +1646,10 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
     let h = hash_key("t", path, size, mtime);
     let key = hex_key(h);
 
-    // Cache hit: the RGBA and its dims are already here â€” recompute stats from
-    // it (cheap) rather than touching the 4K original again.
+    // Cache hit: the stats were computed once at decode time and stored with the
+    // pixels, so just hand them back — no RGBA reconstruct, no per-pixel rescan.
     if let Some(px) = cache.get(h) {
-        let (sw, sh) = (px.src_w, px.src_h);
-        if let Some(buf) = image::RgbaImage::from_raw(px.width, px.height, px.rgba) {
-            let mut info = analyze(&DynamicImage::ImageRgba8(buf));
-            info.source_width = sw;
-            info.source_height = sh;
-            return Ok((key, info));
-        }
+        return Ok((key, px.info));
     }
 
     let img = decode_image(p, Some(THUMB_EDGE)).map_err(|e| format!("decode {path}: {e}"))?;
@@ -1683,9 +1677,8 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
         Pixels {
             width: rgba.width(),
             height: rgba.height(),
-            src_w: w,
-            src_h: ih,
             rgba: rgba.into_raw(),
+            info,
         },
     );
     Ok((key, info))
@@ -1709,16 +1702,10 @@ fn build_audio(path: &str, p: &Path, cache: &ThumbCache) -> Result<(String, Thum
     let h = hash_key("a", path, size, mtime);
     let key = hex_key(h);
 
-    // Warm blob hit: recompute the (unused-for-audio) stats from the stored
-    // RGBA rather than re-decoding cover art or re-running the waveform.
+    // Warm blob hit: return the stored stats — never re-decode cover art or
+    // re-run the (expensive, full-file) waveform decode.
     if let Some(px) = cache.get(h) {
-        let (sw, sh) = (px.src_w, px.src_h);
-        if let Some(buf) = image::RgbaImage::from_raw(px.width, px.height, px.rgba) {
-            let mut info = analyze(&DynamicImage::ImageRgba8(buf));
-            info.source_width = sw;
-            info.source_height = sh;
-            return Ok((key, info));
-        }
+        return Ok((key, px.info));
     }
 
     // Cover art first (it IS a picture); the waveform is the fallback for the
@@ -1744,9 +1731,8 @@ fn build_audio(path: &str, p: &Path, cache: &ThumbCache) -> Result<(String, Thum
         Pixels {
             width: rgba.width(),
             height: rgba.height(),
-            src_w: w,
-            src_h: ih,
             rgba: rgba.into_raw(),
+            info,
         },
     );
     Ok((key, info))
@@ -2022,9 +2008,9 @@ pub fn model_thumb_store(app: AppHandle, request: tauri::ipc::Request<'_>) -> Re
         Pixels {
             width,
             height,
-            src_w: width,
-            src_h: height,
             rgba: rgba.to_vec(),
+            // Model thumbs are rendered, not decoded — no image stats to carry.
+            info: crate::types::ThumbInfo::default(),
         },
     );
     Ok(key)

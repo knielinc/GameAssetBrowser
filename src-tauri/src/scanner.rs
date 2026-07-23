@@ -40,6 +40,11 @@ pub struct ScanState {
     /// single choke point every root passes through, including hydration from
     /// persisted settings, so this is the one place worth setting it.
     pub roots: parking_lot::Mutex<Vec<String>>,
+    /// `roots` canonicalized + normalized for the prefix test in
+    /// `is_within_roots`, rebuilt once per scan. Keeps that hot scheme-request
+    /// path from `canonicalize()`-ing every root on every model/preview/doc
+    /// fetch (a glTF pulls many sibling textures, each hitting this).
+    pub roots_norm: parking_lot::Mutex<Vec<String>>,
     /// Individual files the user explicitly chose in the Browse dialog for a
     /// model's atlas. They picked it themselves, so it is allowed even outside
     /// the scanned roots — but ONLY these exact files, canonicalized.
@@ -56,6 +61,16 @@ fn norm(path: &Path) -> Option<String> {
     #[cfg(windows)]
     let s = s.to_lowercase();
     Some(s)
+}
+
+/// A root canonicalized + normalized for the prefix test, with its trailing
+/// separator trimmed (so a drive root "C:\" compares correctly). Same folding
+/// as `norm`; computed once per scan and cached in `ScanState::roots_norm`.
+fn norm_root(r: &str) -> Option<String> {
+    let root = Path::new(r).canonicalize().ok()?.to_string_lossy().replace('/', "\\");
+    #[cfg(windows)]
+    let root = root.to_lowercase();
+    Some(root.trim_end_matches('\\').to_string())
 }
 
 /// Allow a file the user explicitly browsed to as a model's atlas, so the
@@ -78,21 +93,13 @@ pub fn is_within_roots(app: &AppHandle, path: &Path) -> bool {
     if state.approved.lock().contains(&target) {
         return true;
     }
-    let roots = state.roots.lock();
-    roots.iter().any(|r| {
-        let Ok(rc) = Path::new(r).canonicalize() else {
-            return false;
-        };
-        // Same normalization as norm(): `\` separators everywhere, case-folded
-        // only on Windows.
-        let root = rc.to_string_lossy().replace('/', "\\");
-        #[cfg(windows)]
-        let root = root.to_lowercase();
-        // Trailing-separator trim so the boundary test lands on the right char
-        // (a drive root is "C:\"), then require a separator so `C:\AB` never
-        // matches root `C:\A`.
-        let root = root.trim_end_matches('\\');
-        target.starts_with(root)
+    // Read the pre-normalized roots (rebuilt per scan) — no canonicalize here, so
+    // a model load's many sibling fetches don't each syscall over every root.
+    let roots = state.roots_norm.lock();
+    roots.iter().any(|root| {
+        // Require a separator after the root prefix so `C:\AB` never matches root
+        // `C:\A` (roots_norm already trimmed the trailing separator).
+        target.starts_with(root.as_str())
             && (target.len() == root.len() || target.as_bytes().get(root.len()) == Some(&b'\\'))
     })
 }
@@ -126,6 +133,8 @@ pub fn spawn_scan(app: &AppHandle, roots: Vec<String>) -> Result<u32, String> {
         state.scanning.store(true, Ordering::SeqCst);
         gen
     };
+    // Rebuild the normalized-roots cache the scheme handlers read (is_within_roots).
+    *state.roots_norm.lock() = roots.iter().filter_map(|r| norm_root(r)).collect();
     // Arm the watcher at scan START, not only at `finish_scan`. A file created
     // mid-walk fires no later event, so watching only after the walk leaves the
     // cold first scan (and any freshly added root) blind to changes during it —

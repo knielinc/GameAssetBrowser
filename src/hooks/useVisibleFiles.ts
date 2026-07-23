@@ -196,12 +196,19 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const favorites = useFavoritesStore((s) => (needFavorites ? s.favorites : EMPTY_FAVORITES));
   const recents = useFavoritesStore((s) => (scopeHasRecents ? s.recents : EMPTY_RECENTS));
   const collections = useFavoritesStore((s) => (needCollections ? s.collections : EMPTY_COLLECTIONS));
+  // The probe maps are mutated in place (stable ref → no re-render); only their
+  // *version* counters trigger a rebuild. Gate each to 0 unless THIS kind can
+  // actually use that probe (the same discipline thumbsVersion already applies
+  // below), so e.g. the default "all" tab — which reads none of them — doesn't
+  // re-filter+re-sort the whole library on every audio/dimension batch during a
+  // scan. durations feed only the audio duration facet/sort; dims only texture
+  // res/shape; audioMeta only the audio channel/rate facets.
   const durations = useLibraryStore((s) => s.durations);
-  const durationsVersion = useLibraryStore((s) => s.durationsVersion);
+  const durationsVersion = useLibraryStore((s) => (kind === "audio" ? s.durationsVersion : 0));
   const dims = useLibraryStore((s) => s.dims);
-  const dimsVersion = useLibraryStore((s) => s.dimsVersion);
+  const dimsVersion = useLibraryStore((s) => (kind === "texture" ? s.dimsVersion : 0));
   const audioMeta = useLibraryStore((s) => s.audioMeta);
-  const audioMetaVersion = useLibraryStore((s) => s.audioMetaVersion);
+  const audioMetaVersion = useLibraryStore((s) => (kind === "audio" ? s.audioMetaVersion : 0));
   const thumbs = useLibraryStore((s) => s.thumbs);
   // Only the color facet reads thumb pixels. `thumbs` itself is mutated in
   // place (stable ref → no re-render), but thumbsVersion ticks on every batch;
