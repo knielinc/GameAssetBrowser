@@ -8,9 +8,10 @@ import TexturePreview, { type MeshMode } from "./texture/TexturePreview";
 import Sprite2DView from "./texture/Sprite2DView";
 import SpriteArtView, { isSpriteArt } from "./texture/SpriteArtView";
 import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
+import { isFloatPreview } from "../model/loadModel";
 import { keysForFile, keysForMaterial } from "./texture/TextureInspector";
 import DocumentPreview from "./document/DocumentPreview";
-import { docIsPdf, docIsPsd, docIsTextual, docSupportsZoom } from "./document/doc";
+import { docIsEbook, docIsPdf, docIsPsd, docIsTextual, docSupportsZoom } from "./document/doc";
 import DocViewControls from "./document/DocViewControls";
 import PdfLayoutControls from "./document/PdfLayoutControls";
 import ReadWidthControls from "./document/ReadWidthControls";
@@ -93,7 +94,9 @@ export default function FullscreenPreview({
         <span className="truncate font-mono text-[10px] text-dim">{file.path}</span>
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {file.kind === "document" && docIsPdf(file.ext) && <PdfLayoutControls />}
-          {file.kind === "document" && docIsTextual(file.ext) && <ReadWidthControls />}
+          {file.kind === "document" && (docIsTextual(file.ext) || docIsEbook(file.ext)) && (
+            <ReadWidthControls />
+          )}
           {file.kind === "document" && docSupportsZoom(file.ext) && <DocViewControls />}
           <span className="text-[10px] text-dim">Space or Esc to close</span>
           <button type="button" className="icon-btn" title="Close" onClick={onClose}>
@@ -162,6 +165,7 @@ export default function FullscreenPreview({
               inline
               hasHeight={keys.height !== undefined}
               default3d={default3d}
+              hdr={isFloatPreview(file.ext)}
             />
           </div>
         )}

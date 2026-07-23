@@ -47,7 +47,9 @@ const THUMB_EDGE: u32 = 256;
 /// stays under the WebGL2 max-texture-size on essentially all hardware.
 const PREVIEW_EDGE: u32 = 4096;
 /// Bump to invalidate every cached thumbnail after a pipeline change.
-const CACHE_VERSION: u32 = 1;
+/// v2: default tone-mapper for HDR/EXR thumbnails changed Reinhard -> ACES and
+/// gamma 2.2 -> accurate sRGB (see tonemap.rs).
+const CACHE_VERSION: u32 = 2;
 /// Decode threads. Higher than metadata.rs's 2 because this is CPU-bound
 /// decode rather than disk probes, but capped: each in-flight 4K RGBA decode
 /// is ~64 MB resident, so 4 workers is a ~256 MB ceiling.
@@ -89,7 +91,12 @@ impl Default for PreviewState {
 ///
 /// Same consent gate as `model://`: only files inside a scanned root are read,
 /// so a crafted path cannot exfiltrate an arbitrary file.
-pub fn preview_png(app: &AppHandle, decoded_path: &str) -> Option<Vec<u8>> {
+pub fn preview_png(
+    app: &AppHandle,
+    decoded_path: &str,
+    tm: crate::tonemap::Tonemap,
+    exposure_ev: f32,
+) -> Option<Vec<u8>> {
     if decoded_path.is_empty() {
         return None;
     }
@@ -106,13 +113,15 @@ pub fn preview_png(app: &AppHandle, decoded_path: &str) -> Option<Vec<u8>> {
     }
 
     let (size, mtime) = file_stamp(&path);
-    let ckey = format!("{}|{size}|{mtime}", path.display());
+    // Operator + exposure are in the key: the same HDRI at ACES/+1EV and
+    // AgX/0EV are different pixels and must cache separately.
+    let ckey = format!("{}|{size}|{mtime}|{}|{exposure_ev}", path.display(), tm.id());
     let state = app.state::<PreviewState>();
     if let Some(bytes) = state.cache.lock().get(&ckey) {
         return Some(bytes.as_ref().clone());
     }
 
-    let img = match decode_image(&path) {
+    let img = match decode_image(&path, Some(PREVIEW_EDGE)) {
         Ok(i) => i,
         Err(e) => {
             eprintln!("[preview] decode {}: {e}", path.display());
@@ -130,7 +139,7 @@ pub fn preview_png(app: &AppHandle, decoded_path: &str) -> Option<Vec<u8>> {
     } else {
         img
     };
-    let img = to_ldr(img);
+    let img = crate::tonemap::apply(img, tm, exposure_ev);
 
     let mut bytes: Vec<u8> = Vec::new();
     if let Err(e) = img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png) {
@@ -270,42 +279,18 @@ fn analyze(img: &DynamicImage) -> ThumbInfo {
     }
 }
 
-/// Tone-map a floating-point image down to 8-bit.
+/// Tone-map a floating-point image down to 8-bit with the DEFAULT operator.
+/// The grid thumbnail and workflow.rs's "Copy image" share this — only the
+/// preview panel picks an operator/exposure (see [`crate::tonemap`]).
 /// (`pub(crate)`: workflow.rs's "Copy image" shares this decode pipeline.)
 ///
 /// `.hdr` decodes to Rgb32F and `.exr` to Rgba32F, and the PNG encoder cannot
 /// write either â€” it returns Unsupported, the thumbnail is never written, and
 /// the cell stays blank forever with only a line on stderr. That silently cost
-/// 38 of 303 real files here.
-///
-/// Straight truncation to 8-bit would "work" and look wrong: HDR values run
-/// well past 1.0, so everything bright clamps to flat white. Reinhard maps the
-/// whole range into [0,1] first, then gamma-encodes â€” the same shape of
-/// tone-mapping the 3D viewport applies, so an HDRI's thumbnail resembles what
-/// you get when you open it.
+/// 38 of 303 real files here. The tone-mapper also folds HDR's past-1.0 range
+/// into [0,1] so bright pixels don't just clamp to flat white.
 pub(crate) fn to_ldr(img: DynamicImage) -> DynamicImage {
-    match img {
-        DynamicImage::ImageRgb32F(_) | DynamicImage::ImageRgba32F(_) => {
-            let src = img.to_rgba32f();
-            let mut out = image::RgbaImage::new(src.width(), src.height());
-            let map = |v: f32| -> u8 {
-                let v = if v.is_finite() { v.max(0.0) } else { 0.0 };
-                let tone = v / (1.0 + v); // Reinhard
-                (tone.powf(1.0 / 2.2) * 255.0).clamp(0.0, 255.0) as u8
-            };
-            for (s, d) in src.pixels().zip(out.pixels_mut()) {
-                *d = image::Rgba([
-                    map(s[0]),
-                    map(s[1]),
-                    map(s[2]),
-                    (s[3].clamp(0.0, 1.0) * 255.0) as u8,
-                ]);
-            }
-            DynamicImage::ImageRgba8(out)
-        }
-        // 16-bit types encode to PNG fine; leave them alone.
-        other => other,
-    }
+    crate::tonemap::apply(img, crate::tonemap::Tonemap::DEFAULT, 0.0)
 }
 
 /// Krita (.kra) is a ZIP; it stores a full-resolution flattened `mergedimage.png`
@@ -1002,21 +987,419 @@ pub fn sprite_cels(app: tauri::AppHandle, path: String) -> Result<Vec<SpriteCel>
 /// particular) PANIC on files/features they don't handle â€” without this, one bad
 /// file takes down the whole rayon decode worker and every later thumbnail goes
 /// blank. A panic here just means "no thumbnail for this one".
-pub(crate) fn decode_image(p: &Path) -> Result<DynamicImage, String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decode_image_inner(p)))
+/// `max_edge` hints the largest edge the caller will actually display (256 for
+/// a grid thumb, 4096 for the preview, None for full-res); only the camera-RAW
+/// path uses it, to pick a right-sized embedded preview instead of always
+/// decoding the biggest one.
+pub(crate) fn decode_image(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decode_image_inner(p, max_edge)))
         .unwrap_or_else(|_| Err(format!("{}: decoder panicked", p.display())))
+}
+
+/// Camera RAW (.cr2/.nef/.arw/.dng/.raf/…): decode the camera's EMBEDDED JPEG
+/// preview rather than debayering the sensor. Every consumer camera writes one,
+/// it is already white-balanced and display-ready, and lifting a JPEG out of
+/// the file is a fraction of a full demosaic. Same embedded-preview philosophy
+/// as `decode_affinity`; no new dependency (the bytes are just a JPEG).
+///
+/// Two speed levers, both driven by `max_edge` (256 for a grid thumb, 4096 for
+/// the preview, None for full-res "Copy image"):
+/// * RAW files embed SEVERAL previews (~160px thumb, ~1600px medium, sometimes
+///   full-res), so we decode the SMALLEST that still covers `max_edge` — a 256px
+///   cell turns a 24MP JPEG decode into a ~1600px one.
+/// * We parse the container by seeking (IFDs are tiny) and read ONLY the chosen
+///   preview's bytes, instead of slurping the whole 20–60 MB file.
+///
+/// The slow, robust whole-file scan stays as a fallback for containers the
+/// TIFF/RAF parser doesn't handle (CR3 is ISO-BMFF; some RW2 hide the preview).
+fn decode_raw(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
+    let mut file = std::fs::File::open(p).map_err(|e| e.to_string())?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+
+    // Fast path: container parse + a single targeted read.
+    if let Some(img) = fast_raw_preview(&mut file, len, max_edge) {
+        return Ok(img);
+    }
+
+    // Fallback: slurp and byte-scan for any embedded JPEG.
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::with_capacity(len as usize);
+    file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    let cands = byte_scan_all(&bytes);
+    let idx =
+        choose_preview(&cands, max_edge).ok_or_else(|| "raw: no embedded preview".to_string())?;
+    let c = &cands[idx];
+    let img =
+        image::load_from_memory_with_format(&bytes[c.off..c.off + c.len], image::ImageFormat::Jpeg)
+            .map_err(|e| format!("raw preview: {e}"))?;
+    Ok(apply_orientation(img, 1))
+}
+
+/// A candidate embedded JPEG: where it lives and its decoded size (0 when the
+/// SOF couldn't be read — then byte length stands in as a size proxy).
+#[derive(Clone, Copy)]
+struct Cand {
+    off: usize,
+    len: usize,
+    w: u32,
+    h: u32,
+}
+
+impl Cand {
+    /// Sort key: the shorter edge (what `max_edge` compares against), or the
+    /// byte length as a proxy when dimensions are unknown (scaled down so it
+    /// never outranks a real pixel edge when a sized candidate exists).
+    fn edge(&self) -> u64 {
+        if self.w > 0 && self.h > 0 {
+            self.w.min(self.h) as u64
+        } else {
+            (self.len as u64) / 1000
+        }
+    }
+}
+
+/// Pick which preview to decode: the smallest candidate whose short edge still
+/// covers `max_edge`; failing that (or when `max_edge` is None), the biggest.
+fn choose_preview(cands: &[Cand], max_edge: Option<u32>) -> Option<usize> {
+    if cands.is_empty() {
+        return None;
+    }
+    if let Some(target) = max_edge {
+        let t = target as u64;
+        if let Some((i, _)) = cands
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.edge() >= t)
+            .min_by_key(|(_, c)| c.edge())
+        {
+            return Some(i);
+        }
+    }
+    cands
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, c)| c.edge())
+        .map(|(i, _)| i)
+}
+
+/// Seek-based fast path: RAF header or TIFF IFD walk → candidates (with sizes)
+/// → read only the chosen JPEG. Returns None (→ slurp fallback) for containers
+/// it doesn't recognise or when nothing decodable is found.
+fn fast_raw_preview(
+    file: &mut std::fs::File,
+    len: u64,
+    max_edge: Option<u32>,
+) -> Option<DynamicImage> {
+    let mut head = [0u8; 16];
+    read_exact_at(file, 0, &mut head)?;
+
+    let mut cands: Vec<Cand> = Vec::new();
+    let mut orientation: u16 = 1;
+
+    if &head[0..8] == b"FUJIFILM" {
+        // Fuji RAF: JPEG offset (BE u32) @ 0x54, length @ 0x58.
+        let mut hdr = [0u8; 0x5C];
+        read_exact_at(file, 0, &mut hdr)?;
+        let off = rd_u32(&hdr, 0x54, false)? as usize;
+        let l = rd_u32(&hdr, 0x58, false)? as usize;
+        if let Some((w, h)) = jpeg_dims(file, off, l, len) {
+            cands.push(Cand { off, len: l, w, h });
+        }
+    } else {
+        // CR2 is "II*\0" too; ORF/RW2 keep the II/MM byte-order sig even when
+        // their magic word isn't 42, so key off byte order alone.
+        let le = match &head[0..2] {
+            b"II" => true,
+            b"MM" => false,
+            _ => return None,
+        };
+        let ifd0 = rd_u32(&head, 4, le)?;
+        walk_ifds(file, len, le, ifd0, &mut cands, &mut orientation);
+        // Fill in sizes and drop anything that isn't really a JPEG.
+        cands.retain_mut(|c| match jpeg_dims(file, c.off, c.len, len) {
+            Some((w, h)) => {
+                c.w = w;
+                c.h = h;
+                true
+            }
+            None => false,
+        });
+    }
+
+    let idx = choose_preview(&cands, max_edge)?;
+    let c = cands[idx];
+    let mut buf = vec![0u8; c.len];
+    read_exact_at(file, c.off as u64, &mut buf)?;
+    let img = image::load_from_memory_with_format(&buf, image::ImageFormat::Jpeg).ok()?;
+    Some(apply_orientation(img, orientation))
+}
+
+/// Walk the TIFF IFD tree (SubIFDs via 0x014A, the Exif IFD via 0x8769, and the
+/// IFD1 next-pointer chain), collecting JPEG byte ranges from both
+/// `JPEGInterchangeFormat` pointers and single-strip JPEG-compressed IFDs.
+/// Every read is a small seek — IFDs are a few hundred bytes each.
+fn walk_ifds(
+    file: &mut std::fs::File,
+    len: u64,
+    le: bool,
+    ifd0: u32,
+    out: &mut Vec<Cand>,
+    orientation: &mut u16,
+) {
+    let mut queue: Vec<u32> = vec![ifd0];
+    let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut first = true;
+    let mut budget = 64; // hard cap: a crafted file cannot spin us forever
+    while let Some(off) = queue.pop() {
+        if budget == 0 || off == 0 || !seen.insert(off) {
+            continue;
+        }
+        budget -= 1;
+        let base = off as u64;
+        if base + 2 > len {
+            continue;
+        }
+        let mut cb = [0u8; 2];
+        if read_exact_at(file, base, &mut cb).is_none() {
+            continue;
+        }
+        let count = rd_u16(&cb, 0, le).unwrap_or(0) as usize;
+        if count == 0 || count > 4096 {
+            continue;
+        }
+        // Read the whole entry block (+ the 4-byte next-IFD pointer) at once.
+        let mut buf = vec![0u8; count * 12 + 4];
+        if read_exact_at(file, base + 2, &mut buf).is_none() {
+            // The final IFD can omit its next-pointer at EOF; retry shorter.
+            buf = vec![0u8; count * 12];
+            if read_exact_at(file, base + 2, &mut buf).is_none() {
+                continue;
+            }
+        }
+        let mut jpg_off: Option<usize> = None;
+        let mut jpg_len: Option<usize> = None;
+        let mut compression: u16 = 0;
+        let mut strip_off: Option<usize> = None;
+        let mut strip_len: Option<usize> = None;
+        for i in 0..count {
+            let e = i * 12;
+            let tag = match rd_u16(&buf, e, le) {
+                Some(t) => t,
+                None => break,
+            };
+            let ftype = rd_u16(&buf, e + 2, le).unwrap_or(0);
+            let cnt = rd_u32(&buf, e + 4, le).unwrap_or(0);
+            // A SHORT value is stored left-justified in the 4-byte value field.
+            let v16 = rd_u16(&buf, e + 8, le).unwrap_or(0);
+            let v32 = rd_u32(&buf, e + 8, le).unwrap_or(0);
+            match tag {
+                0x0112 if first => *orientation = v16,       // Orientation
+                0x0103 => compression = v16,                 // Compression
+                0x0111 if cnt == 1 => strip_off = Some(v32 as usize), // StripOffsets
+                0x0117 if cnt == 1 => strip_len = Some(v32 as usize), // StripByteCounts
+                0x0201 => jpg_off = Some(v32 as usize),      // JPEGInterchangeFormat
+                0x0202 => jpg_len = Some(v32 as usize),      // ...Length
+                0x014A => read_subifds(file, le, ftype, cnt, v32, &mut queue), // SubIFDs
+                0x8769 => queue.push(v32),                   // Exif IFD
+                _ => {}
+            }
+        }
+        // Next IFD in the chain (IFD1 holds the classic thumbnail on many cams).
+        if buf.len() >= count * 12 + 4 {
+            if let Some(next) = rd_u32(&buf, count * 12, le) {
+                if next != 0 {
+                    queue.push(next);
+                }
+            }
+        }
+        first = false;
+
+        if let (Some(o), Some(l)) = (jpg_off, jpg_len) {
+            if l >= 4 {
+                out.push(Cand { off: o, len: l, w: 0, h: 0 });
+            }
+        }
+        // A JPEG/YCbCr-compressed single strip is a preview too (DNG/ARW store
+        // their big preview this way rather than via JPEGInterchangeFormat).
+        if matches!(compression, 6 | 7) {
+            if let (Some(o), Some(l)) = (strip_off, strip_len) {
+                if l >= 4 {
+                    out.push(Cand { off: o, len: l, w: 0, h: 0 });
+                }
+            }
+        }
+    }
+}
+
+/// SubIFDs (tag 0x014A): one inline offset when count==1, else a pointer to an
+/// array of `count` LONG offsets (capped so a bogus count can't over-read).
+fn read_subifds(
+    file: &mut std::fs::File,
+    le: bool,
+    ftype: u16,
+    cnt: u32,
+    val: u32,
+    queue: &mut Vec<u32>,
+) {
+    if cnt == 1 {
+        queue.push(val); // offset stored inline
+        return;
+    }
+    if ftype != 4 {
+        return; // LONG offsets only
+    }
+    let n = cnt.min(16) as usize;
+    let mut buf = vec![0u8; n * 4];
+    if read_exact_at(file, val as u64, &mut buf).is_none() {
+        return;
+    }
+    for i in 0..n {
+        if let Some(o) = rd_u32(&buf, i * 4, le) {
+            queue.push(o);
+        }
+    }
+}
+
+/// Read a JPEG's decoded dimensions from its SOF, reading only a bounded header
+/// window (APP1/EXIF can be tens of KB, so allow up to 256 KB) — not the whole
+/// preview. Also doubles as the "is this actually a JPEG" check via the SOI.
+fn jpeg_dims(file: &mut std::fs::File, off: usize, claimed_len: usize, file_len: u64) -> Option<(u32, u32)> {
+    let off = off as u64;
+    if off >= file_len {
+        return None;
+    }
+    let avail = file_len - off;
+    let want = (claimed_len as u64).min(avail).min(256 * 1024) as usize;
+    if want < 4 {
+        return None;
+    }
+    let mut buf = vec![0u8; want];
+    read_exact_at(file, off, &mut buf)?;
+    if buf[0] != 0xFF || buf[1] != 0xD8 {
+        return None; // not a JPEG (no SOI)
+    }
+    parse_sof(&buf)
+}
+
+/// Scan JPEG marker segments for the Start-Of-Frame and return (width, height).
+/// SOF always precedes the scan data, so we return before hitting entropy bytes.
+fn parse_sof(b: &[u8]) -> Option<(u32, u32)> {
+    let mut i = 2usize; // past the SOI
+    while i + 9 < b.len() {
+        if b[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        let marker = b[i + 1];
+        // Padding and standalone markers (no length word).
+        if marker == 0xFF {
+            i += 1;
+            continue;
+        }
+        if marker == 0xD8 || marker == 0xD9 || (0xD0..=0xD7).contains(&marker) || marker == 0x01 {
+            i += 2;
+            continue;
+        }
+        let seglen = u16::from_be_bytes([b[i + 2], b[i + 3]]) as usize;
+        // SOF0..SOF15 carry the frame size; skip DHT(C4)/JPG(C8)/DAC(CC).
+        if matches!(marker, 0xC0..=0xCF) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+            let h = u16::from_be_bytes([b[i + 5], b[i + 6]]) as u32;
+            let w = u16::from_be_bytes([b[i + 7], b[i + 8]]) as u32;
+            return if w > 0 && h > 0 { Some((w, h)) } else { None };
+        }
+        if seglen < 2 {
+            return None;
+        }
+        i += 2 + seglen;
+    }
+    None
+}
+
+/// Whole-file scan for every `FFD8 … FFD9` JPEG run (with SOF sizes). Fallback
+/// for containers the TIFF/RAF parser can't walk — CR3 (ISO-BMFF) and the odd
+/// RW2 — as long as a JPEG is embedded somewhere.
+fn byte_scan_all(bytes: &[u8]) -> Vec<Cand> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i + 1 < bytes.len() {
+        if bytes[i] == 0xFF && bytes[i + 1] == 0xD8 {
+            let mut j = i + 2;
+            let mut found = false;
+            while j + 1 < bytes.len() {
+                if bytes[j] == 0xFF && bytes[j + 1] == 0xD9 {
+                    let l = j + 2 - i;
+                    let (w, h) = parse_sof(&bytes[i..i + l]).unwrap_or((0, 0));
+                    out.push(Cand { off: i, len: l, w, h });
+                    i = j + 2;
+                    found = true;
+                    break;
+                }
+                j += 1;
+            }
+            if !found {
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// `seek + read_exact` into `buf`; None on any I/O error or short read.
+fn read_exact_at(file: &mut std::fs::File, off: u64, buf: &mut [u8]) -> Option<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(off)).ok()?;
+    file.read_exact(buf).ok()?;
+    Some(())
+}
+
+fn rd_u16(b: &[u8], o: usize, le: bool) -> Option<u16> {
+    let s = b.get(o..o + 2)?;
+    Some(if le {
+        u16::from_le_bytes([s[0], s[1]])
+    } else {
+        u16::from_be_bytes([s[0], s[1]])
+    })
+}
+
+fn rd_u32(b: &[u8], o: usize, le: bool) -> Option<u32> {
+    let s = b.get(o..o + 4)?;
+    Some(if le {
+        u32::from_le_bytes([s[0], s[1], s[2], s[3]])
+    } else {
+        u32::from_be_bytes([s[0], s[1], s[2], s[3]])
+    })
+}
+
+/// Rotate/flip a decoded preview per its EXIF orientation (1..=8). Portrait
+/// shots (6/8) are the common ones; the mirror cases (2/4/5/7) are rare and
+/// handled best-effort.
+fn apply_orientation(img: DynamicImage, orient: u16) -> DynamicImage {
+    match orient {
+        2 => img.fliph(),
+        3 => img.rotate180(),
+        4 => img.flipv(),
+        5 => img.rotate90().fliph(),
+        6 => img.rotate90(),
+        7 => img.rotate270().fliph(),
+        8 => img.rotate270(),
+        _ => img,
+    }
 }
 
 /// Retries WebP through libwebp. The pure-Rust `image` WebP decoder rejects some
 /// extended/animated WebP ("Invalid Chunk header") that libwebp decodes fine;
 /// layered art (kra/aseprite) has its own decoders; other formats go straight
 /// through `image`.
-fn decode_image_inner(p: &Path) -> Result<DynamicImage, String> {
+fn decode_image_inner(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
     match p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("kra") => return decode_kra(p),
         Some("aseprite") | Some("ase") => return decode_aseprite(p),
         Some("psd") | Some("psb") => return decode_psd(p),
         Some("afphoto") | Some("afdesign") | Some("afpub") => return decode_affinity(p),
+        Some(ext) if crate::types::RAW_EXTENSIONS.contains(&ext) => return decode_raw(p, max_edge),
         _ => {}
     }
     match image::open(p) {
@@ -1062,7 +1445,7 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
         }
     }
 
-    let img = decode_image(p).map_err(|e| format!("decode {path}: {e}"))?;
+    let img = decode_image(p, Some(THUMB_EDGE)).map_err(|e| format!("decode {path}: {e}"))?;
     let (w, ih) = img.dimensions();
     if w == 0 || ih == 0 {
         return Err(format!("{path}: zero-sized image"));

@@ -10,9 +10,18 @@ pub const AUDIO_EXTENSIONS: [&str; 7] = ["wav", "mp3", "flac", "ogg", "aiff", "a
 /// flattened image (see thumbs::decode_image); the preview shows their layers.
 /// `afphoto`/`afdesign`/`afpub` (Affinity) are closed-format art whose only
 /// readable pixels are the embedded PNG preview — decoded flat, no layer panel.
-pub const TEXTURE_EXTENSIONS: [&str; 20] = [
+/// Camera RAW. Decoded by extracting the camera's embedded full-res JPEG
+/// preview (thumbs::decode_raw) — fast, and no debayering dependency. The
+/// preview panel tone-maps these like HDR/EXR (see tonemap.rs); the fixed set
+/// covers the mainstream TIFF-based formats plus Fuji RAF.
+pub const RAW_EXTENSIONS: [&str; 13] = [
+    "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "pef", "srw",
+];
+
+pub const TEXTURE_EXTENSIONS: [&str; 33] = [
     "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp", "kra",
-    "aseprite", "ase", "psd", "psb", "afphoto", "afdesign", "afpub",
+    "aseprite", "ase", "psd", "psb", "afphoto", "afdesign", "afpub", // camera raw (RAW_EXTENSIONS):
+    "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "pef", "srw",
 ];
 
 /// `blend` is scanned but not previewable — listing it beats it silently
@@ -24,7 +33,14 @@ pub const MODEL_EXTENSIONS: [&str; 9] = [
 /// Documents game devs keep alongside assets — design docs, references, notes.
 /// pdf/md/txt render in the webview directly. (Photoshop psd/psb moved to the
 /// Images tab, where they preview with a layer panel like kra/aseprite.)
-pub const DOCUMENT_EXTENSIONS: [&str; 4] = ["pdf", "md", "markdown", "txt"];
+/// The ebook formats (epub/mobi/azw/azw3/fb2/fbz/cbz) render in-app via the
+/// vendored foliate-js viewer — see components/document/EbookView.tsx. `.fb2.zip`
+/// is intentionally absent: the last extension is "zip", and classifying every
+/// zip as a document would flood the tab.
+pub const DOCUMENT_EXTENSIONS: [&str; 11] = [
+    "pdf", "md", "markdown", "txt", // ebooks (foliate-js):
+    "epub", "mobi", "azw", "azw3", "fb2", "fbz", "cbz",
+];
 
 /// Directories never worth walking.
 ///

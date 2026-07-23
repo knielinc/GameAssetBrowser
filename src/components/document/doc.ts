@@ -16,7 +16,14 @@ export function docUrl(path: string): string {
   return `${schemeBase("doc")}/${schemePath(path)}`;
 }
 
-export type DocFormat = "markdown" | "text" | "pdf" | "psd" | "unsupported";
+export type DocFormat = "markdown" | "text" | "pdf" | "psd" | "ebook" | "unsupported";
+
+/** Ebook formats the foliate-js viewer renders. `fbz` is FB2-in-a-zip; the
+ *  plain `.fb2.zip` double extension isn't listed because the scanner keys off
+ *  the last extension only ("zip"), and sweeping every .zip into Documents is
+ *  worse than missing that one variant. Mirrors the ebook slice of
+ *  DOCUMENT_EXTENSIONS in types.ts / types.rs. */
+export const EBOOK_EXTENSIONS = ["epub", "mobi", "azw", "azw3", "fb2", "fbz", "cbz"] as const;
 
 export function docFormat(ext: string): DocFormat {
   const e = ext.toLowerCase();
@@ -24,18 +31,24 @@ export function docFormat(ext: string): DocFormat {
   if (e === "txt") return "text";
   if (e === "pdf") return "pdf";
   if (e === "psd" || e === "psb") return "psd";
+  if ((EBOOK_EXTENSIONS as readonly string[]).includes(e)) return "ebook";
   return "unsupported";
 }
 
 /** Whether the A−/A+ zoom applies. PSD has its own fit/layer UI. */
 export function docSupportsZoom(ext: string): boolean {
   const f = docFormat(ext);
-  return f === "markdown" || f === "text" || f === "pdf";
+  return f === "markdown" || f === "text" || f === "pdf" || f === "ebook";
 }
 
 /** Whether to show the PDF-only page-layout control. */
 export function docIsPdf(ext: string): boolean {
   return docFormat(ext) === "pdf";
+}
+
+/** EPUB / MOBI / AZW3 / FB2 / CBZ — rendered by the foliate-js viewer. */
+export function docIsEbook(ext: string): boolean {
+  return docFormat(ext) === "ebook";
 }
 
 /** Text/markdown — the formats that take the readable-width toggle. */

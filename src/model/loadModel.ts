@@ -29,20 +29,42 @@ export function modelUrl(path: string): string {
 }
 
 /** Full-resolution preview of a texture the browser can't decode (HDR/EXR/DDS/
- *  TGA/…), decoded + tone-mapped to a PNG in Rust. Same URL shape as modelUrl;
- *  browser-decodable formats should use modelUrl (native res, no re-encode). */
-export function previewUrl(path: string): string {
-  return `${schemeBase("preview")}/${schemePath(path)}`;
+ *  TGA/RAW/…), decoded + tone-mapped to a PNG in Rust. Same URL shape as
+ *  modelUrl; browser-decodable formats should use modelUrl (native res, no
+ *  re-encode).
+ *
+ *  `tm`/`ev` pick the tone-mapper + exposure for float sources (HDR/EXR/RAW);
+ *  the query is part of the Rust preview cache key, so changing them re-fetches
+ *  a freshly tone-mapped PNG. Omitted (or ev 0) => the default (ACES, 0 EV),
+ *  and the query is left off so LDR previews keep a stable, cacheable URL. */
+export function previewUrl(path: string, tm?: string, ev?: number): string {
+  const base = `${schemeBase("preview")}/${schemePath(path)}`;
+  const q: string[] = [];
+  if (tm !== undefined && tm !== "aces") q.push(`tm=${tm}`);
+  if (ev !== undefined && ev !== 0) q.push(`ev=${ev}`);
+  return q.length > 0 ? `${base}?${q.join("&")}` : base;
 }
 
 /** Formats the browser decodes natively — served as the ORIGINAL file at full
  *  resolution rather than round-tripped through Rust. */
 export const BROWSER_DECODABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
 
+/** Float, wider-than-display sources the tone-mapper actually shapes: HDR and
+ *  EXR. Camera RAW is deliberately NOT here — its preview is the camera's own
+ *  embedded JPEG (already display-referred sRGB, and the manufacturer's tone
+ *  rendering is the best default), so a tone-map operator would be a no-op and
+ *  the control is hidden for it. Everything else is likewise already sRGB. */
+export const FLOAT_PREVIEW_EXTENSIONS = new Set<string>(["hdr", "exr"]);
+
+export function isFloatPreview(ext: string | undefined): boolean {
+  return ext !== undefined && FLOAT_PREVIEW_EXTENSIONS.has(ext.toLowerCase());
+}
+
 /** Best source-quality URL for a texture: the original for browser-decodable
- *  formats, a Rust-decoded full-res PNG otherwise. */
-export function sourceUrl(path: string, ext: string): string {
-  return BROWSER_DECODABLE.has(ext.toLowerCase()) ? modelUrl(path) : previewUrl(path);
+ *  formats, a Rust-decoded full-res PNG otherwise. `tm`/`ev` tone-map float
+ *  sources (ignored by the native path — those are already sRGB). */
+export function sourceUrl(path: string, ext: string, tm?: string, ev?: number): string {
+  return BROWSER_DECODABLE.has(ext.toLowerCase()) ? modelUrl(path) : previewUrl(path, tm, ev);
 }
 
 export interface LoadedModel {

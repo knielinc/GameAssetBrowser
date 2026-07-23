@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { basename } from "../../stores/libraryStore";
 import { humanSize } from "../FileRow";
 import DocumentPreview from "./DocumentPreview";
-import { docIsPdf, docIsTextual, docSupportsZoom } from "./doc";
+import { docIsEbook, docIsPdf, docIsTextual, docSupportsZoom } from "./doc";
 import DocViewControls from "./DocViewControls";
 import PdfLayoutControls from "./PdfLayoutControls";
 import ReadWidthControls from "./ReadWidthControls";
@@ -48,7 +48,7 @@ export default function DocumentInspector({
           {docSupportsZoom(ext) && (
             <div className="flex shrink-0 items-center gap-2 border-b border-bg px-2.5 py-1.5">
               {docIsPdf(ext) && <PdfLayoutControls />}
-              {docIsTextual(ext) && <ReadWidthControls />}
+              {(docIsTextual(ext) || docIsEbook(ext)) && <ReadWidthControls />}
               <DocViewControls className="ml-auto" />
             </div>
           )}

@@ -4,6 +4,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { useRenderPrefs } from "../../stores/renderPrefs";
 import { basename, useLibraryStore } from "../../stores/libraryStore";
 import { useEnvPrefs } from "../../stores/envPrefs";
+import { EV_MAX, EV_MIN, EV_STEP, TONEMAPS, useTonemapPrefs } from "../../stores/tonemapPrefs";
 import {
   ISO_CHANNELS,
   LIGHT_MODES,
@@ -54,6 +55,9 @@ export interface PreviewControlsProps {
   /** The mesh to open on when leaving 2D. The parent sets "env" for an
    *  equirectangular map; otherwise it falls back to the flat plane. */
   default3d?: MeshMode;
+  /** Whether the previewed source is a float format (HDR/EXR/RAW) — gates the
+   *  Tone-map control, which is a no-op on already-sRGB images. */
+  hdr?: boolean;
 }
 
 /** The 3D mesh reached for when leaving 2D — a flat plane is the least
@@ -271,6 +275,71 @@ function EnvPicker({ up }: { up: boolean }): ReactElement {
   );
 }
 
+/** EV as a signed, half-stop label: "0 EV", "+1.5 EV", "−2 EV". */
+function fmtEv(ev: number): string {
+  if (ev === 0) return "0 EV";
+  const s = Number.isInteger(ev) ? String(Math.abs(ev)) : Math.abs(ev).toFixed(1);
+  return `${ev > 0 ? "+" : "−"}${s} EV`;
+}
+
+/**
+ * Tone-map + exposure for HDR/EXR/RAW previews. The operator squeezes the
+ * float range into sRGB; each maps to the identical three.js constant so the 2D
+ * preview matches the lit 3D surface. The choice lives in tonemapPrefs
+ * (session-global, shared drawer ↔ fullscreen), same as the environment.
+ */
+function ToneControls(): ReactElement {
+  const tonemap = useTonemapPrefs((s) => s.tonemap);
+  const exposure = useTonemapPrefs((s) => s.exposure);
+  const setTonemap = useTonemapPrefs((s) => s.setTonemap);
+  const setExposure = useTonemapPrefs((s) => s.setExposure);
+  return (
+    <div className="flex min-w-[190px] flex-col gap-1">
+      <Label>Tone map</Label>
+      <Row>
+        {TONEMAPS.map((t) => (
+          <Seg
+            key={t.id}
+            on={tonemap === t.id}
+            onClick={() => setTonemap(t.id)}
+            title={`${t.label} — HDR/EXR/RAW previews only`}
+          >
+            {t.short}
+          </Seg>
+        ))}
+      </Row>
+      <div className="mt-0.5 flex items-center justify-between rounded-full bg-bg px-2.5 py-1">
+        <button
+          type="button"
+          className="text-dim transition-colors duration-[120ms] hover:text-text disabled:opacity-30"
+          disabled={exposure <= EV_MIN}
+          onClick={() => setExposure(exposure - EV_STEP)}
+          title={`Exposure −${EV_STEP} stop`}
+        >
+          −
+        </button>
+        <button
+          type="button"
+          className="text-[11px] tabular-nums text-text transition-colors duration-[120ms] hover:text-accent"
+          onClick={() => setExposure(0)}
+          title="Exposure — click to reset to 0 EV"
+        >
+          {fmtEv(exposure)}
+        </button>
+        <button
+          type="button"
+          className="text-dim transition-colors duration-[120ms] hover:text-text disabled:opacity-30"
+          disabled={exposure >= EV_MAX}
+          onClick={() => setExposure(exposure + EV_STEP)}
+          title={`Exposure +${EV_STEP} stop`}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Mesh / lighting / tiling selectors. Shared by the drawer and the
  *  fullscreen overlay so the two never drift apart. */
 export default function PreviewControls({
@@ -279,6 +348,7 @@ export default function PreviewControls({
   inline,
   hasHeight,
   default3d,
+  hdr,
 }: PreviewControlsProps): ReactElement {
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
   const togglePixelArt = useRenderPrefs((s) => s.toggle);
@@ -536,6 +606,7 @@ export default function PreviewControls({
   return (
     <div className={clsx("flex gap-3", inline ? "flex-row items-end" : "flex-col")}>
       {previewGroup}
+      {hdr === true && <ToneControls />}
       {is2D ? controls2D : controls3D}
     </div>
   );

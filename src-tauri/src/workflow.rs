@@ -38,7 +38,9 @@ pub async fn copy_image_to_clipboard(app: tauri::AppHandle, path: String) -> Res
     if !crate::scanner::is_within_roots(&app, &p) {
         return Err(format!("refused out-of-scope read: {path}"));
     }
-    let img = crate::thumbs::decode_image(&p).map_err(|e| format!("decode {path}: {e}"))?;
+    // None = full-res: the clipboard copy should be the real pixels, not a
+    // thumbnail-sized embedded preview.
+    let img = crate::thumbs::decode_image(&p, None).map_err(|e| format!("decode {path}: {e}"))?;
     let img = crate::thumbs::to_ldr(img);
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();

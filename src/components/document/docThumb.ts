@@ -1,11 +1,13 @@
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { docFormat, docUrl } from "./doc";
+import { basename } from "../../stores/libraryStore";
 
 /**
  * Grid thumbnails for documents, rendered in the webview and cached by path.
  * PDF → its first page (via the pdf_range IPC transport, so a 500 MB file only
  * reads the pages it needs). PSD → the baked composite (ag-psd, layer pixels
- * skipped for speed). md/txt have no raster — the cell shows an icon.
+ * skipped for speed). Ebooks → the embedded cover (foliate-js). md/txt have no
+ * raster — the cell shows an icon.
  *
  * Renders are concurrency-limited so scrolling a big folder doesn't spawn dozens
  * of parses at once, and memoised so a cell that scrolls back is instant.
@@ -107,6 +109,32 @@ async function textThumb(path: string): Promise<string | null> {
   return canvas.toDataURL("image/webp", 0.85);
 }
 
+/** Ebook → its embedded cover, downscaled. foliate parses the whole (small)
+ *  archive to reach the cover; some books carry none, so this may be null and
+ *  the cell falls back to a book icon. The named File lets foliate detect the
+ *  container format (see EbookView). */
+async function ebookThumb(path: string): Promise<string | null> {
+  const blob = await (await fetch(docUrl(path))).blob();
+  const file = new File([blob], basename(path));
+  const { makeBook } = await import("../../vendor/foliate-js/view.js");
+  const book = await makeBook(file);
+  const cover = await book.getCover?.();
+  if (cover == null) return null;
+  const bmp = await createImageBitmap(cover);
+  try {
+    const scale = Math.min(1, TARGET / bmp.width);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bmp.width * scale));
+    canvas.height = Math.max(1, Math.round(bmp.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) return null;
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/webp", 0.85);
+  } finally {
+    bmp.close();
+  }
+}
+
 async function psdThumb(path: string): Promise<string | null> {
   const buf = await (await fetch(docUrl(path))).arrayBuffer();
   const { readPsd } = await import("ag-psd");
@@ -137,6 +165,7 @@ export async function renderDocThumb(path: string, ext: string): Promise<string 
     let url: string | null = null;
     try {
       if (fmt === "pdf") url = await pdfThumb(path);
+      else if (fmt === "ebook") url = await ebookThumb(path);
       else if (fmt === "psd") url = await psdThumb(path);
       else url = await textThumb(path); // markdown | text
     } catch (e) {

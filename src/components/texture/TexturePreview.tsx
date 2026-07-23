@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { modelUrl, sourceUrl } from "../../model/loadModel";
+import { isFloatPreview, modelUrl, sourceUrl } from "../../model/loadModel";
 import { useEnvPrefs } from "../../stores/envPrefs";
+import { useTonemapPrefs, type TonemapId } from "../../stores/tonemapPrefs";
 import { applyParallax } from "./parallax";
+
+/** Tone-map id → the matching three.js constant. Kept exactly parallel to the
+ *  Rust `Tonemap` ports (tonemap.rs) so the lit 3D surface and the HDRI
+ *  environment tone-map identically to the Rust-decoded 2D preview. */
+const THREE_TONE_MAPPING: Record<TonemapId, THREE.ToneMapping> = {
+  linear: THREE.LinearToneMapping,
+  reinhard: THREE.ReinhardToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+  agx: THREE.AgXToneMapping,
+  neutral: THREE.NeutralToneMapping,
+};
 
 /** Shared 1×1 white — the parallax shader keys off a base-color map, so a
  *  material with no albedo needs one to exist. */
@@ -217,6 +229,11 @@ export default function TexturePreview({
   const cam = useRef({ yaw: 0.6, pitch: 0.3, dist: 3.2, panX: 0, panY: 0 });
   const dirty = useRef(true);
   const [ready, setReady] = useState(false);
+  // Tone-map operator + exposure for HDR/EXR/RAW sources. Drives BOTH the
+  // Rust-decoded preview PNG (through the sourceUrl query) and the live three
+  // renderer (lit surfaces + the HDRI env), so the two never disagree.
+  const toneOp = useTonemapPrefs((s) => s.tonemap);
+  const toneEv = useTonemapPrefs((s) => s.exposure);
   // The pointer handler is installed once, so it reads the live mesh mode
   // through a ref rather than closing over a stale value.
   const meshRef = useRef(mesh);
@@ -350,6 +367,19 @@ export default function TexturePreview({
     };
   }, []);
 
+  // --- tone-map follows the preference ---
+  // Lit surfaces and the live HDRI env are tone-mapped by three; the flat/env
+  // preview PNGs are tone-mapped in Rust (shown toneMapped:false). Driving both
+  // from the same operator+exposure keeps a texture looking identical whichever
+  // path renders it.
+  useEffect(() => {
+    const { renderer } = refs.current;
+    if (renderer === undefined) return;
+    renderer.toneMapping = THREE_TONE_MAPPING[toneOp];
+    renderer.toneMappingExposure = Math.pow(2, toneEv);
+    dirty.current = true;
+  }, [toneOp, toneEv, ready]);
+
   // --- lights follow the rig ---
   useEffect(() => {
     const { scene } = refs.current;
@@ -454,7 +484,10 @@ export default function TexturePreview({
       if (src === undefined) return null;
       // Source quality, not the 256px grid thumb — the preview is where you look
       // closely, and a 5K HDRI on the env sphere must not read as a blurry blob.
-      const url = sourceUrl(src.path, src.ext);
+      // Tone-map only float sources; an LDR map (DDS/TGA/TIFF) keeps a stable,
+      // cacheable URL so auditioning an operator never churns its preview.
+      const float = isFloatPreview(src.ext);
+      const url = sourceUrl(src.path, src.ext, float ? toneOp : undefined, float ? toneEv : undefined);
       const cacheKey = `${url}|${srgb ? "s" : "l"}`;
       used.add(cacheKey);
       let t = cache.get(cacheKey);
@@ -665,6 +698,9 @@ export default function TexturePreview({
     keys.baseColor, keys.normal, keys.roughness, keys.metallic,
     keys.ao, keys.height, keys.emissive, keys.opacity,
     mesh, light, tiles, relief, channel, iso, flatTiles, ready,
+    // A tone-map/exposure change re-URLs float textures (new query) so the
+    // preview PNG is re-fetched freshly tone-mapped.
+    toneOp, toneEv,
   ]);
 
   return <div ref={hostRef} className="h-full w-full" />;

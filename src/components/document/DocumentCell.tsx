@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
-import { FileText, Layers } from "lucide-react";
+import { BookOpen, FileText, Layers } from "lucide-react";
 import type { LibFile } from "../../stores/libraryStore";
 import { toggleFavoriteSmart, useFavoritesStore } from "../../stores/favoritesStore";
 import { humanSize } from "../FileRow";
@@ -33,7 +33,7 @@ export default function DocumentCell({ file, selected, focused }: DocumentCellPr
     };
   }, [file.path, file.ext, raster, url]);
 
-  const Icon = fmt === "psd" ? Layers : FileText;
+  const Icon = fmt === "psd" ? Layers : fmt === "ebook" ? BookOpen : FileText;
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];
 
   return (

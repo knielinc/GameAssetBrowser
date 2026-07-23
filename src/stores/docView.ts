@@ -12,12 +12,15 @@ export const MIN_SCALE = 0.7;
 export const MAX_SCALE = 2.4;
 const STEP = 0.15;
 
+/** Base body font size (px) the ebook viewer scales from with fontScale. */
+export const MD_BASE_EBOOK = 16;
+
 /** PDF page layout: fit to the column width, one whole page per screen, or a
  *  two-page facing spread. */
 export type PdfLayout = "width" | "single" | "spread";
 const PDF_LAYOUTS: readonly PdfLayout[] = ["width", "single", "spread"];
 
-/** Text/markdown column: a centered readable measure, or edge-to-edge. */
+/** Text/markdown/ebook column: a centered readable measure, or edge-to-edge. */
 export type ReadWidth = "readable" | "full";
 const READ_WIDTHS: readonly ReadWidth[] = ["readable", "full"];
 
@@ -32,7 +35,11 @@ interface Persisted {
 }
 
 function load(): Persisted {
-  const fallback: Persisted = { fontScale: 1, pdfLayout: "width", readWidth: "readable" };
+  const fallback: Persisted = {
+    fontScale: 1,
+    pdfLayout: "width",
+    readWidth: "readable",
+  };
   try {
     const raw = window.localStorage.getItem(KEY);
     if (raw === null) return fallback;

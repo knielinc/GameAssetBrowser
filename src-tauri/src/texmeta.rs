@@ -111,6 +111,12 @@ fn flusher_loop(
 /// measured).
 fn probe_dims(path: &Path) -> Option<(u32, u32)> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    // Camera RAW: `image::image_dimensions` would read the TIFF CFA dims (or
+    // fail); the meaningful size is the embedded preview's, which the thumbnail
+    // decode fills in (build() sets source_width/height). Skip here.
+    if crate::types::RAW_EXTENSIONS.contains(&ext.as_str()) {
+        return None;
+    }
     let (w, h) = if ext == "dds" {
         dds_dims(path)?
     } else {

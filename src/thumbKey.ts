@@ -13,7 +13,7 @@
  */
 
 // MUST match the constants in thumbs.rs.
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const THUMB_EDGE = 256;
 const KIND = "t";
 

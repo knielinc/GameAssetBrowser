@@ -8,6 +8,7 @@ import { CHANNEL_LABEL, type Channel } from "../../material/table";
 import type { Material, TextureItem } from "../../material/classify";
 import TexturePreview, { type ChannelKeys, type ChannelSrc } from "./TexturePreview";
 import PreviewControls, { type PreviewState } from "./PreviewControls";
+import { isFloatPreview } from "../../model/loadModel";
 import Sprite2DView from "./Sprite2DView";
 
 /**
@@ -192,6 +193,7 @@ export default function TextureInspector({
               value={preview}
               onChange={onPreviewChange}
               hasHeight={keys.height !== undefined}
+              hdr={isFloatPreview(file2d?.ext ?? keys.baseColor?.ext)}
             />
 
             <div>

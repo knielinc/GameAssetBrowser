@@ -10,6 +10,7 @@ mod spectrogram;
 mod texmeta;
 mod thumbcache;
 mod thumbs;
+mod tonemap;
 mod types;
 mod watcher;
 mod waveform;
@@ -194,6 +195,14 @@ fn mime_for(path: &std::path::Path) -> &'static str {
         Some("md") | Some("markdown") => "text/markdown; charset=utf-8",
         Some("txt") => "text/plain; charset=utf-8",
         Some("psd") | Some("psb") => "image/vnd.adobe.photoshop",
+        // Ebooks — fetched as a Blob by the foliate-js viewer (EbookView.tsx),
+        // which re-wraps them in a named File and sniffs the real format, so
+        // these Content-Types are advisory like the other document MIMEs.
+        Some("epub") => "application/epub+zip",
+        Some("mobi") | Some("azw") | Some("azw3") => "application/x-mobipocket-ebook",
+        Some("fb2") => "application/x-fictionbook+xml",
+        Some("fbz") => "application/x-zip-compressed-fb2",
+        Some("cbz") => "application/vnd.comicbook+zip",
         _ => "application/octet-stream",
     }
 }
@@ -367,7 +376,10 @@ pub fn run() {
             let uri = req.uri().clone();
             std::thread::spawn(move || {
                 let decoded = percent_decode(uri.path().trim_start_matches('/'));
-                let resp = match thumbs::preview_png(&app, &decoded) {
+                // ?tm=<operator>&ev=<stops> selects the tone-mapper for HDR/EXR/
+                // RAW previews; absent -> the default (ACES, 0 EV).
+                let (tm, ev) = tonemap::parse_query(uri.query());
+                let resp = match thumbs::preview_png(&app, &decoded, tm, ev) {
                     Some(bytes) => tauri::http::Response::builder()
                         .header("Content-Type", "image/png")
                         // Keyed by path+stamp inside; the URL's bytes are stable.

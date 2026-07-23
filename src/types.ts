@@ -162,15 +162,26 @@ export function texUrl(key: string): string {
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4a"] as const;
 export type AudioExt = (typeof AUDIO_EXTENSIONS)[number];
 
+/** Camera RAW — decoded via the embedded JPEG preview in Rust (thumbs::
+ *  decode_raw). Mirrors RAW_EXTENSIONS in types.rs. */
+export const RAW_EXTENSIONS = [
+  "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "pef", "srw",
+] as const;
+
 export const TEXTURE_EXTENSIONS = [
   "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp",
   "kra", "aseprite", "ase", "psd", "psb", "afphoto", "afdesign", "afpub",
+  ...RAW_EXTENSIONS,
 ] as const;
 export const MODEL_EXTENSIONS = [
   "fbx", "obj", "gltf", "glb", "dae", "3ds", "ply", "stl", "blend",
 ] as const;
-/** Design docs, references, notes. Mirrors types.rs. */
-export const DOCUMENT_EXTENSIONS = ["pdf", "md", "markdown", "txt"] as const;
+/** Design docs, references, notes, plus ebooks (epub/mobi/azw3/fb2/cbz, rendered
+ *  by the vendored foliate-js viewer). Mirrors types.rs. */
+export const DOCUMENT_EXTENSIONS = [
+  "pdf", "md", "markdown", "txt",
+  "epub", "mobi", "azw", "azw3", "fb2", "fbz", "cbz",
+] as const;
 
 /** Per-kind extension vocabularies. Mirrors the four lists in types.rs. */
 export const EXTENSIONS: Record<AssetKind, readonly string[]> = {

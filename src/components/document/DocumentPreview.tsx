@@ -6,6 +6,7 @@ import { docFormat, docUrl } from "./doc";
 import { useDocView } from "../../stores/docView";
 import PdfView from "./PdfView";
 import PsdView from "./PsdView";
+import EbookView from "./EbookView";
 
 /**
  * In-app document preview for the formats Phase 1 covers (pdf, md/markdown,
@@ -173,6 +174,7 @@ export default function DocumentPreview({
   if (fmt === "markdown") return <MarkdownView path={path} scale={scale} full={full} />;
   if (fmt === "text") return <TextView path={path} scale={scale} full={full} />;
   if (fmt === "pdf") return <PdfView path={path} autoFocus={autoFocusPdf} />;
+  if (fmt === "ebook") return <EbookView path={path} autoFocus={autoFocusPdf} />;
   if (fmt === "psd") return <PsdView path={path} />;
   return <Centered>No in-app preview for “.{ext}” yet.</Centered>;
 }
