@@ -466,7 +466,8 @@ export default function FileList({ kind, files, items, onActivate }: FileListPro
             },
             // Textures only, single-target like Show in Explorer — the OS
             // clipboard holds one image. HDR/EXR land tone-mapped (as shown).
-            ...(kind === "texture"
+            // File kind, not tab kind, so it appears on the mixed "all" list too.
+            ...(menu.file.kind === "texture"
               ? [
                   {
                     label: "Copy image",
@@ -485,9 +486,10 @@ export default function FileList({ kind, files, items, onActivate }: FileListPro
               icon: BookmarkPlus,
               onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
             },
-            // One entry per registered app of this kind (External apps…),
-            // single-target: an editor opens one document, not a selection.
-            ...appsForKind(externalApps, kind, menu.file.ext).map((a) => ({
+            // One entry per registered app of this file's kind (External
+            // apps…), single-target: an editor opens one document, not a
+            // selection. File kind, not tab kind, so it works on the "all" tab.
+            ...appsForKind(externalApps, menu.file.kind, menu.file.ext).map((a) => ({
               label: `Open with ${a.name}`,
               icon: ExternalLink,
               onClick: () => {

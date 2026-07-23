@@ -69,8 +69,10 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
       : (useLibraryStore.getState().allFiles.find((f) => f.path === selectedPath) ?? null);
   const info =
     selectedFile !== null ? useLibraryStore.getState().thumbs.get(selectedFile.id)?.info : undefined;
+  // Keyed on the SELECTED file's kind, not the tab's, so a texture selected on
+  // the mixed "all" tab still shows its resolution.
   const resolution =
-    kind === "texture" && info != null && info.sourceWidth > 0
+    selectedFile?.kind === "texture" && info != null && info.sourceWidth > 0
       ? `${info.sourceWidth.toLocaleString()} × ${info.sourceHeight.toLocaleString()}`
       : null;
 

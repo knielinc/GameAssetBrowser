@@ -644,8 +644,10 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
               },
             },
             // Textures only, single-target like Show in Explorer — the OS
-            // clipboard holds one image. A material offers its face file.
-            ...(kind === "texture"
+            // clipboard holds one image. A material offers its face file. Gated
+            // on the FILE's kind, not the tab's, so it still appears for a
+            // texture browsed on the mixed "all" tab.
+            ...(menu.file.kind === "texture"
               ? [
                   {
                     label: "Copy image",
@@ -664,9 +666,10 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
               icon: BookmarkPlus,
               onClick: () => setColPopup({ x: menu.x, y: menu.y, paths: menu.paths }),
             },
-            // One entry per registered app of this kind (External apps…),
-            // single-target: an editor opens one document, not a selection.
-            ...appsForKind(externalApps, kind, menu.file.ext).map((a) => ({
+            // One entry per registered app of this file's kind (External
+            // apps…), single-target: an editor opens one document, not a
+            // selection. File kind, not tab kind, so it works on the "all" tab.
+            ...appsForKind(externalApps, menu.file.kind, menu.file.ext).map((a) => ({
               label: `Open with ${a.name}`,
               icon: ExternalLink,
               onClick: () => {

@@ -3,6 +3,7 @@ import { AudioLines } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../../stores/libraryStore";
 import { useThumbSrc } from "../../hooks/useThumbSrc";
 import { useRenderPrefs } from "../../stores/renderPrefs";
+import { usePlayerStore } from "../../stores/playerStore";
 import { toggleFavoriteSmart, useFavoritesStore } from "../../stores/favoritesStore";
 import { humanSize } from "../FileRow";
 import { formatTime } from "../player/TimeDisplay";
@@ -25,6 +26,10 @@ export default function AudioCell({ file, selected, focused }: AudioCellProps): 
   const { src, imgKey, onError, onLoad } = useThumbSrc(file, "a");
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
   const starred = useFavoritesStore((s) => s.favorites.has(file.path));
+  // Now-playing feedback, matching the list row's eq bars — otherwise the grid
+  // gives no hint which track is loaded/playing.
+  const isCurrent = usePlayerStore((s) => s.currentPath === file.path);
+  const playing = usePlayerStore((s) => s.playing);
   // Duration lands from the audio probe (durationsVersion ticks on each batch).
   useLibraryStore((s) => s.durationsVersion);
   const seconds = useLibraryStore.getState().durations.get(file.id);
@@ -56,6 +61,19 @@ export default function AudioCell({ file, selected, focused }: AudioCellProps): 
       ) : (
         <div className="flex h-full w-full items-center justify-center">
           <AudioLines size={22} className="text-kind-audio opacity-30" />
+        </div>
+      )}
+      {isCurrent && (
+        <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center rounded-full bg-[#0c0d12e6] px-1.5 py-1">
+          {playing ? (
+            <span className="eq">
+              <span />
+              <span />
+              <span />
+            </span>
+          ) : (
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+          )}
         </div>
       )}
     </AssetCell>
