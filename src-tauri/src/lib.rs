@@ -6,6 +6,7 @@ mod index;
 mod metadata;
 mod modeltex;
 mod portable;
+mod raw;
 mod scanner;
 mod spectrogram;
 mod texmeta;
