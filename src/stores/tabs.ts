@@ -1,26 +1,15 @@
-import { playerPause } from "../ipc/commands";
 import type { AssetKind } from "../types";
 import { useLibraryStore } from "./libraryStore";
-import { positionRef, usePlayerStore } from "./playerStore";
 
 /**
  * Switch the active lens.
  *
- * Leaving the Audio tab PAUSES. The player bar only exists on Audio, but the
- * Rust engine owns its own thread — unmounting the React bar does not stop
- * playback, it only removes the transport. Without this, switching tabs mid-
- * playback would leave audible, uncontrollable audio. Pausing is the honest
- * reading of "the player lives on the Audio tab".
+ * Playback is NOT paused on leaving the Audio tab: the player bar is now
+ * persistent (App renders it whenever a track is loaded, on any tab), so audio
+ * stays controllable everywhere and there's no "audible-but-uncontrollable"
+ * window to guard against. Kept as the single tab-switch choke point in case
+ * per-tab entry/exit logic is needed again.
  */
 export function switchTab(kind: AssetKind): void {
-  const lib = useLibraryStore.getState();
-  if (lib.activeTab === kind) return;
-
-  if (lib.activeTab === "audio" && usePlayerStore.getState().playing) {
-    usePlayerStore.setState({ playing: false });
-    positionRef.playing = false;
-    void playerPause();
-  }
-
-  lib.setActiveTab(kind);
+  useLibraryStore.getState().setActiveTab(kind);
 }

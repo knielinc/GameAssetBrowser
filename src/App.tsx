@@ -10,6 +10,7 @@ import { useSidebarWidth } from "./hooks/useSidebarWidth";
 import { useWindowFullscreen } from "./hooks/useWindowFullscreen";
 import { useExternalDrop } from "./hooks/useExternalDrop";
 import { addFolders, useLibraryStore } from "./stores/libraryStore";
+import { usePlayerStore } from "./stores/playerStore";
 import { usePanelPrefs } from "./stores/panelPrefs";
 
 export default function App(): ReactElement {
@@ -21,6 +22,10 @@ export default function App(): ReactElement {
   const dropHover = useExternalDrop();
   const hasRoots = useLibraryStore((s) => s.roots.length > 0);
   const activeTab = useLibraryStore((s) => s.activeTab);
+  // The player bar is persistent: shown on the Audio tab (even empty), and on
+  // any other tab whenever a track is loaded — so audio started from the All
+  // tab or a fullscreen preview stays controllable instead of playing blind.
+  const playerLoaded = usePlayerStore((s) => s.currentPath !== null);
   const leftOpen = usePanelPrefs((s) => s.left);
 
   return (
@@ -59,10 +64,9 @@ export default function App(): ReactElement {
           )}
         </main>
       </div>
-      {/* Audio tab only. The Rust engine owns its own thread, so a hidden bar
-          would mean audible-but-uncontrollable playback — switchTab() pauses
-          on the way out to keep that honest. */}
-      {activeTab === "audio" && <PlayerBar />}
+      {/* Persistent transport: always on the Audio tab, and on any other tab
+          while a track is loaded, so playback is never audible-but-hidden. */}
+      {(activeTab === "audio" || playerLoaded) && <PlayerBar />}
       {/* Drop-to-add-root. pointer-events-none: the OS drives the drag, and
           the native drop event carries the paths — the overlay is pure
           feedback and must not swallow anything. */}

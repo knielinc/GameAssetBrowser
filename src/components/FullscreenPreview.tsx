@@ -1,10 +1,13 @@
 import { useEffect, type ReactElement } from "react";
 import { AudioLines, X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
+import { audioVisibleRef, loadAndSelect, usePlayerStore } from "../stores/playerStore";
 import { useThumbSrc } from "../hooks/useThumbSrc";
 import { requestThumbs } from "../ipc/commands";
 import { humanSize } from "./FileRow";
-import { formatTime } from "./player/TimeDisplay";
+import TimeDisplay, { formatTime } from "./player/TimeDisplay";
+import TransportControls from "./player/TransportControls";
+import WaveformCanvas from "./player/WaveformCanvas";
 import type { TextureItem } from "../material/classify";
 import ModelViewport from "./model/ModelViewport";
 import ModelLightControls from "./model/ModelLightControls";
@@ -63,6 +66,14 @@ export default function FullscreenPreview({
       void requestThumbs([[file.id, file.path]]).catch(() => {});
     }
   }, [isAudio, file.id, file.path]);
+  // Load the track into the engine so the embedded transport (and waveform)
+  // control THIS file. Respects the autoplay pref, like selecting an audio row.
+  useEffect(() => {
+    if (!isAudio) return;
+    if (usePlayerStore.getState().currentPath === file.path) return;
+    const idx = audioVisibleRef.current.findIndex((f) => f.path === file.path);
+    loadAndSelect(file, idx);
+  }, [isAudio, file]);
   const audioMetaLine = ((): string => {
     if (!isAudio) return "";
     const parts: string[] = [file.ext.toUpperCase()];
@@ -151,9 +162,9 @@ export default function FullscreenPreview({
           ) : file.kind === "model" ? (
             <ModelViewport path={file.path} />
           ) : isAudio ? (
-            <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-panel shadow-e1">
-              <div className="flex max-h-full flex-col items-center gap-5 p-6">
-                <div className="aspect-square w-[min(62vh,62vw)] overflow-hidden rounded-xl bg-raised shadow-e1">
+            <div className="flex h-full w-full flex-col items-center overflow-hidden rounded-xl bg-panel shadow-e1">
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6">
+                <div className="aspect-square w-[min(52vh,52vw)] overflow-hidden rounded-xl bg-raised shadow-e1">
                   {audioThumb.src !== null ? (
                     <img
                       key={audioThumb.imgKey}
@@ -171,6 +182,16 @@ export default function FullscreenPreview({
                   )}
                 </div>
                 <div className="text-center text-[12px] tabular-nums text-dim">{audioMetaLine}</div>
+              </div>
+              {/* Full transport — the fullscreen overlay covers the docked
+                  PlayerBar, so play/seek live here while it's open. Controls the
+                  track loaded on open (see the load effect above). */}
+              <div className="flex w-full max-w-3xl shrink-0 items-center gap-5 px-4 pb-5">
+                <TransportControls />
+                <div className="h-12 min-w-0 flex-1">
+                  <WaveformCanvas />
+                </div>
+                <TimeDisplay />
               </div>
             </div>
           ) : use2D ? (
