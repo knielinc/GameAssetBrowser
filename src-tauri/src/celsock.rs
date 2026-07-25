@@ -85,7 +85,15 @@ fn ct_eq(a: &str, b: &str) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn deny(why: &str) -> ErrorResponse {
+/// Refuse a connection.
+///
+/// This LOGS, because the failure mode is otherwise invisible: the client falls
+/// back to `cels://` and everything keeps working, just slower. If a packaged
+/// build ever serves the app from an origin not in the allowlist, every socket
+/// would be refused and the only symptom would be that the transport silently
+/// stopped paying for itself. The refused origin is printed; the token never is.
+fn deny(why: &str, origin: &str) -> ErrorResponse {
+    eprintln!("[celsock] refused connection ({why}); origin={origin:?}");
     tungstenite::http::Response::builder()
         .status(403)
         .body(Some(why.to_string()))
@@ -141,7 +149,7 @@ fn serve(stream: TcpStream, app: &tauri::AppHandle, token: &str) -> Result<(), S
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
             if !origin_allowed(origin) {
-                return Err(deny("origin not allowed"));
+                return Err(deny("origin not allowed", origin));
             }
             let query = req.uri().query().unwrap_or("");
             // The browser's WebSocket constructor cannot set request headers, so
@@ -152,7 +160,7 @@ fn serve(stream: TcpStream, app: &tauri::AppHandle, token: &str) -> Result<(), S
                 .find_map(|kv| kv.strip_prefix("token="))
                 .unwrap_or("");
             if !ct_eq(supplied, token) {
-                return Err(deny("bad token"));
+                return Err(deny("bad token", origin));
             }
             *target.borrow_mut() = Some((
                 crate::percent_decode(req.uri().path().trim_start_matches('/')),
