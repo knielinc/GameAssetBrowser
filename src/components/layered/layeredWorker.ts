@@ -29,6 +29,7 @@ import {
 import { buildAdjustment } from "./adjustment";
 import { normalizeBlend } from "./blend";
 import { readCelPack } from "./celPack";
+import { receive, type CelSocket } from "./celSocket";
 import { applyMask, hasMask, maskDefault, maskStencil, toRgba8 } from "./psdMask";
 import { renderEffects, pendingEffectNames } from "./fx";
 import type { LayerKind, LayerNode, LayeredDoc } from "./types";
@@ -102,11 +103,22 @@ export interface WireCel {
 
 export type LayeredReq =
   /** Krita/Aseprite: Rust has the pixels, we only fetch them. */
-  | { id: number; kind: "art"; celsUrl: string; mergedUrl: string | null; withCels: boolean }
+  | {
+      id: number;
+      kind: "art";
+      /** Source path, for the socket — it addresses files, not URLs. */
+      path: string;
+      sock: CelSocket | null;
+      celsUrl: string;
+      mergedUrl: string | null;
+      withCels: boolean;
+    }
   /** Photoshop: parse the whole file here. */
   | {
       id: number;
       kind: "psd";
+      path: string;
+      sock: CelSocket | null;
       url: string;
       mergedUrl: string | null;
       /** Where the layer records end, for the early tree parse. */
@@ -140,6 +152,41 @@ let deferred: (() => Promise<void>) | null = null;
 
 const post =(msg: LayeredRes, transfer: Transferable[] = []): void =>
   (self as unknown as DedicatedWorkerGlobalScope).postMessage(msg, transfer);
+
+/**
+ * True until the socket transport first fails, after which every payload goes
+ * over `cels://` for the rest of the session — a doomed connect per request
+ * would cost more than the scheme it is trying to beat.
+ */
+let socketOk = true;
+
+/**
+ * One layered payload: over the loopback socket when there is one, over the
+ * `cels://` scheme otherwise.
+ *
+ * The socket measured 4-5.7x the scheme on identical payloads (see celsock.rs),
+ * but it is a strict optimization — the scheme still serves every byte if the
+ * listener never bound, if the handshake is refused, or if anything else goes
+ * wrong mid-transfer.
+ */
+async function payload(
+  sock: CelSocket | null,
+  path: string,
+  query: string,
+  url: string,
+): Promise<ArrayBuffer> {
+  if (sock !== null && socketOk) {
+    try {
+      return await receive(sock, path, query);
+    } catch (e) {
+      socketOk = false;
+      console.warn("[layered] socket transport failed, falling back to cels://", e);
+    }
+  }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} ${res.status}`);
+  return res.arrayBuffer();
+}
 
 /** Ship cels in small batches — one message per layer would be all overhead. */
 const BATCH = 8;
@@ -180,9 +227,9 @@ async function handleArt(req: Extract<LayeredReq, { kind: "art" }>): Promise<voi
   // view something pixel-exact to show meanwhile.
   if (req.mergedUrl !== null) {
     try {
-      const res = await fetch(req.mergedUrl);
-      if (res.ok && id === current) {
-        const bitmap = await createImageBitmap(await res.blob(), STRAIGHT);
+      const buf = await payload(req.sock, req.path, "what=merged", req.mergedUrl);
+      if (id === current && buf.byteLength > 0) {
+        const bitmap = await createImageBitmap(new Blob([buf]), STRAIGHT);
         if (id === current) post({ id, type: "merged", bitmap }, [bitmap]);
       }
     } catch {
@@ -191,9 +238,7 @@ async function handleArt(req: Extract<LayeredReq, { kind: "art" }>): Promise<voi
   }
   if (id !== current) return;
   const ship = async (): Promise<void> => {
-    const res = await fetch(req.celsUrl);
-    if (!res.ok) throw new Error(`cels ${res.status}`);
-    const buf = await res.arrayBuffer();
+    const buf = await payload(req.sock, req.path, "", req.celsUrl);
     if (id !== current) return;
     const sink = new CelSink(id);
     await unpackCels(buf, id, sink);
@@ -288,9 +333,13 @@ async function handlePsd(req: Extract<LayeredReq, { kind: "psd" }>): Promise<voi
   const fetchMerged = async (maxEdge: number): Promise<boolean> => {
     if (req.mergedUrl === null) return false;
     try {
-      const r = await fetch(`${req.mergedUrl}&max=${maxEdge}`);
-      if (!r.ok) return false;
-      const rec = readCelPack(await r.arrayBuffer())[0];
+      const buf = await payload(
+        req.sock,
+        req.path,
+        `what=merged&max=${maxEdge}`,
+        `${req.mergedUrl}&max=${maxEdge}`,
+      );
+      const rec = readCelPack(buf)[0];
       if (rec === undefined || id !== current) return false;
       const bitmap = await createImageBitmap(
         new ImageData(rec.pixels, rec.width, rec.height),

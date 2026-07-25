@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { schemeBase } from "../../platform";
 import { docUrl } from "../document/doc";
 import { normalizeBlend } from "./blend";
+import { celSocket } from "./celSocket";
 import type { LayerNode, LayeredDoc, Cel } from "./types";
 import { celKey } from "./types";
 import type { LayeredReq, LayeredRes } from "./layeredWorker";
@@ -179,24 +180,33 @@ export function useLayeredDoc(path: string, ext: string, wantCels = true): Layer
     };
 
     if (psd) {
-      const req: LayeredReq = {
-        id,
-        kind: "psd",
-        url: docUrl(path),
-        // Rust decodes just the composite section, downscaled — the preview
-        // shows long before the full file has even crossed into the webview.
-        mergedUrl: celsUrl(path, "?what=merged"),
-        // Lets the worker Range-fetch just the layer records for the panel.
-        prefixUrl: celsUrl(path, "?what=prefix"),
-        withCels: wantCels,
-        maxEdge: displayMaxEdge(),
-      };
-      worker.postMessage(req);
+      // The socket's coordinates have to be resolved HERE: `invoke` only exists
+      // on the main thread, and the worker cannot ask for them itself. Memoized
+      // after the first call, so this costs one IPC round-trip per session; a
+      // null result just leaves the worker on `cels://`.
+      void celSocket().then((sock) => {
+        if (cancelled || id !== reqId.current) return;
+        const req: LayeredReq = {
+          id,
+          kind: "psd",
+          path,
+          sock,
+          url: docUrl(path),
+          // Rust decodes just the composite section, downscaled — the preview
+          // shows long before the full file has even crossed into the webview.
+          mergedUrl: celsUrl(path, "?what=merged"),
+          // Lets the worker Range-fetch just the layer records for the panel.
+          prefixUrl: celsUrl(path, "?what=prefix"),
+          withCels: wantCels,
+          maxEdge: displayMaxEdge(),
+        };
+        worker.postMessage(req);
+      });
     } else {
       // Krita/Aseprite metadata comes over IPC (small JSON); the pixels come
       // over the `cels` scheme, which the worker fetches on its own thread.
-      void invoke<RawDoc>("layer_doc", { path })
-        .then((raw) => {
+      void Promise.all([invoke<RawDoc>("layer_doc", { path }), celSocket()])
+        .then(([raw, sock]) => {
           if (cancelled || id !== reqId.current) return;
           const doc: LayeredDoc = {
             width: raw.width,
@@ -214,6 +224,8 @@ export function useLayeredDoc(path: string, ext: string, wantCels = true): Layer
           const req: LayeredReq = {
             id,
             kind: "art",
+            path,
+            sock,
             celsUrl: celsUrl(path),
             mergedUrl: raw.merged ? celsUrl(path, "?what=merged") : null,
             // No usable flattened image means the cels ARE the picture.
