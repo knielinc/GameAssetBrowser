@@ -63,6 +63,25 @@ const COARSE_EDGE = 1024;
 /** Longest edge of the sharp preview that replaces it. */
 const SHARP_EDGE = 2560;
 
+/**
+ * Above this file size the whole-document parse is skipped.
+ *
+ * `readPsd` needs the entire file as ONE ArrayBuffer, and materializing a large
+ * one in the webview fails fatally rather than throwing: a 1.81 GB document
+ * takes the WebView2 process down (exit `0xe0000008`), so there is no exception
+ * to catch and degrade from — the guard has to come first. A 512 MiB fetch
+ * completes normally, so the real ceiling is somewhere between the two; this
+ * errs low, because bytes also cross into the webview at only ~57 MB/s and even
+ * 512 MiB is nine seconds of transfer for pixels no screen can resolve.
+ *
+ * Past the limit the document still OPENS: Rust's downscaled composite is the
+ * image, and the Range-parsed prefix is the layer tree. Only per-layer
+ * compositing is given up — which is exactly what `layered: false` means, and
+ * the view already handles it (falls back to the flattened image, disables the
+ * eye toggles, skips the background cel prefetch).
+ */
+const FULL_PARSE_LIMIT = 768 * 1024 * 1024;
+
 /** A cel on the wire: same as `Cel`, and the bitmap is transferred. */
 export interface WireCel {
   layer: number;
@@ -334,11 +353,14 @@ async function handlePsd(req: Extract<LayeredReq, { kind: "psd" }>): Promise<voi
   // the reader's internal offsets still line up; it never reads past the records
   // with layer image data skipped.
   let early: ReturnType<typeof docFrom> | null = null;
+  /** The document's size on disk, as reported alongside the prefix length. */
+  let totalBytes = 0;
   if (req.prefixUrl !== null) {
     try {
       const pr = await fetch(req.prefixUrl);
       if (pr.ok) {
         const [prefixLen, totalLen] = (await pr.text()).split(" ").map(Number);
+        if (Number.isFinite(totalLen)) totalBytes = totalLen;
         if (Number.isFinite(prefixLen) && prefixLen > 0 && prefixLen < totalLen) {
           const head = await fetch(req.url, { headers: { Range: `bytes=0-${prefixLen - 1}` } });
           const headBuf = await head.arrayBuffer();
@@ -354,6 +376,9 @@ async function handlePsd(req: Extract<LayeredReq, { kind: "psd" }>): Promise<voi
               useImageData: true,
             });
             early = docFrom(tree as PsdLike, rustMerged);
+            // Past the limit this prefix parse is the FINAL tree, and nothing
+            // downstream will ever supply per-layer pixels to go with it.
+            if (totalLen > FULL_PARSE_LIMIT) early.doc.layered = false;
             post({ id, type: "doc", doc: early.doc });
           }
         }
@@ -364,6 +389,18 @@ async function handlePsd(req: Extract<LayeredReq, { kind: "psd" }>): Promise<voi
     }
   }
   if (id !== current) return;
+
+  // Stop BEFORE the whole-file fetch when the document is too big to hold: at
+  // this size it is fatal rather than slow (see FULL_PARSE_LIMIT). The composite
+  // and the layer tree are already on screen, so this degrades instead of dying.
+  if (totalBytes > FULL_PARSE_LIMIT) {
+    const mb = Math.round(totalBytes / 1048576);
+    if (early === null) {
+      throw new Error(`document is ${mb} MB and its layer records could not be read`);
+    }
+    console.warn(`[layered] ${mb} MB document: flattened composite only, per-layer pixels skipped`);
+    return;
+  }
 
   const res = await fetch(req.url);
   if (!res.ok) throw new Error(`psd ${res.status}`);
