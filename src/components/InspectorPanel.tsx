@@ -6,7 +6,7 @@ import type { TextureItem } from "../material/classify";
 import ModelInspector from "./model/ModelInspector";
 import TextureInspector from "./texture/TextureInspector";
 import SpriteArtInspector from "./texture/SpriteArtInspector";
-import { isSpriteArt } from "./texture/SpriteArtView";
+import { isSpriteArt } from "./layered/useLayeredDoc";
 import DocumentInspector from "./document/DocumentInspector";
 import AudioInspector from "./audio/AudioInspector";
 import { docIsPsd } from "./document/doc";

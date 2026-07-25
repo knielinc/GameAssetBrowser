@@ -57,7 +57,8 @@ export function docIsTextual(ext: string): boolean {
   return f === "markdown" || f === "text";
 }
 
-/** Photoshop documents — parsed in-browser with a layer show/hide panel. */
+/** Photoshop documents — parsed in a worker and shown by the shared layered-art
+ *  view (see src/components/layered), alongside Krita and Aseprite. */
 export function docIsPsd(ext: string): boolean {
   return docFormat(ext) === "psd";
 }

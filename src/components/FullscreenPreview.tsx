@@ -13,7 +13,8 @@ import ModelViewport from "./model/ModelViewport";
 import ModelLightControls from "./model/ModelLightControls";
 import TexturePreview, { type MeshMode } from "./texture/TexturePreview";
 import Sprite2DView from "./texture/Sprite2DView";
-import SpriteArtView, { isSpriteArt } from "./texture/SpriteArtView";
+import LayeredView from "./layered/LayeredView";
+import { isSpriteArt } from "./layered/useLayeredDoc";
 import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
 import { isFloatPreview } from "../model/loadModel";
 import { keysForFile, keysForMaterial } from "./texture/TextureInspector";
@@ -173,7 +174,7 @@ export default function FullscreenPreview({
             </div>
           ) : file.kind === "texture" && isSpriteArt(file.ext) ? (
             <div className="flex h-full w-full flex-col overflow-hidden rounded-xl bg-panel shadow-e1">
-              <SpriteArtView key={file.path} path={file.path} />
+              <LayeredView key={file.path} path={file.path} ext={file.ext} />
             </div>
           ) : file.kind === "model" ? (
             <ModelViewport path={file.path} />

@@ -5,7 +5,7 @@ import "github-markdown-css/github-markdown-dark.css";
 import { docFormat, docUrl } from "./doc";
 import { useDocView } from "../../stores/docView";
 import PdfView from "./PdfView";
-import PsdView from "./PsdView";
+import LayeredView from "../layered/LayeredView";
 import EbookView from "./EbookView";
 
 /**
@@ -175,6 +175,6 @@ export default function DocumentPreview({
   if (fmt === "text") return <TextView path={path} scale={scale} full={full} />;
   if (fmt === "pdf") return <PdfView path={path} autoFocus={autoFocusPdf} />;
   if (fmt === "ebook") return <EbookView path={path} autoFocus={autoFocusPdf} />;
-  if (fmt === "psd") return <PsdView path={path} />;
+  if (fmt === "psd") return <LayeredView path={path} ext={ext} />;
   return <Centered>No in-app preview for “.{ext}” yet.</Centered>;
 }

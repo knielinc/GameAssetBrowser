@@ -18,6 +18,8 @@
 //   copy_image_to_clipboard { path: string }            // decode to RGBA and put on the OS clipboard; rejects on failure
 //   open_with           { exe: string, path: string }   // spawn a registered external app, detached; rejects on spawn error
 //   settings_store_path {}                              → Promise<string> (absolute settings.json path, portable-aware)
+//   layer_doc           { path: string }                → Promise<LayerDoc> (kra/aseprite layer tree + frames + tags,
+//                                                          METADATA ONLY — pixels come over the `cels://` scheme)
 
 import { schemeBase } from "./platform";
 
@@ -168,6 +170,12 @@ export function thumbUrl(key: string): string {
 export function texUrl(key: string): string {
   return `${schemeBase("tex")}/${key}`;
 }
+
+// Layered art pixels (Krita/Aseprite) come over the `cels://` scheme rather
+// than IPC: `cels://<path>` is one raw-RGBA pack of every cel in the document
+// and `cels://<path>?what=merged` is the file's own flattened PNG. The URL is
+// built in src/components/layered/useLayeredDoc.ts, next to the code that reads
+// the pack.
 
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4a"] as const;
 export type AudioExt = (typeof AUDIO_EXTENSIONS)[number];

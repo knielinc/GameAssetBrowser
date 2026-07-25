@@ -1,0 +1,10 @@
+[package]
+name = "psdcomp"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# No dependencies on purpose: this is a self-contained reader so it can be
+# compiled at opt-level 3 in dev builds (see the profile override in the parent
+# manifest) without dragging anything else along.
+[dependencies]

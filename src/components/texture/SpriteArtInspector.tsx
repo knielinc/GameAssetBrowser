@@ -2,7 +2,7 @@ import { type ReactElement } from "react";
 import { X } from "lucide-react";
 import { basename } from "../../stores/libraryStore";
 import { humanSize } from "../FileRow";
-import SpriteArtView from "./SpriteArtView";
+import LayeredView from "../layered/LayeredView";
 
 export interface SpriteArtInspectorProps {
   path: string | null;
@@ -37,7 +37,7 @@ export default function SpriteArtInspector({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col border-b border-bg">
-            <SpriteArtView key={path} path={path} />
+            <LayeredView key={path} path={path} ext={ext ?? ""} />
           </div>
           <div className="shrink-0 p-3">
             <div className="break-words text-[14px] font-semibold tracking-tight">{basename(path)}</div>

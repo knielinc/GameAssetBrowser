@@ -3,6 +3,7 @@ mod audio_probe;
 mod dupes;
 mod explorer;
 mod index;
+mod layered;
 mod metadata;
 mod modeltex;
 mod portable;
@@ -368,6 +369,55 @@ pub fn run() {
                 }
             });
         })
+        // Per-layer pixels for the layered-art preview (Krita/Aseprite): every
+        // cel of the document in ONE raw-RGBA pack (see layered::pack_cels), or
+        // the document's own flattened PNG with ?what=merged.
+        //
+        // Same reasoning as tex:// — a 200-layer .kra used to arrive as 200
+        // base64 PNG data URLs inside a JSON reply, which cost a deflate per
+        // layer in Rust and a PNG decode per layer in the webview. Here WebView2
+        // streams the bytes on its own thread and a worker turns each record
+        // into an ImageBitmap. URL shape mirrors doc://:
+        // http://cels.localhost/C:/Art/hero.kra
+        .register_asynchronous_uri_scheme_protocol("cels", |ctx, req, responder| {
+            let app = ctx.app_handle().clone();
+            let uri = req.uri().clone();
+            std::thread::spawn(move || {
+                let path = percent_decode(uri.path().trim_start_matches('/'));
+                let query = uri.query().unwrap_or("");
+                let merged = query.contains("what=merged");
+                // `max=<px>` caps the longest edge of the flattened image. The
+                // view asks for a small one first (near-instant) and a sharp one
+                // after; the reader's cost scales with what is asked for.
+                let max_edge = query
+                    .split('&')
+                    .find_map(|kv| kv.strip_prefix("max="))
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(2560)
+                    .clamp(64, 8192);
+                let bytes = if query.contains("what=prefix") {
+                    layered::psd_prefix(&app, &path).map(|b| (b, "text/plain"))
+                } else if merged {
+                    layered::merged_bytes(&app, &path, max_edge)
+                } else {
+                    layered::cel_pack(&app, &path).map(|b| (b, "application/octet-stream"))
+                };
+                let resp = match bytes {
+                    Some((b, mime)) => tauri::http::Response::builder()
+                        .header("Content-Type", mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(b),
+                    None => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Vec::new()),
+                };
+                match resp {
+                    Ok(r) => responder.respond(r),
+                    Err(e) => eprintln!("[cels] response build failed: {e}"),
+                }
+            });
+        })
         // Full-resolution texture previews for formats the browser can't decode
         // (HDR/EXR/DDS/TGA/…). The grid stays on the 256px thumb; the preview
         // panel and 3D surface fetch the real pixels here, decoded + tone-mapped
@@ -507,8 +557,7 @@ pub fn run() {
             pdf_range,
             scanner::start_scan,
             thumbs::request_thumbs,
-            thumbs::sprite_data,
-            thumbs::sprite_cels,
+            layered::layer_doc,
             thumbs::model_thumb_lookup,
             thumbs::model_thumb_store,
             modeltex::model_texture_hints,
