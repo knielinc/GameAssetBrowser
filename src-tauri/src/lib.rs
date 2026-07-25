@@ -1,5 +1,6 @@
 mod audio;
 mod audio_probe;
+mod celsock;
 mod dupes;
 mod explorer;
 mod index;
@@ -214,7 +215,7 @@ fn mime_for(path: &std::path::Path) -> &'static str {
 /// (`wood%20wall.png`); MTL and FBX emit raw names with literal spaces. A
 /// malformed `%` sequence is left as-is rather than throwing, because a
 /// filename containing a bare `%` is legal on Windows.
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -506,6 +507,16 @@ pub fn run() {
             // app's whole lifetime; it only ever hears from us via `rx`.
             audio::engine::spawn(app.handle().clone(), rx);
 
+            // Loopback WebSocket transport (see celsock). Strictly additive: the
+            // `cels://` scheme below still serves everything, so a bind failure
+            // costs throughput and nothing else.
+            match celsock::start(app.handle().clone()) {
+                Ok(sock) => {
+                    app.manage(sock);
+                }
+                Err(e) => eprintln!("[celsock] disabled, falling back to cels://: {e}"),
+            }
+
             let data_home = portable::resolve(app)?;
             portable::migrate_legacy_settings(app, &data_home);
             // Redirecting the WebView2 profile only applies to portable copies
@@ -549,6 +560,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            celsock::cel_socket,
             portable::settings_store_path,
             portable::settings_export,
             portable::settings_import,

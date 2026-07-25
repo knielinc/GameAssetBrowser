@@ -177,6 +177,17 @@ tauri-plugin-drag = "2"
 # DDS/TGA/EXR pastes into any editor without an export step.
 arboard = "3"
 lofty = "0.24.0"
+# Loopback WebSocket transport for layered-art payloads (celsock.rs). Sync API
+# on std threads, matching how the scheme handlers already work — no tokio
+# runtime is introduced. default-features off drops the TLS stacks (rustls,
+# native-tls, webpki-roots): the listener is 127.0.0.1-only and never speaks
+# TLS. `handshake` is the one feature we do need — it carries the RFC 6455
+# upgrade, and with it the Origin/token check that gates every connection.
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+# The per-launch socket token. A CSPRNG is the point: a guessable token would
+# make the Origin allowlist the only thing standing between a local process and
+# the user's asset library.
+getrandom = "0.4.3"
 
 # Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs).
 # Same 0.61 tauri/tao already use, so no new crate in the tree.

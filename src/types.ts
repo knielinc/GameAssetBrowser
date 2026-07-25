@@ -20,6 +20,9 @@
 //   settings_store_path {}                              → Promise<string> (absolute settings.json path, portable-aware)
 //   layer_doc           { path: string }                → Promise<LayerDoc> (kra/aseprite layer tree + frames + tags,
 //                                                          METADATA ONLY — pixels come over the `cels://` scheme)
+//   cel_socket          {}                              → Promise<CelSocket | null> (loopback WebSocket coordinates for
+//                                                          layered payloads; null when the listener failed to bind and
+//                                                          callers should stay on `cels://`. See celsock.rs.)
 
 import { schemeBase } from "./platform";
 
