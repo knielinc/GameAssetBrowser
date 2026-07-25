@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import clsx from "clsx";
-import { AppWindow, BarChart3, Check, CopyCheck, Settings } from "lucide-react";
+import { AppWindow, BarChart3, Check, CopyCheck, Info, Settings } from "lucide-react";
 import { MAX_SCALE, MIN_SCALE, THEMES, useThemeStore } from "../stores/theme";
+import AboutModal from "./AboutModal";
 import DuplicatesModal from "./DuplicatesModal";
 import ExternalAppsModal from "./ExternalAppsModal";
 import StatsModal from "./StatsModal";
@@ -22,6 +23,7 @@ export default function SettingsMenu(): ReactElement {
   const [showDupes, setShowDupes] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showApps, setShowApps] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const themeId = useThemeStore((s) => s.themeId);
   const setTheme = useThemeStore((s) => s.setTheme);
@@ -158,12 +160,30 @@ export default function SettingsMenu(): ReactElement {
             <AppWindow size={13} className="shrink-0 text-faint" />
             External apps…
           </button>
+
+          <div className="mb-1.5 mt-4 text-[10px] font-medium uppercase tracking-wide text-faint">
+            App
+          </div>
+          {/* Build stamp + the licensing this ships under, including the
+              third-party attributions the MIT/Apache-2.0 notices require. */}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            onClick={() => {
+              setOpen(false);
+              setShowAbout(true);
+            }}
+          >
+            <Info size={13} className="shrink-0 text-faint" />
+            About…
+          </button>
         </div>
       )}
 
       {showDupes && <DuplicatesModal onClose={() => setShowDupes(false)} />}
       {showStats && <StatsModal onClose={() => setShowStats(false)} />}
       {showApps && <ExternalAppsModal onClose={() => setShowApps(false)} />}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </div>
   );
 }

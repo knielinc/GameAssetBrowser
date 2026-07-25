@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "signCommand": {
+        "cmd": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$d=(Get-Location).Path; while($d){$c=Join-Path $d 'scripts\\sign.ps1'; if(Test-Path $c){& $c '%1'; exit $LASTEXITCODE}; $d=Split-Path $d -Parent}; Write-Error 'scripts/sign.ps1 not found above the build directory'; exit 1"
+        ]
+      }
+    }
+  }
+}

@@ -138,12 +138,17 @@ export default function StatsModal({ onClose }: { onClose: () => void }): ReactE
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 p-6"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[80vh] w-[600px] flex-col rounded-xl bg-raised shadow-e2">
+      {/* max-h-FULL, not max-h-[80vh]: the UI-scale setting applies `zoom` to
+          documentElement (stores/theme), and viewport units are scaled by zoom
+          on top of resolving against the viewport — so at 125% an 80vh box
+          fills 100% of the visible height and clips its own header. A
+          percentage of this fixed inset-0 parent is zoom-correct. */}
+      <div className="flex max-h-full w-[600px] max-w-full flex-col rounded-xl bg-raised shadow-e2">
         <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-3">
           <span className="text-[13px] font-medium">Library statistics</span>
           <span className="text-[11px] tabular-nums text-dim">

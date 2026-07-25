@@ -36,6 +36,19 @@ $dest = Join-Path $exportDir "GameAssetBrowser.exe"
 
 Copy-Item $builtExe $dest -Force
 
+# Sign after copying, so the signature covers the file we actually ship. No-ops
+# with a warning when GAB_SIGN_METHOD is unset (see scripts/sign.ps1).
+& (Join-Path $PSScriptRoot "sign.ps1") $dest
+
+# The MIT/Apache-2.0 notices have to travel with the binary, and a portable
+# single-exe drop has no installer to carry them - so the attribution file ships
+# beside it. Regenerated here rather than trusted to be current: a stale
+# attribution file is a license violation that looks like compliance.
+Write-Host "Regenerating third-party attributions..." -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot "gen-third-party.ps1")
+Copy-Item (Join-Path $root "THIRD-PARTY-LICENSES.md") $exportDir -Force
+Copy-Item (Join-Path $root "LICENSE.md") $exportDir -Force
+
 $sizeMB = "{0:N1}" -f ((Get-Item $dest).Length / 1MB)
 "Game Asset Browser $version ($commit) - exported $(Get-Date -Format 'yyyy-MM-dd HH:mm')" |
     Out-File -FilePath (Join-Path $exportDir "VERSION.txt") -Encoding utf8

@@ -26,6 +26,24 @@ permissions:
   contents: write
 
 jobs:
+  # Cheap gate first: a typecheck or unit-test failure should not cost three
+  # 45-minute platform builds to discover. The attribution check needs extracted
+  # crate sources, so it runs in the Windows build job instead (see below).
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test
+
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -52,7 +70,7 @@ jobs:
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: version
+    needs: [check, version]
     strategy:
       fail-fast: false
       matrix:
@@ -103,10 +121,23 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Stamp release version into tauri.conf.json
+      # Both files, not just tauri.conf.json: the installer version comes from
+      # the Tauri config, but the About dialog's build stamp is baked in from
+      # package.json by vite.config.ts. Stamping one and not the other ships an
+      # installer and an app that disagree about what version they are.
+      - name: Stamp release version
         shell: bash
         run: |
-          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version='${{ needs.version.outputs.version }}';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');console.log('app version ->',j.version)"
+          node -e "
+            const fs = require('fs');
+            const v = '${{ needs.version.outputs.version }}';
+            for (const p of ['src-tauri/tauri.conf.json', 'package.json']) {
+              const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+              j.version = v;
+              fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+              console.log(p, '->', v);
+            }
+          "
 
       - name: Install frontend dependencies
         run: npm ci
@@ -115,8 +146,29 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Windows code signing. scripts/sign.ps1 is invoked per-binary via the
+          # signCommand in src-tauri/tauri.windows.conf.json (auto-merged on
+          # Windows), and no-ops when GAB_SIGN_METHOD is unset — so an
+          # unconfigured repo still produces working, unsigned installers.
+          GAB_SIGN_METHOD: ${{ secrets.GAB_SIGN_METHOD }}
+          GAB_SIGN_ENDPOINT: ${{ secrets.GAB_SIGN_ENDPOINT }}
+          GAB_SIGN_ACCOUNT: ${{ secrets.GAB_SIGN_ACCOUNT }}
+          GAB_SIGN_PROFILE: ${{ secrets.GAB_SIGN_PROFILE }}
+          GAB_SIGN_THUMBPRINT: ${{ secrets.GAB_SIGN_THUMBPRINT }}
+          GAB_SIGN_COMMAND: ${{ secrets.GAB_SIGN_COMMAND }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         with:
           args: ${{ matrix.args }}
+
+      # After the build, so the crate sources the generator reads are extracted
+      # in the registry cache. Fails the release if a dependency changed without
+      # THIRD-PARTY-LICENSES.md being regenerated — stale attributions look like
+      # compliance while not being it.
+      - name: Verify third-party attributions are current
+        if: matrix.platform == 'windows-latest'
+        run: npm run licenses:check
 
       - name: Stage itch.io uploads
         shell: bash
@@ -141,6 +193,10 @@ jobs:
               [ -n "$m" ] && cp "$m" "itch/GameAssetBrowser.dmg" || echo "no .dmg"
               ;;
           esac
+          # The MIT/Apache-2.0 notices have to travel with the binary. The app
+          # also embeds them (About → Show full attributions), but a plain file
+          # beside the download is what a compliance reviewer looks for.
+          cp THIRD-PARTY-LICENSES.md LICENSE.md itch/ 2>/dev/null || true
           ls -la itch
 
       - name: Upload itch staging artifact

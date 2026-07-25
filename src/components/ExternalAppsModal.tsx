@@ -111,12 +111,14 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 p-6"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[80vh] w-[480px] flex-col rounded-xl bg-raised shadow-e2">
+      {/* max-h-full rather than 80vh — see the note in StatsModal: the UI-scale
+          `zoom` makes viewport units overflow the visible area. */}
+      <div className="flex max-h-full w-[480px] max-w-full flex-col rounded-xl bg-raised shadow-e2">
         <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-3">
           <span className="text-[13px] font-medium">External apps</span>
           <span className="text-[11px] text-dim">shown as "Open with…" per kind</span>

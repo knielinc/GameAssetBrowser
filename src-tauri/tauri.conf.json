@@ -19,6 +19,14 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "knielinc",
+    "copyright": "Copyright (c) 2026 knielinc",
+    "shortDescription": "Browse audio, texture, model, and document libraries",
+    "longDescription": "A fast desktop browser for large asset libraries. Preview audio, textures and PBR materials, 3D models, and documents in one window, with native decoding, faceted filtering, and drag-out to your engine or DAW.",
+    "licenseFile": "../LICENSE.md",
+    "resources": {
+      "../THIRD-PARTY-LICENSES.md": "THIRD-PARTY-LICENSES.md"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -29,7 +37,20 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "German"],
+        "displayLanguageSelector": false
       }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
     }
   }
 }

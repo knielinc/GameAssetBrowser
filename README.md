@@ -1,18 +1,19 @@
 # Game Asset Browser
 
-A fast, dark‑mode desktop browser for game asset libraries — **audio, textures, and 3D
-models in one place**, with instant preview and without opening a game engine. Built for
-big packs (Synty, ambientCG / freestylized, Megascans, HDRIs, Kenney, SFX libraries) where
-your file explorer gives up and the engine importer is too slow to browse.
+A fast, dark‑mode desktop browser for game asset libraries — **audio, textures, 3D models,
+and documents in one place**, with instant preview and without opening a game engine. Built
+for big packs (Synty, ambientCG / freestylized, Megascans, HDRIs, Kenney, SFX libraries)
+where your file explorer gives up and the engine importer is too slow to browse.
 
 <p align="center">
   <img src="docs/textures.png" alt="Texture grid with material grouping and a live 3D material preview" width="920">
 </p>
 
-One library, three lenses. The sidebar folder tree, collections, search, and filters are
-shared; each tab (Audio, Textures, Models) adds the preview and facets that make sense for
-that kind. Scanning streams in batches, decoding happens natively in Rust, and everything
-you filter or sort is derived in-memory — 20k+ file libraries stay smooth.
+One library, four lenses. The sidebar folder tree, collections, search, and filters are
+shared; each tab (Audio, Textures, Models, Documents) adds the preview and facets that make
+sense for that kind, and an **All** tab shows every kind at once. Scanning streams in
+batches, decoding happens natively in Rust, and everything you filter or sort is derived
+in-memory — 20k+ file libraries stay smooth.
 
 ---
 
@@ -32,6 +33,8 @@ you filter or sort is derived in-memory — 20k+ file libraries stay smooth.
   **copy image to clipboard**, and **"Open with…"** your own external tools.
 - **Persistent, portable‑aware settings** with import/export, custom window chrome, and a
   cohesive dark theme.
+- **About dialog** (settings menu) with the exact version, commit, and build date, plus the
+  full third‑party attributions embedded in the app itself.
 
 ### Audio
 <p align="center">
@@ -48,6 +51,14 @@ you filter or sort is derived in-memory — 20k+ file libraries stay smooth.
 ### Textures & materials
 - GPU‑accelerated thumbnail grid, decoding `png` `jpg` `bmp` `tga` `dds` `tif` `exr` `hdr`
   `gif` `webp` natively.
+- **Layered art** — `psd`/`psb`, Krita `kra`, and Aseprite `ase`/`aseprite` render from
+  their composite, and Krita/Aseprite additionally expose the **layer tree, frames, and
+  tags**, so you can toggle layers and step animation frames without opening the editor.
+- **Camera RAW** — `cr2` `cr3` `nef` `arw` `dng` `raf` `orf` `rw2` and friends, decoded
+  from the embedded preview each file carries (fast, and no demosaic pipeline to maintain).
+- Affinity `afphoto` / `afdesign` / `afpub` show their embedded preview image. Read‑only
+  and unaffiliated with Serif — the layer data in current Affinity versions is not
+  documented, so only the preview is available.
 - **Material grouping**: loose PBR maps (`Rock_D` + `Rock_N` + `Rock_ORM`…) collapse into a
   single material, with channel roles resolved **per group** (base color, normal,
   roughness, metallic, AO, height, …).
@@ -61,9 +72,15 @@ you filter or sort is derived in-memory — 20k+ file libraries stay smooth.
   <img src="docs/models.png" alt="Model grid with rendered thumbnails and a live three.js viewport" width="920">
 </p>
 
-- three.js viewport for **glTF/GLB, FBX, OBJ, DAE, STL, PLY** — rendered thumbnails in the
-  grid and a live **orbit / pan / zoom** preview with lighting presets.
+- three.js viewport for **glTF/GLB, FBX, OBJ, DAE, 3DS, STL, PLY** — rendered thumbnails in
+  the grid and a live **orbit / pan / zoom** preview with lighting presets.
 - Geometry inspector: triangles, vertices, meshes, materials, and file size at a glance.
+
+### Documents
+- Reference material lives with the art it belongs to: **PDF**, Markdown, and plain text,
+  plus **ebooks** (`epub`, `mobi`, `azw3`, `fb2`) and **comics** (`cbz`).
+- Paged or scrolling PDF layout, adjustable reading width and text settings for reflowable
+  formats, and your place is kept when you change them.
 
 ---
 
@@ -99,7 +116,55 @@ npm run tauri build    # produce a release build + installer for the current OS
 
 Tauri can't cross‑compile — build each OS on that OS (or in CI, one runner per target).
 On Windows, `npm run export` also drops a standalone, portable `GameAssetBrowser.exe` into
-`export/`.
+`export/`, alongside the license and attribution files.
+
+### Releasing
+
+| Command | What it does |
+| --- | --- |
+| `npm run licenses` | Regenerate `THIRD-PARTY-LICENSES.md` from the cargo + npm trees |
+| `npm run licenses:check` | Fail if that file is out of date (used by CI) |
+| `npm run export` | Portable single‑exe build (regenerates attributions, signs if configured) |
+| `npm run release` | Full installer build (MSI + NSIS), signed if configured |
+
+**CI.** `.github/workflows/release.yml` is a manual `workflow_dispatch` release to itch.io
+(`kniti/gab`). It computes the next patch version from the latest `vX.Y.Z` tag, runs a cheap
+typecheck + unit‑test gate before spending three platform builds, builds Windows / macOS
+(universal) / Linux, verifies the attribution file is current, uploads via `butler`, and
+tags the released version. Without a `BUTLER_API_KEY` secret it still builds — it just skips
+the upload and the tag.
+
+The release version is stamped into **both** `tauri.conf.json` (the installer's version) and
+`package.json` (the build stamp the About dialog shows), so the two can't disagree.
+
+**Code signing.** Unsigned Windows binaries trip SmartScreen, and Smart App Control blocks
+them outright (the `os error 4551` noted in `src-tauri/Cargo.toml`). `src-tauri/tauri.windows.conf.json`
+is merged automatically into every Windows build and points Tauri's `signCommand` at
+`scripts/sign.ps1`, which is driven entirely by environment variables — an unconfigured
+machine still builds, it just builds unsigned and says so. Set `GAB_SIGN_METHOD` to
+`trustedsigning` (Azure Trusted Signing — cheapest sane option for a solo dev, no hardware
+token), `signtool` (an OV/EV cert on a token or in the cert store), or `custom` (any other
+cloud‑HSM provider); see the header of `scripts/sign.ps1` for the variables each one needs.
+In CI the same variables come from repository secrets.
+
+**Installers.** NSIS installs **per‑user** (`installMode: currentUser`) so there is no UAC
+prompt — an admin elevation on first run costs more conversions than a per‑machine install
+is worth. English and German, no language picker.
+
+**Attributions.** Generated, not hand‑written — rerun `npm run licenses` whenever
+dependencies change. It emits three artifacts:
+
+| Artifact | Size | Consumer |
+| --- | --- | --- |
+| `THIRD-PARTY-LICENSES.md` | ~2.1 MB | Humans / compliance review; bundled + shipped beside the portable exe |
+| `src/generated/thirdParty.json` | ~52 KB | The About dialog's component list |
+| `src/generated/thirdPartyTexts.json` | ~2.1 MB | Individual license texts, fetched only on expand |
+
+The generator detects the workspace's own crates structurally (a `Cargo.lock` entry with no
+`source` is local), so adding another path crate needs no edit, and it fails loudly on any
+dependency with a copyleft, noncommercial, or missing license. The notices ship embedded in
+the binary (Settings → **About** → *Third-party licenses*), as a bundled installer resource,
+and as a file beside the portable exe.
 
 ## Keyboard shortcuts
 
@@ -131,7 +196,23 @@ On Windows, `npm run export` also drops a standalone, portable `GameAssetBrowser
 
 ## License
 
-Source‑available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): free to
-use, modify, and share for **any noncommercial purpose** — personal, private, hobby,
-study, research — but **not for commercial use**. This is a source‑available license, not
-an OSI "open source" one (those permit commercial use).
+Source‑available under the [Game Asset Browser License 1.0.0](LICENSE.md) — source‑available,
+not open source:
+
+- **Use it for any purpose, including commercially.** Hobby, freelance, and studio production
+  are all permitted, for individuals and companies alike. There is no separate commercial
+  license to buy.
+- **Build it yourself and modify it** to suit your needs.
+- **Everything you make with it is yours** — the license reaches the software only, never your
+  artwork, audio, models, or documents.
+- **You may not redistribute or resell it**, modified or not, free or paid.
+
+Ready‑to‑run builds are sold; building from source is a permitted alternative, not a
+loophole.
+
+Third‑party components are listed with their licenses in
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). Every dependency is permissively
+licensed (MIT / Apache‑2.0 / BSD / ISC / Zlib / MPL‑2.0); nothing in the tree is GPL, AGPL,
+or otherwise restricts commercial distribution. The MPL‑2.0 components (the symphonia audio
+decoders and the cssparser family) are used unmodified, so pointing at their upstream source
+is all MPL §3.2 asks for.

@@ -1,3 +1,5 @@
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -5,6 +7,30 @@ import postcss from "postcss";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+
+// Build stamp shown in the About dialog. The version comes from package.json
+// rather than tauri.conf.json because CI bumps both from the same tag, and the
+// frontend already has package.json on hand. Every lookup is best-effort: a
+// source tarball with no .git must still build.
+function buildStamp(): { version: string; commit: string; date: string } {
+  let version = "0.0.0";
+  try {
+    version = (JSON.parse(readFileSync("package.json", "utf8")) as { version: string }).version;
+  } catch {
+    /* keep the placeholder */
+  }
+  let commit = "unknown";
+  try {
+    commit = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+  } catch {
+    /* not a git checkout */
+  }
+  // Date only, not a timestamp: it lands in the binary, and a per-second stamp
+  // would make otherwise identical builds differ for no user-visible benefit.
+  return { version, commit, date: new Date().toISOString().slice(0, 10) };
+}
 
 // Tailwind v4 emits its ENTIRE stylesheet inside cascade layers — theme/base in
 // their own layers and every utility inside `@layer utilities`. Cascade layers
@@ -75,6 +101,12 @@ function flattenCascadeLayersPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss(), flattenCascadeLayersPlugin()],
+
+  // Compile-time constants for the About dialog (see src/buildInfo.ts). JSON
+  // -stringified because `define` performs a raw textual substitution.
+  define: {
+    __BUILD_STAMP__: JSON.stringify(buildStamp()),
+  },
 
   // The model-thumbnail worker (modelThumbWorker.ts) dynamically imports three's
   // loaders, i.e. it code-splits. Vite's default worker format is `iife`, which

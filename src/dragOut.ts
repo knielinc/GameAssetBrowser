@@ -2,7 +2,34 @@
 // file drag (tauri-plugin-drag), so assets drop straight into Explorer, a
 // DAW, or a game engine.
 
-import { startDrag } from "@crabnebula/tauri-plugin-drag";
+import { Channel, invoke } from "@tauri-apps/api/core";
+
+/**
+ * The `plugin:drag|start_drag` binding, inlined rather than taken from
+ * `@crabnebula/tauri-plugin-drag`.
+ *
+ * The npm package ships no `license` field and no LICENSE file, so it is an
+ * artifact with no granted rights at all — not something to redistribute in a
+ * build we sell. The Rust half (the `tauri-plugin-drag` crate,
+ * which does the actual work) is properly licensed Apache-2.0 OR MIT and stays.
+ * Since the JS half was only ever this one `invoke` wrapper, reimplementing it
+ * against the plugin's stable IPC command drops the unlicensed artifact from the
+ * bundle without losing anything.
+ *
+ * Resolves when the OS drag ENDS (drop or cancel). `on_event` is NOT an
+ * `Option` on the Rust side, so the channel is required even though we never
+ * read the drop result — omitting it fails deserialization and the drag never
+ * starts. `options` IS optional and `mode` is `#[serde(default)]`, so the empty
+ * object selects the default (copy).
+ */
+function startDrag(options: { item: string[]; icon: string }): Promise<void> {
+  return invoke("plugin:drag|start_drag", {
+    item: options.item,
+    image: options.icon,
+    options: {},
+    onEvent: new Channel(),
+  });
+}
 
 /** Movement (px) before a press becomes a drag. Under this, the gesture stays
  *  a click for the row/cell handlers — same order of magnitude as the OS drag
