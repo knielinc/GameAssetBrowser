@@ -1,0 +1,102 @@
+[package]
+# Throwaway spike, not a product: does the native path beat the webview? It is
+# gitignored on main (see .gitignore) and depends on the shipping crate only
+# through two leaf crates it does not modify.
+name = "gab-native-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "gab_native_spike"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gab-native-spike"
+path = "src/main.rs"
+
+# Answers the decisive question (custom wgpu content on macOS) without a display,
+# so a macos-latest CI runner can settle it. See src/headless.rs.
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"
+
+# Synthetic library for scale testing. See its header for why the numbers it
+# produces are weaker evidence than a real pack.
+[[bin]]
+name = "genlib"
+path = "src/bin/genlib.rs"
+
+[dependencies]
+# default-features off drops glow (we want the wgpu path exclusively — it is the
+# whole point of the spike) and accesskit. `wgpu` re-exports through eframe, so
+# wgpu and egui-wgpu are NOT direct deps: that makes a version mismatch between
+# our pipeline types and egui's renderer impossible.
+eframe = { version = "0.35", default-features = false, features = [
+    "wgpu",
+    "default_fonts",
+    "x11",
+    "wayland",
+] }
+egui = "0.35"
+bytemuck = { version = "1", features = ["derive"] }
+glam = { version = "0.30", features = ["bytemuck"] }
+pollster = "0.4"
+walkdir = "2.5"
+rayon = "1.10"
+
+# Same codecs and the same feature set as src-tauri/Cargo.toml. default-features
+# off for the same reason it is off there: image's default rayon pool would fight
+# our own decode pool for cores.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "tga",
+    "dds",
+    "tiff",
+    "hdr",
+    "exr",
+    "gif",
+    "webp",
+] }
+webp = "0.3"
+
+# The reuse that makes this spike cheap: both are standalone path crates in the
+# shipping tree, unmodified. exrthumb is the bounded downsampling EXR decode
+# (image::open would materialize a 67 MP float image and OOM); psdcomp reads a
+# PSD composite by seeking past the layer section.
+exrthumb = { path = "../src-tauri/exrthumb" }
+psdcomp = { path = "../src-tauri/psdcomp" }
+
+# Mirrors the overrides in src-tauri/Cargo.toml, and for the same measured
+# reason: at opt-level 0 the mean texture decode is 964 ms vs 34.6 ms — 27.9x.
+# Without these the grid feels broken in dev for reasons that have nothing to do
+# with the UI toolkit, which would invalidate the entire comparison.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.zune-inflate]
+opt-level = 3
+[profile.dev.package.exr]
+opt-level = 3
+[profile.dev.package.tiff]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.exrthumb]
+opt-level = 3
+[profile.dev.package.psdcomp]
+opt-level = 3
+
+# Measuring binary size against the shipping 20.5 MB exe is one of the spike's
+# questions, so strip and LTO like a real release would.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

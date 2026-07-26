@@ -1,0 +1,82 @@
+# Answers the one question that killed the GPUI attempt: can we drive our own
+# wgpu render pass on macOS?
+#
+# `spike/` is gitignored on main, so this workflow cannot run from main — the
+# code is not in the tree. Use a WORKTREE, not a branch checkout in place: files
+# tracked on the branch but absent from main are deleted when you switch back,
+# which would wipe spike/ out of your working tree.
+#
+#   git worktree add -b spike/macos-check ../gab-spike-ci
+#   robocopy spike ..\gab-spike-ci\spike /E /XD target    # /XD target: it is GBs
+#   copy spike\ci\spike-macos.yml ..\gab-spike-ci\.github\workflows\
+#   cd ..\gab-spike-ci
+#   git add -f spike .github/workflows/spike-macos.yml    # -f overrides .gitignore
+#   git commit -m "spike: macOS wgpu check"
+#   git push -u origin spike/macos-check
+#
+# Then Actions -> "Spike: macOS wgpu check" -> Run workflow.
+#
+# Afterwards, none of this belongs on main:
+#
+#   cd ..\GameAssetBrowser
+#   git worktree remove ../gab-spike-ci
+#   git push origin --delete spike/macos-check
+#   git branch -D spike/macos-check
+#
+# It renders headlessly on purpose: GitHub's macOS runners have no display, but
+# Metal is available to a windowless process. The job runs the identical
+# MaterialRenderer::draw the egui callback runs, so a pass here is real evidence
+# rather than a proxy — and it uploads the frame so the result can be looked at,
+# not just trusted.
+
+# Quoted: an unquoted value containing ": " is a YAML parse error.
+name: "Spike: macOS wgpu check"
+
+# Runs on push to the spike branch as well as manually: pushing IS the trigger,
+# so no `gh` CLI or Actions-UI visit is needed to start it. The branch pattern
+# keeps this off main — it must never become part of the release path.
+on:
+  push:
+    branches:
+      - "spike/**"
+  workflow_dispatch: {}
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spike
+
+      # Not `cargo test`: the point is that the binary runs and produces pixels
+      # on a machine with no display, which is what a windowed test could not
+      # tell us.
+      - name: Render the custom wgpu pass headlessly
+        working-directory: spike
+        run: cargo run --release --bin headless -- frame.png
+
+      # The exit code already gates on coverage, but a percentage cannot
+      # distinguish "correct" from "drew something wrong". Compare this against
+      # the Windows frame by eye: a lit, checkered sphere with a specular
+      # highlight up and to the left.
+      - name: Upload the rendered frame
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: spike-macos-frame
+          path: spike/frame.png
+          if-no-files-found: warn
+
+      # Second half of the macOS question: the windowed path has to build too.
+      # It cannot be *run* here (no display), so this only proves it compiles —
+      # eframe + wgpu on mac has its own platform code beyond the render pass.
+      - name: Build the windowed binary
+        working-directory: spike
+        run: cargo build --release --bin gab-native-spike
