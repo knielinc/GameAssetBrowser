@@ -86,6 +86,10 @@ jobs:
             rust-targets: ""
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 45
+    # At job level so steps can branch on it in `if:` — a secret can't be read
+    # from an expression directly, only through the env context.
+    env:
+      GAB_SIGN_METHOD: ${{ secrets.GAB_SIGN_METHOD }}
     steps:
       - uses: actions/checkout@v5
 
@@ -142,6 +146,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Azure Trusted Signing runs through Microsoft's `sign` dotnet global tool,
+      # which is not on the runner image — without this, scripts/sign.ps1 throws
+      # "'sign' tool not found" and the bundle step dies with the unhelpful
+      # "failed to run powershell". All published versions are prerelease.
+      - name: Install the Trusted Signing tool
+        if: matrix.platform == 'windows-latest' && env.GAB_SIGN_METHOD == 'trustedsigning'
+        run: dotnet tool install --global sign --prerelease
+
       - name: Build the app (no GitHub Release — itch.io only)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -150,7 +162,7 @@ jobs:
           # signCommand in src-tauri/tauri.windows.conf.json (auto-merged on
           # Windows), and no-ops when GAB_SIGN_METHOD is unset — so an
           # unconfigured repo still produces working, unsigned installers.
-          GAB_SIGN_METHOD: ${{ secrets.GAB_SIGN_METHOD }}
+          # GAB_SIGN_METHOD comes from the job-level env above.
           GAB_SIGN_ENDPOINT: ${{ secrets.GAB_SIGN_ENDPOINT }}
           GAB_SIGN_ACCOUNT: ${{ secrets.GAB_SIGN_ACCOUNT }}
           GAB_SIGN_PROFILE: ${{ secrets.GAB_SIGN_PROFILE }}
@@ -161,6 +173,15 @@ jobs:
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         with:
           args: ${{ matrix.args }}
+
+      # Tauri discards the sign command's output, so a signing failure surfaces
+      # only as "failed to run powershell". sign.ps1 mirrors every run here.
+      - name: Show the signing log
+        if: failure() && matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (Test-Path sign.log) { Get-Content sign.log }
+          else { Write-Host "no sign.log — scripts/sign.ps1 never ran (check the signCommand in tauri.windows.conf.json)" }
 
       # After the build, so the crate sources the generator reads are extracted
       # in the registry cache. Fails the release if a dependency changed without

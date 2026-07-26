@@ -15,6 +15,12 @@ dist-ssr
 # Standalone release exports (produced by `npm run export`).
 export/
 
+# GPUI experiment under native/: a vendored gpui-ce checkout (its own git clone,
+# ~1 GB) and the Rust build output (~9 GB). Deliberately narrower than `native/`
+# so first-party sources added there are still staged.
+native/target/
+native/vendor/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

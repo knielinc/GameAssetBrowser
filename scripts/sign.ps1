@@ -2,6 +2,16 @@
 # src-tauri/tauri.windows.conf.json, which Tauri auto-merges for Windows targets)
 # and directly by export-release.ps1 for the portable exe.
 #
+# Two invariants that signCommand has to respect, neither of them obvious - JSON
+# takes no comments, so they are recorded here:
+#   * "%1" must be its OWN argument. The bundler substitutes the file path with
+#     `if arg == "%1"`, an exact match - a "%1" embedded in a longer argument
+#     (e.g. inside a -Command script) is passed through as literal text.
+#   * the path to this script is relative to src-tauri, because the Tauri CLI
+#     chdirs there for the build. The bundler rewrites relative args that exist
+#     into absolute paths, which is also what makes NSIS's !uninstfinalize hook
+#     find this script when it signs the uninstaller from another directory.
+#
 # Why this matters commercially: an unsigned installer trips SmartScreen with
 # "Windows protected your PC", which is the single largest conversion killer for
 # a paid desktop app. Signing also stops Smart App Control from blocking freshly
@@ -38,11 +48,28 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Tauri captures this script's stdout and stderr and throws both away when it
+# exits non-zero - all the build prints is "failed to bundle project: `failed to
+# run powershell`", with no hint of what actually went wrong. So mirror every
+# run to a log file beside the repo; the release workflow dumps it on failure.
+$logPath = Join-Path (Split-Path $PSScriptRoot -Parent) "sign.log"
+function Write-SignLog([string]$Message) {
+    try { Add-Content -LiteralPath $logPath -Value "[$(Get-Date -Format o)] $Message" -Encoding utf8 } catch { }
+}
+
+$file = [System.IO.Path]::GetFileName($Path)
+
+try {
+
+if ($Path -eq "%1") {
+    throw "sign: got the literal '%1' placeholder - the bundler only substitutes an argument that is exactly '%1' (see the signCommand in src-tauri/tauri.windows.conf.json)"
+}
 if (-not (Test-Path $Path)) { throw "sign: file not found: $Path" }
 
 $method = $env:GAB_SIGN_METHOD
 if ([string]::IsNullOrWhiteSpace($method)) {
-    Write-Host "sign: GAB_SIGN_METHOD not set - leaving '$([System.IO.Path]::GetFileName($Path))' UNSIGNED" -ForegroundColor Yellow
+    Write-SignLog "skip '$file' - GAB_SIGN_METHOD not set"
+    Write-Host "sign: GAB_SIGN_METHOD not set - leaving '$file' UNSIGNED" -ForegroundColor Yellow
     exit 0
 }
 
@@ -69,7 +96,12 @@ function Resolve-SignTool {
     throw "sign: signtool.exe not found - install the Windows SDK signing tools"
 }
 
-Write-Host "sign: [$method] $([System.IO.Path]::GetFileName($Path))" -ForegroundColor Cyan
+Write-Host "sign: [$method] $file" -ForegroundColor Cyan
+# Names only, never values - this log is printed in CI output.
+$configured = @("GAB_SIGN_ENDPOINT", "GAB_SIGN_ACCOUNT", "GAB_SIGN_PROFILE", "GAB_SIGN_THUMBPRINT",
+    "GAB_SIGN_COMMAND", "AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_CLIENT_SECRET") |
+    Where-Object { -not [string]::IsNullOrWhiteSpace((Get-Item "env:$_" -ErrorAction SilentlyContinue).Value) }
+Write-SignLog "start [$method] '$file' (set: $($configured -join ', '))"
 
 switch ($method.ToLowerInvariant()) {
     "trustedsigning" {
@@ -78,11 +110,17 @@ switch ($method.ToLowerInvariant()) {
                 throw "sign: GAB_SIGN_METHOD=trustedsigning requires $v"
             }
         }
-        # The `sign` dotnet global tool (dotnet tool install --global sign) is
-        # Microsoft's supported front-end for Trusted Signing.
-        $sign = Get-Command sign -ErrorAction SilentlyContinue
-        if (-not $sign) { throw "sign: 'sign' tool not found - run: dotnet tool install --global sign" }
-        & $sign.Source code trusted-signing $Path `
+        # The `sign` dotnet global tool (dotnet tool install --global sign
+        # --prerelease) is Microsoft's supported front-end for Trusted Signing.
+        # It is not on the runner images, so CI installs it; the second lookup
+        # covers a shell whose PATH predates the install.
+        $signExe = (Get-Command sign.exe -ErrorAction SilentlyContinue).Source
+        if (-not $signExe) {
+            $candidate = Join-Path $env:USERPROFILE ".dotnet\tools\sign.exe"
+            if (Test-Path $candidate) { $signExe = $candidate }
+        }
+        if (-not $signExe) { throw "sign: 'sign' tool not found - run: dotnet tool install --global sign --prerelease" }
+        & $signExe code trusted-signing $Path `
             --trusted-signing-endpoint $env:GAB_SIGN_ENDPOINT `
             --trusted-signing-account $env:GAB_SIGN_ACCOUNT `
             --trusted-signing-certificate-profile $env:GAB_SIGN_PROFILE `
@@ -111,4 +149,11 @@ switch ($method.ToLowerInvariant()) {
     default { throw "sign: unknown GAB_SIGN_METHOD '$method' (expected trustedsigning, signtool, or custom)" }
 }
 
+Write-SignLog "ok '$file'"
 Write-Host "sign: ok" -ForegroundColor Green
+
+}
+catch {
+    Write-SignLog "FAILED '$file': $_"
+    throw
+}

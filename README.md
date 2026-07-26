@@ -145,7 +145,11 @@ machine still builds, it just builds unsigned and says so. Set `GAB_SIGN_METHOD`
 `trustedsigning` (Azure Trusted Signing — cheapest sane option for a solo dev, no hardware
 token), `signtool` (an OV/EV cert on a token or in the cert store), or `custom` (any other
 cloud‑HSM provider); see the header of `scripts/sign.ps1` for the variables each one needs.
-In CI the same variables come from repository secrets.
+In CI the same variables come from repository secrets, and `trustedsigning` additionally
+installs Microsoft's `sign` dotnet tool on the runner. Tauri throws away the sign command's
+output — a failure shows up only as ``failed to bundle project: `failed to run powershell` `` —
+so `sign.ps1` mirrors every run to `sign.log` in the repo root, which the release workflow
+prints when a Windows build fails.
 
 **Installers.** NSIS installs **per‑user** (`installMode: currentUser`) so there is no UAC
 prompt — an admin elevation on first run costs more conversions than a per‑machine install
