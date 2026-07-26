@@ -145,6 +145,19 @@ function Read-LicenseFiles {
 # ---------------------------------------------------------------- Rust crates
 Write-Host "Collecting Rust crates from Cargo.lock..." -ForegroundColor Cyan
 
+# cargo unpacks a crate into registry\src only when it actually compiles it, so
+# a Windows build never unpacks the Linux/macOS half of the lock (gtk, glib,
+# objc2, block2, ...). Reading licenses straight off whatever happens to be
+# unpacked therefore gives a different document on a CI runner than on a dev
+# machine, where rust-analyzer's constant `cargo metadata` has unpacked the lot
+# - which surfaces as a bogus "out of date". `cargo metadata` resolves the graph
+# for every target and unpacks all of it, so ask for that first. It also has to
+# run before the enumeration below, because on a runner whose cache was restored
+# with registry\src pruned the directory may not exist yet.
+Write-Host "  unpacking crate sources (cargo metadata)..." -ForegroundColor DarkGray
+& cargo metadata --format-version 1 --manifest-path (Join-Path $root "src-tauri\Cargo.toml") | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed - cannot resolve crate sources" }
+
 $registry = Join-Path $env:USERPROFILE ".cargo\registry\src"
 $regDirs = @(Get-ChildItem $registry -Directory -ErrorAction SilentlyContinue)
 if ($regDirs.Count -eq 0) {
@@ -172,6 +185,7 @@ $crates = foreach ($block in ($lock -split '(?m)^\[\[package\]\]\s*$')) {
 }
 
 $missingLicense = New-Object System.Collections.ArrayList
+$notUnpacked = New-Object System.Collections.ArrayList
 $localNames = @($crates | Where-Object { $_.IsLocal } | ForEach-Object { $_.Name })
 Write-Host "  local (not redistributed): $($localNames -join ', ')" -ForegroundColor DarkGray
 
@@ -202,7 +216,15 @@ foreach ($c in $crates) {
         if ($txt) { Add-LicenseText $label $txt }
         else { [void]$missingLicense.Add($label) }
     }
-    else { [void]$missingLicense.Add("$label (not in registry cache)") }
+    else { [void]$notUnpacked.Add($label) }
+}
+
+# A crate whose source never got unpacked would otherwise be published as
+# UNKNOWN with no license text - an attribution gap that looks like a stale
+# file rather than the missing evidence it is. Refuse to generate instead.
+if ($notUnpacked.Count -gt 0) {
+    $notUnpacked | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+    throw "$($notUnpacked.Count) crate(s) are in Cargo.lock but not unpacked under $registry - cannot read their licenses"
 }
 
 # ------------------------------------------------------------- npm production
@@ -446,9 +468,27 @@ function Test-Current {
     # Compare on normalized line endings: git checkouts differ between runners
     # (CRLF on Windows, LF on Linux) and that is not a stale-attribution signal.
     $existing = (Get-Content $File -Raw) -replace "`r`n", "`n"
-    if ($existing.TrimEnd() -ne ($Expected -replace "`r`n", "`n").TrimEnd()) {
-        throw "$Label is out of date - run 'npm run licenses' and commit the result"
+    $want = ($Expected -replace "`r`n", "`n")
+    if ($existing.TrimEnd() -eq $want.TrimEnd()) { return }
+
+    # "Out of date" on its own is unactionable when the mismatch only reproduces
+    # on a runner - the answer is in *which* lines moved. Show the first few.
+    $a = $existing.TrimEnd() -split "`n"
+    $b = $want.TrimEnd() -split "`n"
+    $clip = { param($s) if ($s.Length -gt 150) { $s.Substring(0, 150) + " [...]" } else { $s } }
+    Write-Host ""
+    Write-Host ("{0}: committed {1:N0} lines, generated {2:N0} lines" -f $Label, $a.Count, $b.Count) -ForegroundColor Yellow
+    $shown = 0
+    for ($i = 0; $i -lt [Math]::Max($a.Count, $b.Count) -and $shown -lt 8; $i++) {
+        $x = if ($i -lt $a.Count) { $a[$i] } else { "<end of file>" }
+        $y = if ($i -lt $b.Count) { $b[$i] } else { "<end of file>" }
+        if ($x -eq $y) { continue }
+        $shown++
+        Write-Host "  line $($i + 1):" -ForegroundColor DarkGray
+        Write-Host "    committed: $(& $clip $x)" -ForegroundColor Red
+        Write-Host "    generated: $(& $clip $y)" -ForegroundColor Green
     }
+    throw "$Label is out of date - run 'npm run licenses' and commit the result"
 }
 
 if ($Check) {

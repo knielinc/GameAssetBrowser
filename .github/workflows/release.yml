@@ -183,10 +183,12 @@ jobs:
           if (Test-Path sign.log) { Get-Content sign.log }
           else { Write-Host "no sign.log — scripts/sign.ps1 never ran (check the signCommand in tauri.windows.conf.json)" }
 
-      # After the build, so the crate sources the generator reads are extracted
-      # in the registry cache. Fails the release if a dependency changed without
-      # THIRD-PARTY-LICENSES.md being regenerated — stale attributions look like
-      # compliance while not being it.
+      # Fails the release if a dependency changed without THIRD-PARTY-LICENSES.md
+      # being regenerated — stale attributions look like compliance while not
+      # being it. The generator unpacks the crate sources it reads itself (via
+      # cargo metadata): a Windows build only unpacks the crates it compiles, so
+      # the Linux/macOS half of the lock would otherwise read as UNKNOWN here and
+      # fail the check on a file that is perfectly current.
       - name: Verify third-party attributions are current
         if: matrix.platform == 'windows-latest'
         run: npm run licenses:check
