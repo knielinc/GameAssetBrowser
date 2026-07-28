@@ -11,7 +11,6 @@
 //! hard drive untouched.
 
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -103,20 +102,30 @@ impl ThumbCache {
         g.order.push(key);
     }
 
-    /// Encode a cached thumbnail to PNG on demand, for the handful of surfaces
-    /// that still consume an `<img>`/three.js texture (fullscreen, inspector
-    /// preview, map swatches). The grid never calls this — it takes RGBA
-    /// directly. Rare enough that the encode is not worth caching.
+    /// Encode a cached thumbnail to PNG on demand, for every `<img>`/three.js
+    /// consumer — which since the grid moved off the WebGL overlay is the MAIN
+    /// thumbnail path, not a rare one.
+    ///
+    /// Still encoded per request, not cached: the webview's in-page image
+    /// memory cache serves a remounted `<img>` with a known URL without hitting
+    /// this scheme at all (measured: a remount is ~0.5 ms with zero resource
+    /// entries), so each key reaches us roughly once per session and a byte
+    /// cache would hold ~nothing but misses.
+    ///
+    /// Fast compression + adaptive filtering, not the encoder default: measured
+    /// on real 256px thumbnails it is ~30% faster (0.20 vs 0.29 ms) at the SAME
+    /// average output size (21.4 KB) — adaptive filtering is what carries PNG
+    /// compression at this size, so the cheaper deflate costs nothing.
     pub fn get_png(&self, key: u64) -> Option<Vec<u8>> {
+        use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+        use image::ImageEncoder;
         let p = self.get(key)?;
-        // Rare path (fullscreen/inspector/swatches), so the one rgba clone to
-        // own the buffer for the PNG encoder is fine.
-        let buf = image::RgbaImage::from_raw(p.width, p.height, p.rgba.clone())?;
-        let mut out = Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(buf)
-            .write_to(&mut out, image::ImageFormat::Png)
+        let mut out = Vec::new();
+        // Encodes straight from the borrowed pixels — no 256 KB clone.
+        PngEncoder::new_with_quality(&mut out, CompressionType::Fast, FilterType::Adaptive)
+            .write_image(&p.rgba, p.width, p.height, image::ExtendedColorType::Rgba8)
             .ok()?;
-        Some(out.into_inner())
+        Some(out)
     }
 }
 
