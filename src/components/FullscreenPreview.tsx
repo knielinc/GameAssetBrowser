@@ -1,4 +1,4 @@
-import { useEffect, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { AudioLines, X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { audioVisibleRef, loadAndSelect, usePlayerStore } from "../stores/playerStore";
@@ -16,7 +16,7 @@ import Sprite2DView from "./texture/Sprite2DView";
 import LayeredView from "./layered/LayeredView";
 import { isSpriteArt } from "./layered/useLayeredDoc";
 import PreviewControls, { type PreviewState } from "./texture/PreviewControls";
-import { isFloatPreview } from "../model/loadModel";
+import { isFloatPreview, previewUrl } from "../model/loadModel";
 import { keysForFile, keysForMaterial } from "./texture/TextureInspector";
 import DocumentPreview from "./document/DocumentPreview";
 import { docIsEbook, docIsPdf, docIsPsd, docIsTextual, docSupportsZoom } from "./document/doc";
@@ -74,6 +74,13 @@ export default function FullscreenPreview({
   // path AudioCell uses; request it here too so it shows even when fullscreen
   // is opened from the list (where no grid drove the request).
   const audioThumb = useThumbSrc(audioFile, "a");
+  // The "a" thumb is 256px — upscaled to the ~50vh art square it's blurry, so
+  // a sharp render (native-res cover art / 2048px waveform, see preview_png's
+  // audio branch) swaps in over it once loaded. Keyed by path, not booleans,
+  // so auto-advance to the next track resets both states for free.
+  const [sharpPath, setSharpPath] = useState<string | null>(null);
+  const [sharpFailedPath, setSharpFailedPath] = useState<string | null>(null);
+  const sharpReady = sharpPath === audioFile.path;
   // A pin (supersede=false): decode this one file without dropping the grid's
   // in-flight window behind the overlay, so its cells aren't stranded.
   useEffect(() => {
@@ -187,8 +194,11 @@ export default function FullscreenPreview({
           ) : isAudio ? (
             <div className="flex h-full w-full flex-col items-center overflow-hidden rounded-xl bg-panel shadow-e1">
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6">
-                <div className="aspect-square w-[min(52vh,52vw)] overflow-hidden rounded-xl bg-raised shadow-e1">
-                  {audioThumb.src !== null ? (
+                <div className="relative aspect-square w-[min(52vh,52vw)] overflow-hidden rounded-xl bg-raised shadow-e1">
+                  {/* The 256px thumb shows instantly (warm-cache thumb://);
+                      hidden once the sharp render lands so its blurred halo
+                      doesn't peek out from behind the crisp pixels. */}
+                  {audioThumb.src !== null && !sharpReady ? (
                     <img
                       key={audioThumb.imgKey}
                       src={audioThumb.src}
@@ -198,10 +208,20 @@ export default function FullscreenPreview({
                       onLoad={audioThumb.onLoad}
                       className="h-full w-full object-contain"
                     />
-                  ) : (
+                  ) : !sharpReady ? (
                     <div className="flex h-full w-full items-center justify-center">
                       <AudioLines size={56} className="text-kind-audio opacity-30" />
                     </div>
+                  ) : null}
+                  {sharpFailedPath !== audioFile.path && (
+                    <img
+                      src={previewUrl(audioFile.path)}
+                      alt=""
+                      draggable={false}
+                      onLoad={() => setSharpPath(audioFile.path)}
+                      onError={() => setSharpFailedPath(audioFile.path)}
+                      className={`absolute inset-0 h-full w-full object-contain ${sharpReady ? "" : "opacity-0"}`}
+                    />
                   )}
                 </div>
                 <div className="flex flex-col items-center gap-1">

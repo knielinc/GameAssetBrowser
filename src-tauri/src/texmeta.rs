@@ -119,12 +119,30 @@ pub(crate) fn probe_dims(path: &Path) -> Option<(u32, u32)> {
     }
     let (w, h) = if ext == "dds" {
         dds_dims(path)?
+    } else if ext == "psd" || ext == "psb" {
+        psd_dims(path)?
     } else {
         image::image_dimensions(path).ok()?
     };
     if w == 0 || h == 0 {
         return None;
     }
+    Some((w, h))
+}
+
+/// PSD/PSB dimensions from the fixed 26-byte header. Manual because `image`
+/// has no Photoshop reader, and the thumbnail decode can no longer stand in:
+/// it is downscaled at the source (psdcomp reads only the rows the thumb
+/// samples), so its dimensions would understate the document.
+fn psd_dims(path: &Path) -> Option<(u32, u32)> {
+    let mut head = [0u8; 26];
+    File::open(path).ok()?.read_exact(&mut head).ok()?;
+    if &head[0..4] != b"8BPS" {
+        return None;
+    }
+    // Big-endian: rows at offset 14, columns at 18 (same layout in PSD and PSB).
+    let h = u32::from_be_bytes([head[14], head[15], head[16], head[17]]);
+    let w = u32::from_be_bytes([head[18], head[19], head[20], head[21]]);
     Some((w, h))
 }
 

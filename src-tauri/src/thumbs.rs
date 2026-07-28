@@ -46,6 +46,10 @@ const THUMB_EDGE: u32 = 256;
 /// is source-quality for all but the largest maps, 16x the grid thumb, and
 /// stays under the WebGL2 max-texture-size on essentially all hardware.
 const PREVIEW_EDGE: u32 = 4096;
+/// Fullscreen waveform render edge. The fullscreen art square is ~50vh, so up
+/// to ~1100 CSS px on a 4K display; 2048 keeps the bars crisp at 2x DPR. Cheap
+/// to render (flat-colour bars, mostly-transparent PNG), unlike a 2048 decode.
+const PREVIEW_WAVEFORM_EDGE: u32 = 2048;
 /// Bump to invalidate every cached thumbnail after a pipeline change.
 /// v2: default tone-mapper for HDR/EXR thumbnails changed Reinhard -> ACES and
 /// gamma 2.2 -> accurate sRGB (see tonemap.rs).
@@ -138,11 +142,26 @@ pub fn preview_png(
         return Some(bytes.as_ref().clone());
     }
 
-    let img = match decode_image(&path, Some(PREVIEW_EDGE)) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("[preview] decode {}: {e}", path.display());
-            return None;
+    // Audio has no source image either: its "full-res preview" is the embedded
+    // cover art at native resolution, or the waveform re-rendered big. The
+    // fullscreen overlay shows this art at ~50vh — the 256px grid thumb
+    // upscaled to that is exactly the blur this path exists to avoid.
+    let img = if is_audio_path(&path) {
+        let native = path.to_string_lossy().into_owned();
+        match audio_cover(&path).or_else(|| audio_waveform_image(&native, PREVIEW_WAVEFORM_EDGE)) {
+            Some(i) => i,
+            None => {
+                eprintln!("[preview] no cover art or waveform: {}", path.display());
+                return None;
+            }
+        }
+    } else {
+        match decode_image(&path, Some(PREVIEW_EDGE)) {
+            Ok(i) => i,
+            Err(e) => {
+                eprintln!("[preview] decode {}: {e}", path.display());
+                return None;
+            }
         }
     };
     let (w, h) = img.dimensions();
@@ -341,7 +360,19 @@ fn decode_aseprite(p: &Path) -> Result<DynamicImage, String> {
 /// Photoshop (.psd/.psb) â€” flatten to the composited RGBA image. The per-layer
 /// tree is read separately in the frontend (ag-psd); here we only need the final
 /// picture for the thumbnail and the base preview.
-fn decode_psd(p: &Path) -> Result<DynamicImage, String> {
+///
+/// psdcomp first: it seeks straight to the flattened composite and decodes only
+/// the rows `max_edge` samples — and it tolerates files whose layer records the
+/// `psd` crate panics on (real-world example: a CS-era file with extra alpha
+/// channels dies in its layer-and-mask parser with a slice-range panic). The
+/// full-parse crate stays as the fallback for composites psdcomp declines
+/// (CMYK, zip compression); decode_image's catch_unwind guards its panics.
+fn decode_psd(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
+    if let Some(c) = psdcomp::from_file(p, max_edge.unwrap_or(u32::MAX)) {
+        if let Some(buf) = image::RgbaImage::from_raw(c.width, c.height, c.rgba) {
+            return Ok(DynamicImage::ImageRgba8(buf));
+        }
+    }
     let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
     let doc = psd::Psd::from_bytes(&bytes).map_err(|e| e.to_string())?;
     let (w, h) = (doc.width(), doc.height());
@@ -450,7 +481,7 @@ fn decode_image_inner(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, S
     match p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("kra") => return decode_kra(p),
         Some("aseprite") | Some("ase") => return decode_aseprite(p),
-        Some("psd") | Some("psb") => return decode_psd(p),
+        Some("psd") | Some("psb") => return decode_psd(p, max_edge),
         Some("afphoto") | Some("afdesign") | Some("afpub") => return decode_affinity(p),
         // EXR gets a bounded, downsampling decode — a huge light bake would OOM
         // through image::open's full-resolution float path (see decode_exr).
@@ -574,7 +605,7 @@ fn build_audio(path: &str, p: &Path, cache: &ThumbCache) -> Result<(String, Thum
     // Cover art first (it IS a picture); the waveform is the fallback for the
     // many game-audio files that ship untagged.
     let img = audio_cover(p)
-        .or_else(|| audio_waveform_image(path))
+        .or_else(|| audio_waveform_image(path, THUMB_EDGE))
         .ok_or_else(|| format!("{path}: no cover art and no decodable waveform"))?;
     let (w, ih) = img.dimensions();
     if w == 0 || ih == 0 {
@@ -616,21 +647,25 @@ fn audio_cover(p: &Path) -> Option<DynamicImage> {
 /// when there's no embedded art. Transparent background so the cell's own
 /// colour shows through; a single accent colour, centred on the midline. The
 /// peaks come from the same decoder the player-bar waveform uses.
-fn audio_waveform_image(path: &str) -> Option<DynamicImage> {
-    const SIZE: u32 = 256;
+///
+/// Bin count is fixed at 96 regardless of `size`: the fullscreen render is the
+/// SAME picture as the grid thumb (bars land at the same proportional spots),
+/// just with crisp edges — so the sharp image can swap in over the upscaled
+/// thumb without the shape visibly changing.
+fn audio_waveform_image(path: &str, size: u32) -> Option<DynamicImage> {
     const BINS: u32 = 96;
     let peaks = crate::waveform::peaks_blocking(path, BINS)?;
     let bins = (peaks.len() / 2) as u32;
     if bins == 0 {
         return None;
     }
-    let mut img = image::RgbaImage::new(SIZE, SIZE); // zero-filled = transparent
-    let mid = SIZE as f32 / 2.0;
+    let mut img = image::RgbaImage::new(size, size); // zero-filled = transparent
+    let mid = size as f32 / 2.0;
     let amp = mid * 0.9;
     // Matches the app's waveform tint; opaque bars over the transparent bg.
     let color = image::Rgba([96u8, 165, 250, 255]);
-    for x in 0..SIZE {
-        let bin = (x * bins / SIZE) as usize;
+    for x in 0..size {
+        let bin = (x * bins / size) as usize;
         let hi = peaks[bin * 2 + 1]; // max → above the midline
         let lo = peaks[bin * 2]; // min → below
         let mut top = (mid - hi * amp).round();
@@ -638,8 +673,8 @@ fn audio_waveform_image(path: &str) -> Option<DynamicImage> {
         if top > bot {
             std::mem::swap(&mut top, &mut bot);
         }
-        let y0 = top.clamp(0.0, SIZE as f32 - 1.0) as u32;
-        let y1 = bot.clamp(0.0, SIZE as f32 - 1.0) as u32;
+        let y0 = top.clamp(0.0, size as f32 - 1.0) as u32;
+        let y1 = bot.clamp(0.0, size as f32 - 1.0) as u32;
         for y in y0..=y1 {
             img.put_pixel(x, y, color);
         }
