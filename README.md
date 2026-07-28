@@ -1,6 +1,6 @@
 # Game Asset Browser
 
-A fast, dark‑mode desktop browser for game asset libraries — **audio, textures, 3D models,
+A fast desktop browser for game asset libraries — **audio, 2D textures, 3D models,
 and documents in one place**, with instant preview and without opening a game engine. Built
 for big packs (Synty, ambientCG / freestylized, Megascans, HDRIs, Kenney, SFX libraries)
 where your file explorer gives up and the engine importer is too slow to browse.
@@ -10,7 +10,7 @@ where your file explorer gives up and the engine importer is too slow to browse.
 </p>
 
 One library, four lenses. The sidebar folder tree, collections, search, and filters are
-shared; each tab (Audio, Textures, Models, Documents) adds the preview and facets that make
+shared; each tab (**Audio**, **2D**, **3D**, **Docs**) adds the preview and facets that make
 sense for that kind, and an **All** tab shows every kind at once. Scanning streams in
 batches, decoding happens natively in Rust, and everything you filter or sort is derived
 in-memory — 20k+ file libraries stay smooth.
@@ -28,11 +28,17 @@ in-memory — 20k+ file libraries stay smooth.
   favourites") and as filters that narrow the current view.
 - **Rich filtering** — instant text search, sortable columns, and per‑kind facets (format,
   size, date, and more below), all with live result counts.
+- **Grid or list**, with a thumbnail‑size slider, an info‑pill toggle for the format /
+  dimension / size badges, and **shuffle** to jump to a random item.
+- **Pixel‑art mode** — nearest‑neighbour scaling across the thumbnail grid and every preview
+  at once, so sprite work stays crisp instead of smearing as it scales.
+- **Ten themes** — five dark (Midnight, Ember, Forest, Orchid, Glacier) and five light
+  (Daylight, Sand, Meadow, Blossom, Frost) — plus a **50–200 % UI scale** that grows the
+  whole interface, not just the text.
 - **Duplicate finder** (two‑stage content hash) and a **library stats** overview.
 - **Native drag‑out** to Explorer / DAWs / engines, **drop a folder in** to add a root,
   **copy image to clipboard**, and **"Open with…"** your own external tools.
-- **Persistent, portable‑aware settings** with import/export, custom window chrome, and a
-  cohesive dark theme.
+- **Persistent, portable‑aware settings** with import/export, and custom window chrome.
 - **About dialog** (settings menu) with the exact version, commit, and build date, plus the
   full third‑party attributions embedded in the app itself.
 
@@ -46,9 +52,13 @@ in-memory — 20k+ file libraries stay smooth.
 - **Waveform** with click‑to‑seek playhead, plus an on‑demand **spectrogram**.
 - Transport with play/pause, loop, volume, **playback speed**, **auto‑advance**, and
   **shuffle**.
+- The transport follows your selection: picking a non‑audio file pauses and hides the bar,
+  leaving the track loaded so returning to it resumes where you left off.
+- Cover art when a file has it, a rendered waveform when it doesn't — either way every clip
+  is identifiable from the grid.
 - Facets for **duration**, **sample rate**, and **channel layout**.
 
-### Textures & materials
+### 2D — textures & materials
 - GPU‑accelerated thumbnail grid, decoding `png` `jpg` `bmp` `tga` `dds` `tif` `exr` `hdr`
   `gif` `webp` natively.
 - **Layered art** — `psd`/`psb`, Krita `kra`, and Aseprite `ase`/`aseprite` render from
@@ -67,22 +77,41 @@ in-memory — 20k+ file libraries stay smooth.
 - Facets for **color**, **resolution**, **shape** (square, power‑of‑two), and **channel**,
   plus a manual **atlas picker** for packs where the base‑color map can't be inferred.
 
-### Models
+### 3D — models
 <p align="center">
   <img src="docs/models.png" alt="Model grid with rendered thumbnails and a live three.js viewport" width="920">
 </p>
 
 - three.js viewport for **glTF/GLB, FBX, OBJ, DAE, 3DS, STL, PLY** — rendered thumbnails in
-  the grid and a live **orbit / pan / zoom** preview with lighting presets.
+  the grid and a live **orbit / pan / zoom** preview with lighting presets (studio, sun,
+  rim, soft).
+- Inspection toggles: **wireframe**, a **UV checker** in place of base‑colour maps, a
+  **human silhouette** for scale, and a slow **turntable**.
 - Geometry inspector: triangles, vertices, meshes, materials, and file size at a glance.
 
-### Documents
+### Docs — reference & reading
 - Reference material lives with the art it belongs to: **PDF**, Markdown, and plain text,
   plus **ebooks** (`epub`, `mobi`, `azw3`, `fb2`) and **comics** (`cbz`).
 - Paged or scrolling PDF layout, adjustable reading width and text settings for reflowable
   formats, and your place is kept when you change them.
+- A **reading theme** for prose — sepia paper or soft dark — chosen independently of the app
+  theme, because a dark app with a light page is a perfectly normal way to work.
 
 ---
+
+## Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| ↑ / ↓ | Move selection (by row in a grid); auto‑plays on the Audio tab |
+| ← / → | Seek ∓2 s in the audio list · move one cell in a grid |
+| Space | Play / pause (Audio) · open the fullscreen preview (2D / 3D) |
+| Enter | Replay the current audio file |
+| L | Toggle loop |
+| F | Toggle favorite (the whole selection when the focused item is part of it) |
+| Ctrl + 1 … 5 | Switch to All / Audio / 2D / 3D / Docs |
+| Ctrl + A | Select all visible · Escape collapses a multi‑selection |
+| F11 | Toggle window fullscreen |
 
 ## Platforms
 
@@ -91,112 +120,11 @@ Windows is the primary, most‑tested target (WebView2). **macOS (WKWebView)** a
 three preview types — via platform‑aware asset serving. A few niceties (reveal‑in‑file‑
 manager on Linux, some external‑app conveniences) are still being finished.
 
----
+## Building it yourself
 
-## Getting started
-
-Prerequisites: **Node 20+** and **Rust (stable)**, plus your platform's Tauri toolchain:
-
-- **Windows** — Visual Studio Build Tools with the C++ workload; WebView2 (bundled on
-  Windows 11).
-- **macOS** — Xcode Command Line Tools (`xcode-select --install`).
-- **Linux** — `webkit2gtk-4.1` and the usual build deps, e.g. on Ubuntu:
-  ```bash
-  sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-    libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-  ```
-
-Then:
-
-```bash
-npm install
-npm run tauri dev      # run the app with hot reload
-npm run tauri build    # produce a release build + installer for the current OS
-```
-
-Tauri can't cross‑compile — build each OS on that OS (or in CI, one runner per target).
-On Windows, `npm run export` also drops a standalone, portable `GameAssetBrowser.exe` into
-`export/`, alongside the license and attribution files.
-
-### Releasing
-
-| Command | What it does |
-| --- | --- |
-| `npm run licenses` | Regenerate `THIRD-PARTY-LICENSES.md` from the cargo + npm trees |
-| `npm run licenses:check` | Fail if that file is out of date (used by CI) |
-| `npm run export` | Portable single‑exe build (regenerates attributions, signs if configured) |
-| `npm run release` | Full installer build (MSI + NSIS), signed if configured |
-
-**CI.** `.github/workflows/release.yml` is a manual `workflow_dispatch` release to itch.io
-(`kniti/gab`). It computes the next patch version from the latest `vX.Y.Z` tag, runs a cheap
-typecheck + unit‑test gate before spending three platform builds, builds Windows / macOS
-(universal) / Linux, verifies the attribution file is current, uploads via `butler`, and
-tags the released version. Without a `BUTLER_API_KEY` secret it still builds — it just skips
-the upload and the tag.
-
-The release version is stamped into **both** `tauri.conf.json` (the installer's version) and
-`package.json` (the build stamp the About dialog shows), so the two can't disagree.
-
-**Code signing.** Unsigned Windows binaries trip SmartScreen, and Smart App Control blocks
-them outright (the `os error 4551` noted in `src-tauri/Cargo.toml`). `src-tauri/tauri.windows.conf.json`
-is merged automatically into every Windows build and points Tauri's `signCommand` at
-`scripts/sign.ps1`, which is driven entirely by environment variables — an unconfigured
-machine still builds, it just builds unsigned and says so. Set `GAB_SIGN_METHOD` to
-`trustedsigning` (Azure Trusted Signing — cheapest sane option for a solo dev, no hardware
-token), `signtool` (an OV/EV cert on a token or in the cert store), or `custom` (any other
-cloud‑HSM provider); see the header of `scripts/sign.ps1` for the variables each one needs.
-In CI the same variables come from repository secrets, and `trustedsigning` additionally
-installs Microsoft's `sign` dotnet tool on the runner. Tauri throws away the sign command's
-output — a failure shows up only as ``failed to bundle project: `failed to run powershell` `` —
-so `sign.ps1` mirrors every run to `sign.log` in the repo root, which the release workflow
-prints when a Windows build fails.
-
-**Installers.** NSIS installs **per‑user** (`installMode: currentUser`) so there is no UAC
-prompt — an admin elevation on first run costs more conversions than a per‑machine install
-is worth. English and German, no language picker.
-
-**Attributions.** Generated, not hand‑written — rerun `npm run licenses` whenever
-dependencies change. It emits three artifacts:
-
-| Artifact | Size | Consumer |
-| --- | --- | --- |
-| `THIRD-PARTY-LICENSES.md` | ~2.1 MB | Humans / compliance review; bundled + shipped beside the portable exe |
-| `src/generated/thirdParty.json` | ~52 KB | The About dialog's component list |
-| `src/generated/thirdPartyTexts.json` | ~2.1 MB | Individual license texts, fetched only on expand |
-
-The generator detects the workspace's own crates structurally (a `Cargo.lock` entry with no
-`source` is local), so adding another path crate needs no edit, and it fails loudly on any
-dependency with a copyleft, noncommercial, or missing license. The notices ship embedded in
-the binary (Settings → **About** → *Third-party licenses*), as a bundled installer resource,
-and as a file beside the portable exe.
-
-## Keyboard shortcuts
-
-| Key | Action |
-| --- | --- |
-| ↑ / ↓ | Move selection (by row in a grid); auto‑plays on the Audio tab |
-| ← / → | Seek ∓2 s in the audio list · move one cell in a grid |
-| Space | Play / pause (Audio) · open the fullscreen preview (Textures / Models) |
-| Enter | Replay the current audio file |
-| L | Toggle loop |
-| F | Toggle favorite (the whole selection when the focused item is part of it) |
-| Ctrl + 1 / 2 / 3 | Switch to Audio / Textures / Models |
-| Ctrl + A | Select all visible · Escape collapses a multi‑selection |
-| F11 | Toggle window fullscreen |
-
-## How it works
-
-- **Tauri 2** (Rust backend) + **React / TypeScript** (Vite) frontend + **three.js** for
-  3D. `src-tauri/src/types.rs` and `src/types.ts` are a pinned IPC contract — keep them
-  mirrored.
-- **Native decode, zero‑copy serve.** Audio plays on a dedicated Rust thread that owns the
-  `rodio` output stream; textures and models are decoded in Rust and handed to the webview
-  over custom URI schemes (`thumb://`, `tex://`, `model://`, `preview://`) — thumbnails and
-  raw RGBA never round‑trip as JSON.
-- **Streamed scans, in‑memory views.** Scans arrive as batched events; durations,
-  dimensions, and thumbnails are probed lazily by capped worker pools. Filtering, sorting,
-  the folder tree, and facet counts are all derived in the frontend from the in‑memory file
-  list — no IPC round‑trips while you type or click.
+Ready‑to‑run builds are sold; building from source is a permitted alternative, not a
+loophole. See **[DEVELOPMENT.md](DEVELOPMENT.md)** for prerequisites, the dev/build commands,
+how the app is put together, and the release and code‑signing setup.
 
 ## License
 
@@ -210,9 +138,6 @@ not open source:
 - **Everything you make with it is yours** — the license reaches the software only, never your
   artwork, audio, models, or documents.
 - **You may not redistribute or resell it**, modified or not, free or paid.
-
-Ready‑to‑run builds are sold; building from source is a permitted alternative, not a
-loophole.
 
 Third‑party components are listed with their licenses in
 [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). Every dependency is permissively
