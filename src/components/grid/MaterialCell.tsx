@@ -69,15 +69,16 @@ export default function MaterialCell({
     // are absolutely positioned and transform-offset, so they render outside
     // the box without contributing to layout — the 12px grid gap absorbs them.
     <div className="group relative">
-      {/* Stacked cards behind the frame — the "this is a set" signal, now read
-          as tonal cards with their own soft shadow rather than outlines. */}
-      <div className="pointer-events-none absolute inset-0 translate-x-[5px] translate-y-[-5px] rounded-lg bg-panel opacity-45 shadow-e1" />
-      <div className="pointer-events-none absolute inset-0 translate-x-[2.5px] translate-y-[-2.5px] rounded-lg bg-panel shadow-e1" />
+      {/* Stacked cards behind the frame — the "this is a set" signal, read as
+          offset tonal cards. No drop shadow: the panel-on-canvas step is what
+          separates them, same as the front card. */}
+      <div className="pointer-events-none absolute inset-0 translate-x-[5px] translate-y-[-5px] rounded-lg bg-panel opacity-45" />
+      <div className="pointer-events-none absolute inset-0 translate-x-[2.5px] translate-y-[-2.5px] rounded-lg bg-panel" />
 
       <div
         className={clsx(
-          "relative overflow-hidden rounded-lg bg-panel transition-[box-shadow] duration-200 ease-spring",
-          selected ? "bg-accent/8 shadow-sel" : "shadow-e1 group-hover:shadow-e2",
+          "relative overflow-hidden rounded-lg bg-panel transition-[background-color,box-shadow] duration-200 ease-spring",
+          selected ? "bg-accent/8 shadow-sel" : "group-hover:bg-hover",
           // outline-based, so it stacks on the box-shadow styling above.
           focused === true && "cell-focused",
         )}
@@ -114,7 +115,7 @@ export default function MaterialCell({
               {lowConfidence && (
                 <span
                   title={`Resolved by content — ${Math.round(material.confidence * 100)}% confidence`}
-                  className="rounded-full bg-kind-model px-2 py-0.5 text-[9px] font-semibold text-[#1a1208]"
+                  className="rounded-full bg-kind-model px-2 py-0.5 text-[9px] font-semibold text-on-kind"
                 >
                   ?
                 </span>

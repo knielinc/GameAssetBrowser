@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, type ReactElement } from "react";
 import clsx from "clsx";
 import { FolderPlus } from "lucide-react";
 import Sidebar from "./components/Sidebar";
@@ -10,7 +10,7 @@ import { useSidebarWidth } from "./hooks/useSidebarWidth";
 import { useWindowFullscreen } from "./hooks/useWindowFullscreen";
 import { useExternalDrop } from "./hooks/useExternalDrop";
 import { addFolders, useLibraryStore } from "./stores/libraryStore";
-import { usePlayerStore } from "./stores/playerStore";
+import { pausePlayback, useAudioSelected, usePlayerStore } from "./stores/playerStore";
 import { usePanelPrefs } from "./stores/panelPrefs";
 
 export default function App(): ReactElement {
@@ -22,10 +22,16 @@ export default function App(): ReactElement {
   const dropHover = useExternalDrop();
   const hasRoots = useLibraryStore((s) => s.roots.length > 0);
   const activeTab = useLibraryStore((s) => s.activeTab);
-  // The player bar shows only while a track is loaded — on any tab, so audio
-  // started from the All tab or a fullscreen preview stays controllable instead
-  // of playing blind, and the Audio tab isn't cluttered by an empty transport.
   const playerLoaded = usePlayerStore((s) => s.currentPath !== null);
+  const playing = usePlayerStore((s) => s.playing);
+  // The transport follows the SELECTION, not the tab: picking a texture (or any
+  // non-audio file) means the user is done listening, so playback pauses and
+  // the bar goes away. The track stays loaded, so re-selecting it brings the bar
+  // back where it left off.
+  const audioSelected = useAudioSelected();
+  useEffect(() => {
+    if (!audioSelected) pausePlayback();
+  }, [audioSelected]);
   const leftOpen = usePanelPrefs((s) => s.left);
 
   return (
@@ -64,9 +70,13 @@ export default function App(): ReactElement {
           )}
         </main>
       </div>
-      {/* Transport shows only while a track is loaded, so playback is never
-          audible-but-hidden and an idle Audio tab stays uncluttered. */}
-      {playerLoaded && <PlayerBar />}
+      {/* Shown while an audio file is selected — and, regardless of selection,
+          whenever sound is actually coming out. That second clause is what keeps
+          playback from ever being audible-but-hidden: the duplicates modal can
+          start a track while a texture is selected, and it must stay
+          controllable. The pause above then drops `playing`, which is what
+          actually retires the bar on a non-audio pick. */}
+      {playerLoaded && (audioSelected || playing) && <PlayerBar />}
       {/* Drop-to-add-root. pointer-events-none: the OS drives the drag, and
           the native drop event carries the paths — the overlay is pure
           feedback and must not swallow anything. */}

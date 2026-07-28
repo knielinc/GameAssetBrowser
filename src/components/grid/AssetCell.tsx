@@ -5,7 +5,7 @@ import { useRenderPrefs } from "../../stores/renderPrefs";
 
 /**
  * Shared star button for grid cells (AssetCell chrome + MaterialCell's bespoke
- * frame): hover-revealed until favorited, then always on in the amber kind hue.
+ * frame): hover-revealed until favorited, then always on in the star gold.
  * stopPropagation so a star click never doubles as a cell select.
  */
 export function CellStar({
@@ -21,12 +21,17 @@ export function CellStar({
       title={starred ? "Remove from favorites" : "Add to favorites (F)"}
       className={clsx(
         "absolute right-1 top-1 z-10 rounded-full p-1 transition-opacity duration-[120ms]",
-        // Drop shadow instead of a pill: legible on light thumbs without
-        // adding chrome to every cell corner.
-        "[filter:drop-shadow(0_1px_2px_rgb(0_0_0_/_0.7))]",
+        // Drop shadow instead of a pill: legible on light thumbs without adding
+        // chrome to every cell corner. Split by state, because the two need
+        // opposite amounts. The FAVORITED star is a filled gold shape that
+        // already carries its own contrast, so it takes a tight unoffset rim —
+        // a 2px offset blur at 0.7 is nearly as thick as a 14px glyph's own
+        // strokes and smeared the star into a brown smudge on pale cells. The
+        // idle one is a white outline that can land on a white thumbnail with
+        // nothing else to separate it, so it keeps the real shadow.
         starred
-          ? "text-kind-model opacity-100"
-          : "text-white/85 opacity-0 hover:text-white group-hover:opacity-100",
+          ? "text-star opacity-100 [filter:drop-shadow(0_0_1px_rgb(0_0_0_/_0.45))]"
+          : "text-white/85 opacity-0 hover:text-white group-hover:opacity-100 [filter:drop-shadow(0_1px_2px_rgb(0_0_0_/_0.6))]",
       )}
       onClick={(e) => {
         e.stopPropagation();
@@ -94,19 +99,19 @@ function AssetCellInner({
   return (
     <div
       className={clsx(
-        // Separation by tone + soft shadow, never a 1px outline. Elevation on
-        // hover is shadow-only — no transform — because the WebGL grid paints
-        // the thumb hole at its measured rect and only repaints on
+        // Separation by TONE, never a drop shadow: the card surface clears
+        // ~1.19:1 against the canvas in every theme, and hover steps one rung up
+        // the ladder. Hover stays fill-only — no transform — because the WebGL
+        // grid paints the thumb hole at its measured rect and only repaints on
         // scroll/resize; a translate here would slide the frame off its paint.
-        "group relative overflow-hidden rounded-lg transition-[box-shadow] duration-200 ease-spring",
+        "group relative overflow-hidden rounded-lg transition-[background-color,box-shadow] duration-200 ease-spring",
         // GL cells keep the frame transparent so the canvas behind shows
         // through the thumb hole; the meta strip below carries its own bg.
         gl ? "bg-transparent" : "bg-panel",
-        selected
-          ? gl
-            ? "shadow-sel"
-            : "bg-accent/8 shadow-sel"
-          : "shadow-e1 group-hover:shadow-e2",
+        // A GL cell's frame must stay transparent (a fill would occlude the
+        // thumb hole) and carries no edge at all — its hover lands on the meta
+        // strip below, which is the one part of it that IS painted.
+        selected ? (gl ? "shadow-sel" : "bg-accent/8 shadow-sel") : !gl && "group-hover:bg-hover",
         // outline-based, so it stacks on the box-shadow styling above.
         focused === true && "cell-focused",
       )}
@@ -127,12 +132,12 @@ function AssetCellInner({
           <CellStar starred={starred === true} onToggle={onToggleStar} />
         )}
         {showInfo && corner !== undefined && (
-          <div className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-white">
+          <div className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-chip px-2 py-0.5 text-[9px] font-semibold tabular-nums text-chip-fg">
             {corner}
           </div>
         )}
         {showInfo && topRight !== undefined && (
-          <div className="pointer-events-none absolute right-1.5 top-1.5 rounded-full bg-[#0c0d12e6] px-2 py-0.5 text-[9px] font-semibold tabular-nums text-white">
+          <div className="pointer-events-none absolute right-1.5 top-1.5 rounded-full bg-chip px-2 py-0.5 text-[9px] font-semibold tabular-nums text-chip-fg">
             {topRight}
           </div>
         )}
@@ -149,7 +154,7 @@ function AssetCellInner({
                 className={clsx(
                   "rounded-full px-2 py-0.5 text-[9px] font-semibold tabular-nums",
                   i === badges.length - 1 && badges.length > 1 && "ml-auto",
-                  b.warn ? "bg-kind-model text-[#1a1208]" : "bg-[#0c0d12e6] text-white",
+                  b.warn ? "bg-kind-model text-on-kind" : "bg-chip text-chip-fg",
                 )}
               >
                 {b.text}
@@ -159,7 +164,12 @@ function AssetCellInner({
         )}
       </div>
 
-      <div className={clsx("flex flex-col gap-0.5 px-2 pb-2 pt-1.5", gl && "bg-panel")}>
+      <div
+        className={clsx(
+          "flex flex-col gap-0.5 px-2 pb-2 pt-1.5 transition-[background-color] duration-200 ease-spring",
+          gl && "bg-panel group-hover:bg-hover",
+        )}
+      >
         <div className="truncate text-[11.5px]" title={name}>
           {name}
         </div>

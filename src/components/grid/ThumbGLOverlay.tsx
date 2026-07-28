@@ -26,6 +26,9 @@ export interface ThumbGLOverlayProps {
   /** Bumped by the owner whenever the item set or decoded thumbs change, so
    *  slots get (re-)measured and any 404'd fetches retried. */
   revision: number;
+  /** Cache keys whose pixels are gone from the Rust cache (their tex:// fetch
+   *  404'd), batched per frame. The owner re-requests the decode. */
+  onThumbsGone?: (keys: string[]) => void;
 }
 
 /**
@@ -44,12 +47,21 @@ export interface ThumbGLOverlayProps {
  * until the next paint lands. The rAF loop stays hot through recent movement
  * and pending uploads, then self-stops; scroll/resize/data restart it.
  */
-export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayProps): ReactElement {
+export default function ThumbGLOverlay({
+  scrollRef,
+  revision,
+  onThumbsGone,
+}: ThumbGLOverlayProps): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const glRef = useRef<ThumbGL | null>(null);
   const scheduleRef = useRef<(() => void) | null>(null);
   const pixelArt = useRenderPrefs((s) => s.pixelArt);
   const themeId = useThemeStore((s) => s.themeId);
+
+  // Kept in a ref so the GL effect below stays keyed on `scrollRef` alone — it
+  // owns the canvas and must not tear down when a callback identity changes.
+  const goneRef = useRef(onThumbsGone);
+  goneRef.current = onThumbsGone;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -63,6 +75,22 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
       return; // no WebGL2 — cells keep their placeholder; no crash
     }
     glRef.current = gl;
+
+    // Evicted keys arrive one fetch at a time; coalesce a burst into a single
+    // store write (a screenful of them is 200+ otherwise).
+    let goneKeys: string[] = [];
+    let goneTimer: number | null = null;
+    gl.onGone = (key: string): void => {
+      goneKeys.push(key);
+      if (goneTimer !== null) return;
+      goneTimer = window.setTimeout(() => {
+        goneTimer = null;
+        const batch = goneKeys;
+        goneKeys = [];
+        goneRef.current?.(batch);
+      }, 0);
+    };
+
     gl.setPixelArt(useRenderPrefs.getState().pixelArt); // honour the current setting on mount
     applyThemeColors(gl); // honour the current theme on mount
     gl.canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none";
@@ -129,15 +157,40 @@ export default function ThumbGLOverlay({ scrollRef, revision }: ThumbGLOverlayPr
       schedule();
     };
 
+    // A resize is not a one-frame event. The observer fires the moment the
+    // container's box changes, but the grid then feeds that width through React
+    // state — new column count, new row height, re-measured virtualizer — and
+    // the slots do not reach their final rects until that commit paints.
+    // Drawing once on the observer tick therefore measures the OLD layout, and
+    // if the loop had gone idle, that stale paint was the last one: thumbnails
+    // stranded at the previous grid's positions while the cells moved out from
+    // under them. Maximizing is the reliable way to see it, since it is the
+    // resize most likely to change the column count.
+    //
+    // So treat a resize like a scroll: reset the idle counter and let the loop
+    // re-measure for IDLE_FRAMES, which comfortably outlasts React's commit.
+    const onResize = (): void => {
+      idle = 0;
+      schedule();
+    };
+
     scroll.addEventListener("scroll", onScroll, { passive: true });
-    const ro = new ResizeObserver(schedule);
+    // Window-level as well as element-level. Restoring from minimize, or moving
+    // the window to a monitor with a different devicePixelRatio, can leave the
+    // host's box byte-identical — the element observer stays silent while the
+    // canvas holds a backing scale that no longer matches the screen.
+    window.addEventListener("resize", onResize);
+    const ro = new ResizeObserver(onResize);
     ro.observe(host);
     schedule();
 
     return () => {
       scroll.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
       ro.disconnect();
       if (raf !== null) cancelAnimationFrame(raf);
+      if (goneTimer !== null) window.clearTimeout(goneTimer);
+      gl.onGone = null;
       scheduleRef.current = null;
       gl.canvas.remove();
       gl.dispose();

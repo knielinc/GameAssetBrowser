@@ -44,8 +44,8 @@ export const REAL_ASSET_KINDS = ["audio", "texture", "model", "document"] as con
 export const NOUN: Record<AssetKind, string> = {
   all: "files",
   audio: "files",
-  texture: "images",
-  model: "models",
+  texture: "2D files",
+  model: "3D files",
   document: "documents",
 };
 

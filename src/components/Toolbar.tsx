@@ -47,7 +47,7 @@ function PanelToggle({
       aria-pressed={on}
       className={clsx(
         "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms]",
-        on ? "bg-accent-fill text-accent-fg" : "text-dim hover:bg-overlay hover:text-text",
+        on ? "bg-accent-fill text-accent-fg" : "text-dim hover:bg-hover-strong hover:text-text",
       )}
       onClick={onClick}
     >
@@ -85,8 +85,8 @@ function PillToggle({
         "flex items-center gap-1.5 text-[11px] font-medium transition-[background-color,transform,color] duration-[120ms]",
         menu ? "h-9 w-full justify-start rounded-lg px-3" : "h-8 rounded-full px-3",
         active
-          ? "bg-accent-fill text-accent-fg shadow-e1"
-          : clsx("bg-bg text-dim hover:bg-overlay hover:text-text", !menu && "hover:-translate-y-px"),
+          ? "bg-accent-fill text-accent-fg"
+          : clsx("bg-bg text-dim hover:bg-hover-strong hover:text-text", !menu && "hover:-translate-y-px"),
       )}
       onClick={onClick}
     >
@@ -136,8 +136,8 @@ const SORT_LABELS: Record<SortField, string> = {
 const PLACEHOLDER: Record<AssetKind, string> = {
   all: "Search files…",
   audio: "Search samples…",
-  texture: "Search images…",
-  model: "Search models…",
+  texture: "Search 2D…",
+  model: "Search 3D…",
   document: "Search documents…",
 };
 
@@ -262,7 +262,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           value={query}
           spellCheck={false}
           placeholder={PLACEHOLDER[kind]}
-          className="h-8 w-full rounded-full border-0 bg-bg pl-8 pr-7 text-xs text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-overlay focus:ring-2 focus:ring-accent/35"
+          className="h-8 w-full rounded-full border-0 bg-bg pl-8 pr-7 text-xs text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-hover-strong focus:ring-2 focus:ring-accent/35"
           onChange={(e) => setQuery(kind, e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") setQuery(kind, "");
@@ -336,7 +336,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
                   aria-label="Sort by"
                   aria-expanded={sortOpen}
                   title={`Sort by — ${SORT_LABELS[sortField]}`}
-                  className="flex h-[30px] items-center gap-2 rounded-full bg-bg pl-3 pr-2 text-[12px] text-text transition-colors duration-[120ms] hover:bg-overlay"
+                  className="flex h-[30px] items-center gap-2 rounded-full bg-bg pl-3 pr-2 text-[12px] text-text transition-colors duration-[120ms] hover:bg-hover-strong"
                   onClick={() => setSortOpen((o) => !o)}
                 >
                   {SORT_LABELS[sortField]}
@@ -355,7 +355,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
                           "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
                           f === sortField
                             ? "bg-accent-fill text-accent-fg"
-                            : "text-dim hover:bg-overlay hover:text-text",
+                            : "text-dim hover:bg-hover-strong hover:text-text",
                         )}
                         onClick={() => {
                           setSort(kind, f);
@@ -419,7 +419,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
                         "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors duration-[120ms]",
                         f === sortField
                           ? "bg-accent-fill text-accent-fg"
-                          : "text-dim hover:bg-overlay hover:text-text",
+                          : "text-dim hover:bg-hover-strong hover:text-text",
                       )}
                       onClick={() => setSort(kind, f)}
                     >
@@ -429,7 +429,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
                   ))}
                   <button
                     type="button"
-                    className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+                    className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
                     onClick={() => toggleSortDir(kind)}
                   >
                     {sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
@@ -441,7 +441,7 @@ export default function Toolbar({ kind }: ToolbarProps): ReactElement {
           </div>
         )}
 
-        <div className="ml-1 flex items-center gap-0.5 rounded-full bg-bg p-0.5">
+        <div className="ml-1 flex items-center gap-1 rounded-full bg-bg p-1">
           {(["grid", "list"] as const).map((mode) => {
             const Icon = mode === "grid" ? LayoutGrid : List;
             return (

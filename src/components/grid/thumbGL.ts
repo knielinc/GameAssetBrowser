@@ -124,6 +124,16 @@ export interface DrawCell {
 const FLOATS = 13; // aCell(4) + aInset(4) + aUvSize(2) + aLayer(1) + aRadius(2)
 /** Corner radius in CSS px — matches the cells' Tailwind `rounded-lg`. */
 const CORNER_PX = 8;
+/** Concurrent tex:// fetches. A screenful of a dense grid is 200+ cells, and
+ *  the Rust scheme handler spawns a thread per request, so firing them all at
+ *  once is a stampede for no gain — the responses are small and the socket pool
+ *  serializes them anyway. */
+const MAX_IN_FLIGHT = 8;
+/** How many times one key may be reported gone before we stop asking for a
+ *  re-decode. Bounds the 404 → forget → re-request cycle for a file that simply
+ *  cannot be decoded, while leaving room for the ordinary race where the retry
+ *  arrives before the decode does. */
+const MAX_GONE_RETRIES = 3;
 
 export class ThumbGL {
   readonly canvas: HTMLCanvasElement;
@@ -143,6 +153,22 @@ export class ThumbGL {
   private inFlight = new Set<string>();
   /** Keys that 404'd, so we don't hammer tex:// — cleared when a decode lands. */
   private failed = new Set<string>();
+  /** Keys waiting for a fetch slot, most-recently-asked LAST. A screenful is
+   *  200+ cells and every tex:// request costs a thread on the Rust side, so
+   *  they go out a few at a time rather than as one stampede. `queued` mirrors
+   *  it for membership — draw() re-asks for every missing cell on every frame,
+   *  so an array scan here would be quadratic in the visible count. */
+  private queue: string[] = [];
+  private queued = new Set<string>();
+  private disposed = false;
+  /** How many times each key has 404'd and been reported to `onGone`. Survives
+   *  clearFailed() (which is what un-fails a key) so a genuinely undecodable
+   *  file can't drive an endless forget→re-request→404 cycle. Reset on a
+   *  successful fetch, so a later eviction gets a fresh set of attempts. */
+  private gone = new Map<string, number>();
+  /** Told about a key whose pixels are gone from the Rust cache, so the owner
+   *  can re-request the decode. Set once, by ThumbGLOverlay. */
+  onGone: ((key: string) => void) | null = null;
 
   constructor() {
     const canvas = document.createElement("canvas");
@@ -220,16 +246,48 @@ export class ThumbGL {
     this.failed.clear();
   }
 
-  /** Fetch `key`'s RGBA over tex:// and upload it, unless it's already here or
-   *  in flight. Returns immediately; the thumbnail appears on a later frame. */
+  /** Fetch `key`'s RGBA over tex:// and upload it, unless it's already here,
+   *  queued, in flight or known-bad. Returns immediately; the thumbnail appears
+   *  on a later frame. */
   request(key: string): void {
-    if (this.atlas.has(key) || this.inFlight.has(key) || this.failed.has(key)) return;
+    if (
+      this.atlas.has(key) ||
+      this.inFlight.has(key) ||
+      this.failed.has(key) ||
+      this.queued.has(key)
+    ) {
+      return;
+    }
+    this.queue.push(key);
+    this.queued.add(key);
+    this.pump();
+  }
+
+  /** Start fetches until the in-flight cap is reached. Newest-first (the queue
+   *  is drained from the back): after a scroll the freshly-asked keys are the
+   *  ones under the user's eye, and stale entries left by a fly-over cost one
+   *  cheap fetch each at the tail. */
+  private pump(): void {
+    while (!this.disposed && this.inFlight.size < MAX_IN_FLIGHT) {
+      const key = this.queue.pop();
+      if (key === undefined) return;
+      this.queued.delete(key);
+      if (this.atlas.has(key) || this.inFlight.has(key) || this.failed.has(key)) continue;
+      this.fetchOne(key);
+    }
+  }
+
+  private fetchOne(key: string): void {
     this.inFlight.add(key);
     void (async () => {
       try {
         const res = await fetch(texUrl(key));
         if (!res.ok) {
-          this.failed.add(key);
+          // 404 = the Rust pixel cache no longer holds these pixels (it is a
+          // bounded LRU and we may have held this key for a long time). Say so,
+          // so the owner can re-request the decode — otherwise the cell shows
+          // its badges and dimensions but never an image again.
+          this.reportGone(key);
           return;
         }
         const buf = await res.arrayBuffer();
@@ -237,16 +295,29 @@ export class ThumbGL {
         const w = dv.getUint32(0, true);
         const h = dv.getUint32(4, true);
         if (w === 0 || h === 0 || buf.byteLength < 8 + w * h * 4) {
-          this.failed.add(key);
+          this.reportGone(key);
           return;
         }
+        if (this.disposed) return; // the atlas texture is gone
         this.atlas.upload(key, w, h, new Uint8Array(buf, 8));
+        this.gone.delete(key);
       } catch {
+        // Transient (the fetch was aborted, the scheme handler died). Hold it
+        // out of the retry loop until the next clearFailed(), but don't spend
+        // one of the re-decode attempts on it — nothing says the pixels moved.
         this.failed.add(key);
       } finally {
         this.inFlight.delete(key);
+        this.pump();
       }
     })();
+  }
+
+  private reportGone(key: string): void {
+    this.failed.add(key);
+    const tries = (this.gone.get(key) ?? 0) + 1;
+    this.gone.set(key, tries);
+    if (tries <= MAX_GONE_RETRIES) this.onGone?.(key);
   }
 
   /** Draw `cells` into a `cssW x cssH` viewport (device pixels via `dpr`). */
@@ -314,6 +385,12 @@ export class ThumbGL {
   }
 
   dispose(): void {
+    // Stops pump() from starting anything new; a fetch already in flight sees
+    // the flag when it resolves and drops its pixels instead of uploading into
+    // a deleted texture.
+    this.disposed = true;
+    this.queue = [];
+    this.queued.clear();
     this.atlas.dispose();
     this.gl.deleteProgram(this.prog);
     this.gl.deleteBuffer(this.instBuf);

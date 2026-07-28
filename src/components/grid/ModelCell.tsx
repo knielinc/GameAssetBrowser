@@ -40,7 +40,7 @@ export default function ModelCell({ file, selected, focused }: ModelCellProps): 
       starred={starred}
       onToggleStar={() => toggleFavoriteSmart(file.path)}
     >
-      <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-[#15151d] to-[#0c0c12]">
+      <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-stage-top to-stage">
         {thumb !== undefined ? (
           // A rendered thumbnail is a plain <img> — the grid holds no WebGL
           // contexts at all, whatever the folder size.

@@ -10,6 +10,7 @@ import {
 import { scrollToIndexRef } from "../hooks/useKeyboardShortcuts";
 import { useLibraryStore, type LibFile } from "./libraryStore";
 import { useFavoritesStore } from "./favoritesStore";
+import { AUDIO_EXTENSIONS } from "../types";
 
 /**
  * Mutable playhead written by the 20 Hz `playback:position` listener and read
@@ -145,6 +146,43 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     }
   },
 }));
+
+/**
+ * Pause playback, leaving the track LOADED so returning to it resumes from the
+ * same position rather than restarting. No-op when nothing is playing, so
+ * callers can fire it unconditionally.
+ */
+export function pausePlayback(): void {
+  if (!usePlayerStore.getState().playing) return;
+  usePlayerStore.setState({ playing: false });
+  positionRef.playing = false;
+  void playerPause();
+}
+
+/** Audio-or-not from a path alone, mirroring the scanner's kind assignment.
+ *  Used where only a selected PATH is known, with no FileEntry to read `kind`
+ *  off — the selection is stored as a path. */
+function isAudioPath(path: string): boolean {
+  const base = path.slice(Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")) + 1);
+  const dot = base.lastIndexOf(".");
+  if (dot < 0) return false;
+  return (AUDIO_EXTENSIONS as readonly string[]).includes(base.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * Whether the file the user currently has selected is audio.
+ *
+ * Reads the ACTIVE tab's selection, so it flips as they browse: the Audio tab's
+ * selection is audio by construction, the All tab's may be any kind, and the
+ * 2D/3D/Docs tabs' never is. The transport is gated on this (see App) — picking
+ * a texture is treated as "done listening".
+ */
+export function useAudioSelected(): boolean {
+  return useLibraryStore((s) => {
+    const path = s.tabs[s.activeTab].selectedPath;
+    return path !== null && isAudioPath(path);
+  });
+}
 
 let loadTimer: number | undefined;
 

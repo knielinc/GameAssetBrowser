@@ -7,6 +7,7 @@ import { docIsEbook, docIsPdf, docIsTextual, docSupportsZoom } from "./doc";
 import DocViewControls from "./DocViewControls";
 import PdfLayoutControls from "./PdfLayoutControls";
 import ReadWidthControls from "./ReadWidthControls";
+import ReadThemeControls from "./ReadThemeControls";
 
 export interface DocumentInspectorProps {
   path: string | null;
@@ -48,7 +49,12 @@ export default function DocumentInspector({
           {docSupportsZoom(ext) && (
             <div className="flex shrink-0 items-center gap-2 border-b border-bg px-2.5 py-1.5">
               {docIsPdf(ext) && <PdfLayoutControls />}
-              {(docIsTextual(ext) || docIsEbook(ext)) && <ReadWidthControls />}
+              {(docIsTextual(ext) || docIsEbook(ext)) && (
+                <>
+                  <ReadThemeControls />
+                  <ReadWidthControls />
+                </>
+              )}
               <DocViewControls className="ml-auto" />
             </div>
           )}

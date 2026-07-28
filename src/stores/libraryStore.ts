@@ -173,6 +173,13 @@ export interface LibraryState {
    *  version-counter idiom as `durations`. */
   thumbs: Map<number, { key: string; info: ThumbInfo | null }>;
   thumbsVersion: number;
+  /** Bumped by `forgetThumbs` only. Deliberately NOT `thumbsVersion`: that one
+   *  drives the WebGL overlay's "a decode landed, retry the 404s" nudge, and
+   *  bumping it here would send the overlay straight back at a key whose
+   *  re-decode has not happened yet — a 404 → forget → 404 loop. This counter
+   *  wakes only the request hook, which re-asks Rust; the resulting batch bumps
+   *  `thumbsVersion` once the pixels genuinely exist. */
+  thumbRetry: number;
   /** file id → source [w, h] from the texture dimension probe. Same idiom. */
   dims: Map<number, readonly [w: number, h: number]>;
   dimsVersion: number;
@@ -216,6 +223,12 @@ export interface LibraryState {
   /** Model thumbnails: rendered in the webview, so they arrive as a bare key
    *  with no image statistics (those are a texture-decode by-product). */
   setModelThumbs: (entries: [id: number, key: string][]) => void;
+  /** Forget the records naming these cache keys, so the next visible-range
+   *  flush re-requests a decode. Called when `tex://`/`thumb://` 404s: the Rust
+   *  pixel cache is a bounded LRU, so a key we still hold can outlive its
+   *  pixels, and without this the cell would stay blank for the whole session.
+   *  See `thumbRetry`. */
+  forgetThumbs: (keys: readonly string[]) => void;
   setActiveTab: (kind: AssetKind) => void;
   patchTab: (kind: AssetKind, patch: Partial<TabState>) => void;
   setQuery: (kind: AssetKind, query: string) => void;
@@ -362,6 +375,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   audioMetaVersion: 0,
   thumbs: new Map<number, { key: string; info: ThumbInfo | null }>(),
   thumbsVersion: 0,
+  thumbRetry: 0,
   dims: new Map<number, readonly [number, number]>(),
   dimsVersion: 0,
   folderScopes: [],
@@ -541,6 +555,21 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
         s.thumbs.set(id, { key, info: null });
       }
       return { thumbsVersion: s.thumbsVersion + 1 };
+    }),
+
+  forgetThumbs: (keys) =>
+    set((s) => {
+      const gone = new Set(keys);
+      let dropped = 0;
+      for (const [id, t] of s.thumbs) {
+        if (!gone.has(t.key)) continue;
+        s.thumbs.delete(id);
+        dropped++;
+      }
+      // No thumbsVersion bump — see the field docs. Nothing on screen changes
+      // yet either: the badges keep rendering off the stale read until the
+      // re-decode lands, which is the point (no flicker back to a bare cell).
+      return dropped === 0 ? {} : { thumbRetry: s.thumbRetry + 1 };
     }),
 
   setActiveTab: (kind) => set({ activeTab: kind }),

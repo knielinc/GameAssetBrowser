@@ -64,7 +64,7 @@ export default function AudioCell({ file, selected, focused }: AudioCellProps): 
         </div>
       )}
       {isCurrent && (
-        <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center rounded-full bg-[#0c0d12e6] px-1.5 py-1">
+        <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center rounded-full bg-chip px-1.5 py-1">
           {playing ? (
             <span className="eq">
               <span />

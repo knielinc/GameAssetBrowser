@@ -85,7 +85,7 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps):
         <button
           key={item.label}
           type="button"
-          className="flex h-7 w-full items-center gap-2.5 px-3 text-[13px] text-text transition-colors duration-[120ms] hover:bg-raised"
+          className="flex h-7 w-full items-center gap-2.5 px-3 text-[13px] text-text transition-colors duration-[120ms] hover:bg-hover"
           onClick={() => {
             onClose();
             item.onClick();

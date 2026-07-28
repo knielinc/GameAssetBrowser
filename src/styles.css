@@ -4,12 +4,22 @@
   /* Tonal ladder — each surface a step lighter and faintly cooler. Depth is
      carried by tone + soft shadow, NOT a 1px line around every box (the tell
      that reads as machine-made). bg → panel → raised → overlay. */
-  --color-bg: #0d0e13;
-  --color-header: #16181f; /* the top bar — a touch darker than the panel chrome */
-  --color-panel: #1e212a;
-  --color-raised: #272a35;
-  --color-overlay: #313641;
-  --color-border: #2a2e39; /* legacy surfaces not yet migrated off borders */
+  --color-bg: #08080b;
+  --color-header: #13151b; /* the top bar — a touch darker than the panel chrome */
+  --color-panel: #242832;
+  --color-raised: #2f3240;
+  --color-overlay: #3b414e;
+  /* Hover tints. Separate from raised/overlay because the two roles conflict in
+     a LIGHT theme: an elevated popup goes lighter (white) while a hover on a
+     near-white card must go darker. In dark themes both are "lighter", so these
+     equal raised/overlay and nothing changes. See stores/theme.ts. */
+  --color-hover: #2f3240;
+  --color-hover-strong: #3b414e;
+  /* The tab track inside the header. Equal to `bg` in dark themes; in light
+     ones the header is darker than the canvas, so the well has to go deeper
+     still or the pill reads as floating on the bar. */
+  --color-well: #08080b;
+  --color-border: #323744; /* legacy surfaces not yet migrated off borders */
   --color-text: #edeff4;
   --color-dim: #a2a8b8;
   --color-faint: #6b7284;
@@ -32,6 +42,48 @@
   --color-kind-texture: #66c6dc;
   --color-kind-model: #ffb454;
   --color-kind-document: #b79cff;
+  /* Favorites. NOT the model hue it used to borrow: that one is darkened in
+     light themes to carry 4.5:1 as TEXT (the 3D tab label), which turns a star
+     brown. A star is a status GLYPH, not text — it reads by hue first, so this
+     stays gold in both modes and only shifts enough to hold its shape against
+     the surface. */
+  --color-star: #ffc53d;
+  /* Text/icons sitting ON a kind-coloured fill. Near-black under the dark
+     set's bright tints, near-white under the light set's darkened ones. */
+  --color-on-kind: #1a1208;
+
+  /* Info chips pinned over a grid cell's thumbnail: format, dimensions, size,
+     and the now-playing pill. These used to be a hardcoded blue-black with
+     white text, which meant a light theme wore four near-black blobs on every
+     card.
+
+     They can't simply take a surface token, because what's BEHIND them is not
+     an app surface — it's an arbitrary thumbnail, a white sprite sheet one cell
+     and a black normal map the next. What makes them legible is opacity: at
+     ~90% the chip effectively IS its own surface, so contrast is chip-vs-text,
+     which is fixed, rather than chip-vs-whatever. That buys the freedom to
+     follow the theme — dark themes tint their near-black chip with `bg`, light
+     ones use the card white, and the text tone comes along for free. The one
+     thing it costs is a crisp chip EDGE when the thumbnail happens to match
+     (white chip on a white sheet), which is the same trade dark themes have
+     always made against a dark normal map. */
+  --color-chip: color-mix(in srgb, var(--color-bg) 90%, transparent);
+  --color-chip-fg: var(--color-text);
+
+  /* The 3D / texture "stage" — the backdrop a model or material is presented
+     on, and the well behind a thumbnail. Follows light/dark like everything
+     else: a near-black stage under a light theme read as a hole in the window
+     next to the paper-white 2D and document previews. `stage-top` is the
+     lighter end of the cell gradient. */
+  --color-stage: #0c0c12;
+  --color-stage-top: #15151d;
+
+  /* The list view's sheet. `bg` is cut deep so GRID cards separate from it by
+     tone alone — a list has no cards, so it doesn't need (or want) that depth,
+     and in a light theme the deep canvas made list mode read far darker than
+     the content it holds. Indirects to a per-theme colour; applyTheme points it
+     at `bg` in dark themes and `panel` in light ones. */
+  --color-list: var(--color-bg);
 
   /* PBR channel palette — functional colour on the material channel strip.
      Normal is periwinkle (like an actual tangent-space normal map), so a
@@ -46,7 +98,9 @@
   /* Soft, diffuse depth — the separator that replaces borders. */
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.3), 0 3px 10px rgb(0 0 0 / 0.22);
   --shadow-e2: 0 4px 14px rgb(0 0 0 / 0.34), 0 14px 34px rgb(0 0 0 / 0.3);
-  --shadow-sel: 0 0 0 2px var(--color-accent), 0 4px 14px rgb(0 0 0 / 0.34);
+  /* Selection is a ring, not an elevation — grid cells carry no drop shadow, so
+     the 14px black bloom this used to append only muddied the canvas. */
+  --shadow-sel: 0 0 0 2px var(--color-accent);
 
   /* Spring easing for the playful micro-motion (hover lift, selection). */
   --ease-spring: cubic-bezier(0.34, 1.42, 0.5, 1);
@@ -59,6 +113,25 @@
 
 :root {
   color-scheme: dark;
+
+  /* Non-Tailwind tokens — chrome that has to flip with light/dark but isn't a
+     colour utility. applyTheme() overwrites all of these on :root at startup
+     and on every theme change (see DARK_MODE / LIGHT_MODE in stores/theme.ts);
+     the values here are the dark defaults that paint the first frame. */
+  --scroll-thumb: #2f3240;
+  --scroll-thumb-strong: #3b414e;
+  --scroll-thumb-hover: #474e5d;
+  --checker-a: #191920;
+  --checker-b: #23232b;
+  /* Floating HUD pill over a viewport (PDF pager, ebook progress, model
+     overlays). Dark in BOTH modes — these sit over white PDF pages and
+     near-black 3D stages, so they can't borrow the app surfaces. */
+  --hud-bg: rgb(0 0 0 / 0.65);
+  --hud-fg: rgb(255 255 255 / 0.9);
+  --hud-dim: rgb(255 255 255 / 0.6);
+  --hud-hover: rgb(255 255 255 / 0.15);
+  --hud-line: rgb(255 255 255 / 0.2);
+  --hud-mark: #fcd34d;
 }
 
 html,
@@ -97,7 +170,7 @@ textarea {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-raised);
+  background: var(--scroll-thumb);
   border-radius: 6px;
   /* Transparent border + padding-box clip insets the thumb WITHOUT painting a
      coloured ring — so it reads the same on any surface (no outline). */
@@ -105,17 +178,26 @@ textarea {
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3d4a;
+  background: var(--scroll-thumb-hover);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-/* Popup-internal scroll: the global thumb is raised-on-bg and vanishes on a
-   raised panel — step it one tone up. */
+/* A reading surface carries its own palette, independent of the app theme, so
+   its background and scrollbar track the PAGE rather than the chrome. */
+.rd-page {
+  background: var(--rd-bg);
+}
+.rd-scroll::-webkit-scrollbar-thumb {
+  background: var(--rd-thumb);
+}
+
+/* Popup-internal scroll: the global thumb is tuned for the canvas and vanishes
+   on an elevated popup surface — step it one tone further. */
 .facet-scroll::-webkit-scrollbar-thumb {
-  background: var(--color-overlay);
+  background: var(--scroll-thumb-strong);
 }
 
 /* Markdown preview: use the app background instead of GitHub's own, so it
@@ -124,17 +206,17 @@ textarea {
    outranks github-markdown-css's `.markdown-body` background. */
 .doc-markdown,
 .doc-markdown .markdown-body {
-  background: var(--color-bg);
+  background: var(--rd-bg);
 }
-/* Transparency checkerboard behind a PSD composite. Two dark greys so it reads
-   on the dark chrome without shouting. */
+/* Transparency checkerboard behind a PSD composite. Two close-toned greys so it
+   reads against the chrome without shouting — light or dark. */
 .doc-checker {
-  background-color: #191920;
+  background-color: var(--checker-a);
   background-image:
-    linear-gradient(45deg, #23232b 25%, transparent 25%),
-    linear-gradient(-45deg, #23232b 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #23232b 75%),
-    linear-gradient(-45deg, transparent 75%, #23232b 75%);
+    linear-gradient(45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-b) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%);
   background-size: 20px 20px;
   background-position:
     0 0,
@@ -151,6 +233,73 @@ textarea {
   margin-inline: auto;
 }
 
+/* github-markdown-css v5 inlines hex per mode rather than exposing variables,
+   and we import the DARK sheet unconditionally — which left markdown rendering
+   near-white #f0f6fc prose on a light theme's background, i.e. unreadable.
+   Port the light sheet's prose colours over the dark ones when the app theme is
+   light. Only the elements markdown-it can actually emit are listed: it runs
+   with html:false and no highlighter, so GitHub's `.pl-*` syntax classes and
+   alert/diff chrome never appear in this output. */
+.doc-markdown.rd-light .markdown-body {
+  color: #1f2328;
+}
+.doc-markdown.rd-light .markdown-body a {
+  color: #0969da;
+}
+.doc-markdown.rd-light .markdown-body h1,
+.doc-markdown.rd-light .markdown-body h2 {
+  border-bottom-color: #d1d9e0b3;
+}
+.doc-markdown.rd-light .markdown-body h6,
+.doc-markdown.rd-light .markdown-body blockquote,
+.doc-markdown.rd-light .markdown-body .footnotes {
+  color: #59636e;
+}
+.doc-markdown.rd-light .markdown-body blockquote {
+  border-left-color: #d1d9e0;
+}
+.doc-markdown.rd-light .markdown-body hr {
+  background-color: #d1d9e0;
+  border-bottom-color: #d1d9e0b3;
+}
+.doc-markdown.rd-light .markdown-body code,
+.doc-markdown.rd-light .markdown-body tt {
+  background-color: #818b981f;
+}
+.doc-markdown.rd-light .markdown-body pre {
+  color: #1f2328;
+  background-color: #f6f8fa;
+}
+.doc-markdown.rd-light .markdown-body pre > code,
+.doc-markdown.rd-light .markdown-body pre code,
+.doc-markdown.rd-light .markdown-body pre tt {
+  background-color: rgb(0 0 0 / 0);
+}
+.doc-markdown.rd-light .markdown-body table th,
+.doc-markdown.rd-light .markdown-body table td {
+  border-color: #d1d9e0;
+}
+.doc-markdown.rd-light .markdown-body table tr {
+  background-color: #ffffff;
+  border-top-color: #d1d9e0b3;
+}
+.doc-markdown.rd-light .markdown-body table tr:nth-child(2n) {
+  background-color: #f6f8fa;
+}
+.doc-markdown.rd-light .markdown-body kbd {
+  color: #1f2328;
+  background-color: #f6f8fa;
+}
+.doc-markdown.rd-light .markdown-body mark {
+  color: #1f2328;
+  background-color: #fff8c5;
+}
+/* The sheet also declares `color-scheme: dark` on .markdown-body, which is what
+   paints the pane's scrollbar and any form control inside it. */
+.doc-markdown.rd-light .markdown-body {
+  color-scheme: light;
+}
+
 /* ---------------------------------------------------------- components --- */
 
 /* Virtualized list rows: subtle raise on hover, accent tint + left bar when
@@ -161,7 +310,7 @@ textarea {
   transition: background-color 120ms ease;
 }
 .file-row:hover {
-  background: var(--color-raised);
+  background: var(--color-hover);
 }
 .file-row.row-selected {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
@@ -185,8 +334,9 @@ textarea {
 
 /* Sidebar resize handle: an invisible 6px hit strip straddling the
    sidebar/main boundary (negative margins keep it out of the flex flow).
-   Hover or an active drag fades in a 1px accent line over the panel border —
-   the same 120 ms cadence as everything else. */
+   Hover or an active drag turns its 1px divider accent — the same 120 ms
+   cadence as everything else. Used for BOTH vertical seams: sidebar/content
+   and content/inspector. */
 .sidebar-resizer {
   position: relative;
   z-index: 10;
@@ -197,6 +347,15 @@ textarea {
   cursor: col-resize;
   touch-action: none;
 }
+/* The seam itself, drawn ALWAYS rather than faded in on hover. Dark themes
+   separate chrome from content by tone alone and never needed it, but in a
+   light theme the list sheet IS `panel` (see --color-list) — the exact colour
+   of the sidebar and inspector flanking it — so the workspace read as one flat
+   white slab with no edges. `bg` is the same hairline the toolbar, status bar
+   and player bar already draw with, so this gives the vertical panels the
+   separator the horizontal chrome always had. In dark themes it lands on a
+   canvas that is already `bg`, so only the panel-side edge picks up a seam —
+   exactly what `border-y border-bg` does on the toolbar. */
 .sidebar-resizer::after {
   content: "";
   position: absolute;
@@ -205,13 +364,12 @@ textarea {
   left: 50%;
   width: 1px;
   margin-left: -0.5px;
-  background: var(--color-accent);
-  opacity: 0;
-  transition: opacity 120ms ease;
+  background: var(--color-bg);
+  transition: background-color 120ms ease;
 }
 .sidebar-resizer:hover::after,
 .sidebar-resizer.sidebar-resizer-active::after {
-  opacity: 1;
+  background: var(--color-accent);
 }
 
 /* While a sidebar drag is live (class set by useSidebarWidth): keep the
@@ -228,7 +386,7 @@ html.sidebar-resizing * {
   transition: background-color 120ms ease;
 }
 .tree-row:hover {
-  background: var(--color-raised);
+  background: var(--color-hover);
 }
 .tree-row.tree-row-selected {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
@@ -262,12 +420,57 @@ html.sidebar-resizing * {
 /* Alpha checkerboard behind texture thumbnails. Without it, cutout foliage
    and masked decals read as "the thumbnail is broken" on a dark panel. */
 .alpha-checker {
-  background-color: var(--color-raised);
+  background-color: var(--color-hover);
   background-image: repeating-conic-gradient(
     var(--color-panel) 0% 25%,
-    var(--color-raised) 0% 50%
+    var(--color-hover) 0% 50%
   );
   background-size: 16px 16px;
+}
+
+/* Floating HUD pill over a viewport — the PDF pager, the ebook progress/
+   bookmark bar. Previously hardcoded black/65 + white/90 Tailwind utilities in
+   each viewer, which meant they ignored the theme entirely. Now driven by the
+   --hud-* vars: applyTheme sets them per light/dark mode, and EbookView
+   overrides them locally so the pill follows the READING page instead. */
+.hud {
+  background: var(--hud-bg);
+  color: var(--hud-fg);
+  box-shadow: var(--shadow-e2);
+}
+.hud-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--hud-fg);
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.hud-btn:hover:not(:disabled) {
+  background: var(--hud-hover);
+}
+.hud-btn:disabled {
+  opacity: 0.3;
+}
+.hud-btn-mark {
+  color: var(--hud-mark);
+}
+.hud-dim {
+  color: var(--hud-dim);
+}
+.hud-sep {
+  background: var(--hud-line);
+}
+.hud-input {
+  background: var(--hud-hover);
+  color: var(--hud-fg);
+}
+.hud-input:focus {
+  background: var(--hud-line);
 }
 
 /* Extension filter chips — a tonal well on the toolbar, no outline. */
@@ -282,17 +485,20 @@ html.sidebar-resizing * {
   transition:
     color 120ms ease,
     background-color 120ms ease,
+    box-shadow 120ms ease,
     transform 120ms var(--ease-spring);
 }
 .chip:hover {
   color: var(--color-text);
-  background: var(--color-overlay);
+  background: var(--color-hover-strong);
   transform: translateY(-1px);
 }
 .chip-active {
   color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 15%, transparent);
   font-weight: 600;
+  /* An engaged filter is stated by colour; it must not also lift on hover. */
+  transform: none;
 }
 .chip-active:hover {
   color: var(--color-accent-hover);
@@ -310,11 +516,13 @@ html.sidebar-resizing * {
   color: var(--color-dim);
   transition:
     color 120ms ease,
-    background-color 120ms ease;
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
 }
 .icon-btn:hover:not(:disabled) {
   color: var(--color-text);
-  background: var(--color-raised);
+  background: var(--color-hover);
 }
 .icon-btn:disabled {
   opacity: 0.35;
@@ -327,6 +535,7 @@ html.sidebar-resizing * {
   color: var(--color-accent-hover);
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
+
 
 /* Primary action (Add Folder / empty-state CTA). */
 .btn-primary {
@@ -378,8 +587,9 @@ html.sidebar-resizing * {
 }
 
 /* Sort dropdown in the toolbar — tonal pill, focus ring not a border. The
-   native arrow is hidden (a positioned chevron replaces it); `color-scheme`
-   forces the OS popup dark, and the options are themed so the list matches. */
+   native arrow is hidden (a positioned chevron replaces it); the OS-drawn popup
+   inherits the root `color-scheme` that applyTheme flips, so it follows a light
+   theme instead of staying stuck dark, and the options are themed to match. */
 .sort-select {
   height: 30px;
   padding: 0 28px 0 12px;
@@ -391,14 +601,13 @@ html.sidebar-resizing * {
   outline: none;
   appearance: none;
   -webkit-appearance: none;
-  color-scheme: dark;
   cursor: pointer;
   transition:
     background-color 120ms ease,
     box-shadow 150ms ease;
 }
 .sort-select:hover {
-  background: var(--color-overlay);
+  background: var(--color-hover-strong);
 }
 .sort-select:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 32%, transparent);

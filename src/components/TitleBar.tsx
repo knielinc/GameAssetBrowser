@@ -33,8 +33,8 @@ const win = getCurrentWindow();
 const TAB_META: Record<AssetKind, { label: string; icon: typeof Box; hue: string }> = {
   all: { label: "All", icon: LayoutGrid, hue: "text-accent" },
   audio: { label: "Audio", icon: AudioLines, hue: "text-kind-audio" },
-  texture: { label: "Images", icon: Image, hue: "text-kind-texture" },
-  model: { label: "Models", icon: Box, hue: "text-kind-model" },
+  texture: { label: "2D", icon: Image, hue: "text-kind-texture" },
+  model: { label: "3D", icon: Box, hue: "text-kind-model" },
   document: { label: "Docs", icon: FileText, hue: "text-kind-document" },
 };
 
@@ -56,7 +56,7 @@ function ControlButton({
       onClick={onClick}
       className={
         "flex h-full w-11 items-center justify-center text-dim transition-colors duration-[120ms] " +
-        (danger === true ? "hover:bg-[#e81123] hover:text-white" : "hover:bg-overlay hover:text-text")
+        (danger === true ? "hover:bg-[#e81123] hover:text-white" : "hover:bg-hover-strong hover:text-text")
       }
     >
       {children}
@@ -151,9 +151,14 @@ export default function TitleBar(): ReactElement {
 
       <SettingsMenu />
 
-      {/* The three lenses as a segmented pill — a tonal well with the active
-          tab lifted onto its own filled pill. Icon + live count preserved. */}
-      <div className="flex shrink-0 items-center gap-0.5 rounded-full bg-bg p-0.5">
+      {/* The three lenses as a segmented pill — a tonal well with the active tab
+          on its own ACCENT-filled pill, matching every other segmented control
+          in the app (it used to be a neutral grey barely distinct from the well
+          it sits in). Per-kind icon hue + live count preserved. */}
+      {/* `bg-well`, not `bg-bg`: in a LIGHT theme the header is darker than the
+          canvas, so a bg-coloured track here reads raised instead of recessed —
+          the tab pill floated on the bar instead of sitting in it. */}
+      <div className="flex shrink-0 items-center gap-1 rounded-full bg-well p-1">
         {ASSET_KINDS.map((kind, i) => {
           const { label, icon: Icon, hue } = TAB_META[kind];
           const active = activeTab === kind;
@@ -165,18 +170,27 @@ export default function TitleBar(): ReactElement {
               className={clsx(
                 "flex h-[26px] items-center rounded-full text-[11px] font-medium transition-[background-color,color] duration-[120ms]",
                 compact ? "w-8 justify-center" : "gap-1.5 px-2.5",
-                active ? "bg-raised text-text shadow-e1" : "text-dim hover:text-text",
+                active ? "bg-accent-fill text-accent-fg" : "text-dim hover:text-text",
               )}
               onClick={() => switchTab(kind)}
             >
-              <Icon size={13} className={clsx(hue, !active && "opacity-60")} />
+              {/* The per-kind hue is an INACTIVE-only signal. On the active pill
+                  the fill is a solid accent, and a dark kind hue (light mode's
+                  #96590a model amber, say) all but disappeared on it — so the
+                  active icon inherits accent-fg like its label. */}
+              <Icon size={13} className={clsx(!active && [hue, "opacity-60"])} />
               {!compact && (
                 <>
                   {label}
                   <span
                     className={clsx(
                       "rounded-full px-1.5 text-[10px] tabular-nums",
-                      active ? "bg-accent/15 text-accent" : "bg-overlay text-dim",
+                      // accent-fg is the tone picked to read ON accent-fill, so
+                      // the badge stays legible inside the active pill.
+                      // Inactive: hover-strong, not `overlay` — overlay is pure
+                      // white in light themes, which made an idle tab's badge
+                      // shout louder than the active tab's.
+                      active ? "bg-accent-fg/20 text-accent-fg" : "bg-hover-strong text-dim",
                     )}
                   >
                     {counts[kind].toLocaleString()}

@@ -83,7 +83,7 @@ export interface FileRowProps {
   formatLabel: string | undefined;
   /** Audio only — drives the Format/Length columns and the grid template. */
   showDuration: boolean;
-  /** Favorited — the filled amber star; off renders a hover-reveal outline. */
+  /** Favorited — the filled gold star; off renders a hover-reveal outline. */
   starred: boolean;
   /** Star-slot click, by row index (the FileList onSelect idiom, so the memo'd
    *  row keeps one stable callback). Omitted → no star slot (material rows). */
@@ -150,7 +150,7 @@ function FileRowInner({
             className={clsx(
               "shrink-0 rounded p-0.5 transition-opacity duration-[120ms]",
               starred
-                ? "text-kind-model opacity-100"
+                ? "text-star opacity-100"
                 : "text-dim opacity-0 hover:text-text group-hover:opacity-100",
             )}
             onClick={(e) => {

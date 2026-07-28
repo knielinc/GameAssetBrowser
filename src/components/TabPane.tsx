@@ -484,7 +484,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
       <div className="flex min-h-0 flex-1">
         {/* Status bar lives INSIDE the content column so it stops at the
             inspector, not across it — the inspector runs the full height beside
-            it. Its own left/right separators delineate it from both panels. */}
+            it. The resizers draw the seams to either side of it. */}
         <div className="flex min-w-0 flex-1 flex-col">
           {content}
           <StatusBar kind={kind} visibleCount={visible.length} />

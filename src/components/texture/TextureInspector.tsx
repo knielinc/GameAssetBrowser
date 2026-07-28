@@ -152,7 +152,7 @@ export default function TextureInspector({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-        <div className="aspect-square w-full shrink-0 overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
+        <div className="aspect-square w-full shrink-0 overflow-hidden rounded-xl bg-stage shadow-e1">
           {item === null ? (
             <div className="flex h-full items-center justify-center text-[11px] text-dim">
               Select a texture
@@ -218,7 +218,7 @@ export default function TextureInspector({
                       "flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] transition-colors duration-[120ms]",
                       preview.mesh === "flat" && channelOf(m.channel) === preview.channel
                         ? "bg-accent/12"
-                        : "hover:bg-overlay",
+                        : "hover:bg-hover-strong",
                     )}
                     title={`${m.file.name}\nClick to view this map flat`}
                     onClick={() =>

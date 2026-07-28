@@ -214,7 +214,7 @@ function TreeNode({
   // Self-hidden, or excluded because an ancestor is hidden. Either way the
   // content is out of the query, so present the row the same muted way.
   const effectiveHidden = hidden || ancestorHidden;
-  const breakdown = `${node.counts.audio} audio · ${node.counts.texture} images · ${node.counts.model} models · ${node.counts.document} documents`;
+  const breakdown = `${node.counts.audio} audio · ${node.counts.texture} 2D · ${node.counts.model} 3D · ${node.counts.document} documents`;
 
   // Every folder — root or subfolder — scopes the file list the same way: plain
   // click shows ONLY this folder's content, ctrl/cmd-click adds it to what's

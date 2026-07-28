@@ -428,7 +428,7 @@ export default function LayeredView({ path, ext }: { path: string; ext: string }
             {groupIdxs.length > 0 && (
               <button
                 type="button"
-                className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-overlay hover:text-text"
+                className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-hover-strong hover:text-text"
                 onClick={toggleAll}
                 title={allCollapsed ? "Expand all folders" : "Collapse all folders"}
               >
@@ -439,7 +439,7 @@ export default function LayeredView({ path, ext }: { path: string; ext: string }
               <>
                 <button
                   type="button"
-                  className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-overlay hover:text-text"
+                  className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-hover-strong hover:text-text"
                   onClick={() => {
                     setTouched(true);
                     setHidden(new Set());
@@ -450,7 +450,7 @@ export default function LayeredView({ path, ext }: { path: string; ext: string }
                 </button>
                 <button
                   type="button"
-                  className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-overlay hover:text-text"
+                  className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-hover-strong hover:text-text"
                   onClick={resetDefaults}
                   title="Reset to the file’s saved visibility"
                 >
@@ -527,7 +527,7 @@ function LayerRow({
   ].filter((s): s is string => s !== null);
   return (
     <div
-      className="group flex items-center gap-1.5 py-1 pr-1.5 text-[12px] transition-colors hover:bg-overlay"
+      className="group flex items-center gap-1.5 py-1 pr-1.5 text-[12px] transition-colors hover:bg-hover-strong"
       style={{ paddingLeft: 6 + layer.depth * 12 }}
     >
       {layer.isGroup ? (

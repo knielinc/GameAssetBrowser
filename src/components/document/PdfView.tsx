@@ -586,11 +586,11 @@ export default function PdfView({
       {/* Page navigator — prev / jump-box / next. Outside the scroll area so it
           stays put as pages move. */}
       {state === "ready" && numPages > 0 && (
-        <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-black/65 px-1.5 py-1 text-[11px] text-white/90 shadow-e2">
+        <div className="hud absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full px-1.5 py-1 text-[11px]">
           <button
             type="button"
             title="Previous page"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-30"
+            className="hud-btn h-6 w-6"
             disabled={framed && row <= 0}
             onClick={() => step(-1)}
           >
@@ -601,7 +601,7 @@ export default function PdfView({
             inputMode="numeric"
             spellCheck={false}
             aria-label="Go to page"
-            className="w-9 rounded bg-white/10 py-0.5 text-center tabular-nums text-white outline-none focus:bg-white/20"
+            className="hud-input w-9 rounded py-0.5 text-center tabular-nums outline-none"
             onChange={(e) => setJump(e.currentTarget.value.replace(/[^0-9]/g, ""))}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -612,22 +612,22 @@ export default function PdfView({
             }}
             onBlur={() => setJump(String(curPage))}
           />
-          <span className="tabular-nums text-white/60">/ {numPages}</span>
+          <span className="hud-dim tabular-nums">/ {numPages}</span>
           <button
             type="button"
             title="Next page"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-30"
+            className="hud-btn h-6 w-6"
             disabled={framed && row >= rowCount - 1}
             onClick={() => step(1)}
           >
             <ChevronRight size={15} />
           </button>
-          <span className="mx-0.5 h-4 w-px shrink-0 bg-white/20" />
+          <span className="hud-sep mx-0.5 h-4 w-px shrink-0" />
           {bookmark !== null && !onBookmark && (
             <button
               type="button"
               title={`Go to bookmark (page ${bookmark})`}
-              className="flex h-6 items-center gap-1 rounded-full pl-1.5 pr-2 text-amber-300/90 transition-colors hover:bg-white/15 hover:text-amber-300"
+              className="hud-btn hud-btn-mark h-6 gap-1 pl-1.5 pr-2"
               onClick={goToBookmark}
             >
               <Bookmark size={13} fill="currentColor" />
@@ -637,12 +637,7 @@ export default function PdfView({
           <button
             type="button"
             title={onBookmark ? "Remove bookmark" : "Bookmark this page"}
-            className={
-              "flex h-6 w-6 items-center justify-center rounded-full transition-colors " +
-              (onBookmark
-                ? "text-amber-300 hover:bg-white/15"
-                : "text-white/80 hover:bg-white/15 hover:text-white")
-            }
+            className={"hud-btn h-6 w-6" + (onBookmark ? " hud-btn-mark" : "")}
             onClick={toggleBookmark}
           >
             <Bookmark size={14} fill={onBookmark ? "currentColor" : "none"} />
@@ -650,12 +645,12 @@ export default function PdfView({
         </div>
       )}
       {state === "loading" && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-white/80">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-dim">
           Loading PDF…
         </div>
       )}
       {state === "error" && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-white/80">
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-dim">
           Couldn’t open this PDF.
         </div>
       )}

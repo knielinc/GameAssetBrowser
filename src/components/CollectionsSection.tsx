@@ -98,7 +98,7 @@ export default function CollectionsSection(): ReactElement {
       </div>
 
       <ScopeRow
-        icon={<Star size={14} className={clsx("shrink-0", scopes.includes(FAVORITES_SCOPE) ? "text-accent" : "text-kind-model")} />}
+        icon={<Star size={14} className={clsx("shrink-0", scopes.includes(FAVORITES_SCOPE) ? "text-accent" : "text-star")} />}
         label="Favorites"
         count={favoritesCount}
         active={scopes.includes(FAVORITES_SCOPE)}

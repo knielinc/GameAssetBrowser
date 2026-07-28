@@ -105,7 +105,7 @@ export default function FilterMenu({ kind }: { kind: AssetKind }): ReactElement 
           onClick={() => setOpen((o) => !o)}
           className={clsx(
             "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms]",
-            open ? "bg-accent-fill text-accent-fg" : "text-dim hover:bg-overlay hover:text-text",
+            open ? "bg-accent-fill text-accent-fg" : "text-dim hover:bg-hover-strong hover:text-text",
           )}
         >
           <ListFilter size={14} />

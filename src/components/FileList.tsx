@@ -297,7 +297,7 @@ export default function FileList({ kind, files, items, onActivate }: FileListPro
   }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col bg-list">
       {/* pr-[10px] mirrors the scrollbar width so header and rows align. */}
       <div className="shrink-0 pr-[10px] shadow-[inset_0_-1px_0_var(--color-bg)]">
         <div className={clsx(rowGrid(kind === "audio"), "h-8")}>

@@ -13,8 +13,8 @@ import { IS_WINDOWS } from "../platform";
 const KIND_LABEL: Record<AssetKind, string> = {
   all: "All",
   audio: "Audio",
-  texture: "Image",
-  model: "Model",
+  texture: "2D",
+  model: "3D",
   document: "Document",
 };
 const KIND_ICON: Record<AssetKind, typeof AudioLines> = {
@@ -141,7 +141,7 @@ export default function ExternalAppsModal({ onClose }: { onClose: () => void }):
                 // position (name+exe pairs may repeat), and removal is by index.
                 <div
                   key={i}
-                  className="group flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-[120ms] hover:bg-overlay"
+                  className="group flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-[120ms] hover:bg-hover-strong"
                 >
                   <span
                     title={KIND_LABEL[a.kind]}

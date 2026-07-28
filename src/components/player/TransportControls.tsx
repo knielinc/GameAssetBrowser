@@ -127,7 +127,7 @@ export default function TransportControls(): ReactElement {
           "h-[26px] rounded-md px-2 text-[10px] font-semibold uppercase tracking-widest transition-colors duration-[120ms]",
           autoplay
             ? "bg-accent/15 text-accent hover:bg-accent/20 hover:text-accent-hover"
-            : "text-dim hover:bg-raised hover:text-text",
+            : "text-dim hover:bg-hover hover:text-text",
         )}
       >
         auto

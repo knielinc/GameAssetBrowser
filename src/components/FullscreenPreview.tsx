@@ -23,6 +23,7 @@ import { docIsEbook, docIsPdf, docIsPsd, docIsTextual, docSupportsZoom } from ".
 import DocViewControls from "./document/DocViewControls";
 import PdfLayoutControls from "./document/PdfLayoutControls";
 import ReadWidthControls from "./document/ReadWidthControls";
+import ReadThemeControls from "./document/ReadThemeControls";
 
 export interface FullscreenPreviewProps {
   file: LibFile;
@@ -155,8 +156,13 @@ export default function FullscreenPreview({
         <span className="truncate font-mono text-[10px] text-dim">{audioFile.path}</span>
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {file.kind === "document" && docIsPdf(file.ext) && <PdfLayoutControls />}
+          {/* Prose only — a PDF's pages are images of paper the file itself
+              produced, so there is no page colour for us to choose. */}
           {file.kind === "document" && (docIsTextual(file.ext) || docIsEbook(file.ext)) && (
-            <ReadWidthControls />
+            <>
+              <ReadThemeControls />
+              <ReadWidthControls />
+            </>
           )}
           {file.kind === "document" && docSupportsZoom(file.ext) && <DocViewControls />}
           <span className="text-[10px] text-dim">Space or Esc to close</span>
@@ -220,7 +226,7 @@ export default function FullscreenPreview({
               </div>
             </div>
           ) : use2D ? (
-            <div className="relative h-full w-full overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
+            <div className="relative h-full w-full overflow-hidden rounded-xl bg-stage shadow-e1">
               <Sprite2DView
                 path={file.path}
                 ext={file.ext}
@@ -241,7 +247,7 @@ export default function FullscreenPreview({
             // Wrapped on a real mesh, same renderer as the drawer — a flat
             // <img> here was the gap: you could not see the material, only
             // one of its files.
-            <div className="h-full w-full overflow-hidden rounded-xl bg-[#07070b] shadow-e1">
+            <div className="h-full w-full overflow-hidden rounded-xl bg-stage shadow-e1">
               <TexturePreview
                 keys={keys}
                 mesh={mesh}

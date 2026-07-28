@@ -161,7 +161,7 @@ function FacetGroup({
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className="group flex w-full items-center gap-1.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[120ms] hover:bg-overlay"
+        className="group flex w-full items-center gap-1.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[120ms] hover:bg-hover-strong"
       >
         <span className="flex-1 text-[10px] font-medium uppercase tracking-wide text-faint transition-colors duration-[120ms] group-hover:text-dim">
           {label}
@@ -217,10 +217,10 @@ function OptionRow({
       className={clsx(
         "flex w-full items-center gap-2 rounded-lg py-1.5 pl-2.5 pr-2 text-left text-[12px] transition-colors duration-[120ms]",
         selected
-          ? "text-text hover:bg-overlay"
+          ? "text-text hover:bg-hover-strong"
           : dead
             ? "text-faint"
-            : "text-dim hover:bg-overlay hover:text-text",
+            : "text-dim hover:bg-hover-strong hover:text-text",
       )}
     >
       <span
@@ -288,7 +288,7 @@ function RangeInput({
       value={text}
       placeholder={placeholder}
       className={clsx(
-        "h-7 w-full min-w-0 flex-1 rounded-lg bg-bg px-2 text-[12px] tabular-nums text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-overlay",
+        "h-7 w-full min-w-0 flex-1 rounded-lg bg-bg px-2 text-[12px] tabular-nums text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-hover-strong",
         invalid ? "ring-2 ring-danger/50" : "focus:ring-2 focus:ring-accent/35",
       )}
       onChange={(e) => {
@@ -338,7 +338,7 @@ function ExcludeInput({
         spellCheck={false}
         value={text}
         placeholder="type a word, press ↵"
-        className="h-7 w-full min-w-0 rounded-lg bg-bg px-2 text-[12px] text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-overlay focus:ring-2 focus:ring-accent/35"
+        className="h-7 w-full min-w-0 rounded-lg bg-bg px-2 text-[12px] text-text outline-none transition-[background-color,box-shadow] duration-[120ms] placeholder:text-faint hover:bg-hover-strong focus:ring-2 focus:ring-accent/35"
         onChange={(e) => setText(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === ",") {

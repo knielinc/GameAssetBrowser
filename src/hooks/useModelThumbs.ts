@@ -58,6 +58,16 @@ export function useModelThumbs(files: readonly LibFile[], enabled: boolean): (st
     });
   }, []);
 
+  // A rendered thumbnail was evicted from the Rust cache and its fetch 404'd,
+  // so forgetThumbs() dropped the record. Re-run the window: the lookup misses
+  // and the model is re-rendered. Without this the cell would stay blank until
+  // the next scroll happened to re-arm the flush.
+  const thumbRetry = useLibraryStore((s) => s.thumbRetry);
+  useEffect(() => {
+    if (!enabled || thumbRetry === 0) return;
+    flush();
+  }, [thumbRetry, enabled, flush]);
+
   useEffect(
     () => () => {
       if (timer.current !== undefined) window.clearTimeout(timer.current);

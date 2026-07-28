@@ -66,18 +66,12 @@ export default function AssetGrid<T>({
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
 
-  // The WebGL overlay measures the DOM each frame, so it only needs a nudge
-  // when the slots move for a reason other than scroll/resize: a new item set
-  // (filter, group toggle), a decode landing (a 404'd fetch can now succeed),
-  // or a cell-size change. That last one reflows the grid to new columns/row
-  // heights WITHOUT resizing the container, so the overlay's ResizeObserver
-  // never fires — the cells grow but the painted thumbnails stay at the old
-  // rects until we bump the revision here.
-  const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
-  const [glRevision, setGlRevision] = useState(0);
-  useEffect(() => {
-    if (glThumbs === true) setGlRevision((r) => r + 1);
-  }, [items, thumbsVersion, glThumbs, cellSize]);
+  // A thumbnail's pixels were evicted from the Rust cache while we still held
+  // its key, so the fetch 404'd. Drop the record; the request hook re-asks and
+  // the re-decode bumps thumbsVersion, which retries the fetch above.
+  const onThumbsGone = useCallback((keys: string[]) => {
+    useLibraryStore.getState().forgetThumbs(keys);
+  }, []);
 
   // Column count comes from the live container width, so the grid reflows when
   // the sidebar or inspector is dragged.
@@ -102,6 +96,28 @@ export default function AssetGrid<T>({
   const cellWidth = columns > 0 ? (usable - (columns - 1) * GAP) / columns : cellSize;
   const rowHeight = Math.ceil(cellWidth + CELL_META_HEIGHT + GAP);
   const rowCount = Math.ceil(items.length / columns);
+
+  // The WebGL overlay measures the DOM each frame, so it only needs a nudge
+  // when the slots move for a reason other than scroll: a new item set (filter,
+  // group toggle), a decode landing (a 404'd fetch can now succeed), or a
+  // reflow to a new column count / row height.
+  //
+  // That last group covers BOTH directions of the resize problem. A cell-size
+  // change reflows without resizing the container, so the overlay's
+  // ResizeObserver never fires at all. A window maximize fires it, but too
+  // EARLY — the observer sees the new box while `columns` and `rowHeight` are
+  // still derived from the previous width, so the overlay repaints the old
+  // geometry and, if its loop then goes idle, leaves the thumbnails behind
+  // where the cells used to be. Depending on the DERIVED values rather than the
+  // raw width is what fixes it: this effect runs after React has committed the
+  // new layout, which is exactly when the slots are where they will stay.
+  // (It also means the deps must sit below their declarations — hence the
+  // position of this block.)
+  const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
+  const [glRevision, setGlRevision] = useState(0);
+  useEffect(() => {
+    if (glThumbs === true) setGlRevision((r) => r + 1);
+  }, [items, thumbsVersion, glThumbs, cellSize, columns, rowHeight]);
 
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -178,7 +194,9 @@ export default function AssetGrid<T>({
       {/* Behind the grid: one WebGL canvas paints every visible thumbnail. It
           shows through the cells' transparent `[data-thumb-key]` holes, so it
           must sit under the scroll layer (z-0 vs z-10). */}
-      {glThumbs === true && <ThumbGLOverlay scrollRef={parentRef} revision={glRevision} />}
+      {glThumbs === true && (
+        <ThumbGLOverlay scrollRef={parentRef} revision={glRevision} onThumbsGone={onThumbsGone} />
+      )}
       {/* overscroll-none kills the trackpad rubber-band at the scroll ends. The
           GL thumbnail overlay (a fixed sibling, not inside this scroller) aligns
           off scrollTop, but the elastic bounce is a compositor-only transform

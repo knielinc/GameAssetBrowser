@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
+import clsx from "clsx";
+import { readVars, useReadPalette } from "./readTheme";
 // GitHub's dark Markdown stylesheet, scoped entirely to `.markdown-body` — it
 // styles the rendered readme and nothing else in the app. Small; eager is fine.
 import "github-markdown-css/github-markdown-dark.css";
@@ -68,6 +70,7 @@ function MarkdownView({
   full: boolean;
 }): ReactElement {
   const { text, state } = useDocText(path);
+  const palette = useReadPalette();
   const [html, setHtml] = useState<string | null>(null);
   useEffect(() => {
     if (text === null) {
@@ -89,7 +92,15 @@ function MarkdownView({
   if (state === "error") return <Centered>Couldn’t read this document.</Centered>;
   if (html === null) return <Centered>Loading…</Centered>;
   return (
-    <div className="doc-markdown min-h-0 flex-1 overflow-y-auto">
+    <div
+      className={clsx(
+        "doc-markdown rd-scroll rd-page min-h-0 flex-1 overflow-y-auto",
+        // Gates the light prose overrides in styles.css. Keyed on the READING
+        // theme, not the app theme — the page is its own choice.
+        palette.scheme === "light" && "rd-light",
+      )}
+      style={readVars(palette)}
+    >
       <div
         className={
           full
@@ -120,6 +131,7 @@ function TextView({
   full: boolean;
 }): ReactElement {
   const { text, state } = useDocText(path);
+  const palette = useReadPalette();
   const lines = useMemo(() => (text === null ? [] : text.split(/\r\n|\r|\n/)), [text]);
   const shown = lines.length > TEXT_LINE_CAP ? lines.slice(0, TEXT_LINE_CAP) : lines;
   const gutterCh = String(Math.max(shown.length, 1)).length;
@@ -128,23 +140,30 @@ function TextView({
   if (text === null) return <Centered>Loading…</Centered>;
   return (
     <div
-      className="min-h-0 flex-1 overflow-auto bg-header font-mono"
-      style={{ fontSize: TEXT_BASE * scale, lineHeight: 1.6, tabSize: 4 }}
+      className="rd-scroll rd-page min-h-0 flex-1 overflow-auto font-mono"
+      style={{ ...readVars(palette), fontSize: TEXT_BASE * scale, lineHeight: 1.6, tabSize: 4 }}
     >
       <div className={full ? "min-w-max py-1.5" : "mx-auto w-fit py-1.5"}>
         {shown.map((line, i) => (
           <div key={i} className="flex">
             <span
-              className="sticky left-0 z-10 shrink-0 select-none border-r border-overlay/60 bg-header pl-3 pr-3 text-right text-faint"
-              style={{ minWidth: `calc(${gutterCh}ch + 1.6rem)` }}
+              className="sticky left-0 z-10 shrink-0 select-none pl-3 pr-3 text-right"
+              style={{
+                minWidth: `calc(${gutterCh}ch + 1.6rem)`,
+                background: "var(--rd-well)",
+                color: "var(--rd-quote)",
+                borderRight: "1px solid var(--rd-rule)",
+              }}
             >
               {i + 1}
             </span>
-            <span className="whitespace-pre pl-3 pr-4 text-text">{line.length > 0 ? line : " "}</span>
+            <span className="whitespace-pre pl-3 pr-4" style={{ color: "var(--rd-fg)" }}>
+              {line.length > 0 ? line : " "}
+            </span>
           </div>
         ))}
         {lines.length > TEXT_LINE_CAP && (
-          <div className="px-3 py-2 text-[11px] italic text-faint">
+          <div className="px-3 py-2 text-[11px] italic" style={{ color: "var(--rd-quote)" }}>
             … {(lines.length - TEXT_LINE_CAP).toLocaleString()} more lines not shown
           </div>
         )}

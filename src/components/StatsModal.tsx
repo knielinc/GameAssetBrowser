@@ -10,8 +10,8 @@ import { humanSize } from "./FileRow";
 const KIND_META: Record<AssetKind, { label: string; icon: typeof Box; hue: string }> = {
   all: { label: "All", icon: Box, hue: "text-accent" },
   audio: { label: "Audio", icon: AudioLines, hue: "text-kind-audio" },
-  texture: { label: "Images", icon: ImageIcon, hue: "text-kind-texture" },
-  model: { label: "Models", icon: Box, hue: "text-kind-model" },
+  texture: { label: "2D", icon: ImageIcon, hue: "text-kind-texture" },
+  model: { label: "3D", icon: Box, hue: "text-kind-model" },
   document: { label: "Docs", icon: FileText, hue: "text-kind-document" },
 };
 
@@ -225,7 +225,7 @@ export default function StatsModal({ onClose }: { onClose: () => void }): ReactE
                   key={f.path}
                   type="button"
                   title={`${f.path} — Show in Explorer`}
-                  className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-[12px] transition-colors duration-[120ms] hover:bg-overlay"
+                  className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-[12px] transition-colors duration-[120ms] hover:bg-hover-strong"
                   onClick={() => {
                     showInExplorer(f.path).catch((err: unknown) => {
                       console.error("show_in_explorer failed", err);

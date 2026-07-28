@@ -21,6 +21,10 @@ export/
 native/target/
 native/vendor/
 
+# Local Godot experiment — scratch work that shouldn't show up as pending
+# changes on main.
+godot/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

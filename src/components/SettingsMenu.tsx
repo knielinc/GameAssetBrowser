@@ -65,7 +65,7 @@ export default function SettingsMenu(): ReactElement {
         onClick={() => setOpen((o) => !o)}
         className={clsx(
           "flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-[120ms]",
-          open ? "bg-accent-fill text-accent-fg" : "text-dim hover:bg-overlay hover:text-text",
+          open ? "bg-accent-fill text-accent-fg" : "text-dim hover:bg-hover-strong hover:text-text",
         )}
       >
         <Settings size={14} />
@@ -128,7 +128,7 @@ export default function SettingsMenu(): ReactElement {
           </div>
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
             onClick={() => {
               setOpen(false);
               setShowDupes(true);
@@ -139,7 +139,7 @@ export default function SettingsMenu(): ReactElement {
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
             onClick={() => {
               setOpen(false);
               setShowStats(true);
@@ -151,7 +151,7 @@ export default function SettingsMenu(): ReactElement {
           {/* Per-kind "Open with…" targets for the file context menus. */}
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
             onClick={() => {
               setOpen(false);
               setShowApps(true);
@@ -168,7 +168,7 @@ export default function SettingsMenu(): ReactElement {
               third-party attributions the MIT/Apache-2.0 notices require. */}
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
             onClick={() => {
               setOpen(false);
               setShowAbout(true);

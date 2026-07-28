@@ -15,7 +15,7 @@ export default function PdfLayoutControls({ className }: { className?: string })
   const layout = useDocView((s) => s.pdfLayout);
   const setLayout = useDocView((s) => s.setPdfLayout);
   return (
-    <div className={clsx("flex items-center gap-0.5 rounded-full bg-bg p-0.5", className)}>
+    <div className={clsx("flex items-center gap-1 rounded-full bg-bg p-1", className)}>
       {OPTIONS.map((o) => (
         <button
           key={o.id}
@@ -27,7 +27,7 @@ export default function PdfLayoutControls({ className }: { className?: string })
             "flex h-6 w-7 items-center justify-center rounded-full transition-colors duration-[120ms]",
             layout === o.id
               ? "bg-accent-fill text-accent-fg"
-              : "text-dim hover:bg-overlay hover:text-text",
+              : "text-dim hover:bg-hover-strong hover:text-text",
           )}
         >
           <o.icon size={13} />

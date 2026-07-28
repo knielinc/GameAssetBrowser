@@ -1,4 +1,7 @@
 import { create } from "zustand";
+// theme.ts imports nothing from here, so this is a one-way edge. Importing it
+// also guarantees applyTheme() has run before we read the mode below.
+import { THEMES, useThemeStore } from "./theme";
 
 /**
  * Reading preferences for the document preview — a font/zoom scale and the PDF
@@ -24,6 +27,23 @@ const PDF_LAYOUTS: readonly PdfLayout[] = ["width", "single", "spread"];
 export type ReadWidth = "readable" | "full";
 const READ_WIDTHS: readonly ReadWidth[] = ["readable", "full"];
 
+/** Reading page for every prose document — ebook, markdown, plain text (NOT
+ *  pdf, whose pages are images of paper the file itself produced). Dark or the
+ *  light sepia paper.
+ *
+ *  Seeded from the app theme's light/dark mode on first run, then INDEPENDENT
+ *  of it: you read in whichever page colour suits the room, not whichever
+ *  chrome the app wears, so switching app themes later never overwrites a
+ *  reading choice you made deliberately. */
+export type ReadTheme = "dark" | "light";
+const READ_THEMES: readonly ReadTheme[] = ["dark", "light"];
+
+/** The app's current mode, as the first-run default for the reading page. */
+function themeDefault(): ReadTheme {
+  const { themeId } = useThemeStore.getState();
+  return THEMES.find((t) => t.id === themeId)?.light === true ? "light" : "dark";
+}
+
 const clamp = (n: number): number =>
   // Round to the nearest step so the A−/A+ pair always lands on clean values.
   Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(n / STEP) * STEP));
@@ -32,6 +52,7 @@ interface Persisted {
   fontScale: number;
   pdfLayout: PdfLayout;
   readWidth: ReadWidth;
+  readTheme: ReadTheme;
 }
 
 function load(): Persisted {
@@ -39,6 +60,7 @@ function load(): Persisted {
     fontScale: 1,
     pdfLayout: "width",
     readWidth: "readable",
+    readTheme: themeDefault(),
   };
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -51,6 +73,9 @@ function load(): Persisted {
       readWidth: READ_WIDTHS.includes(p.readWidth as ReadWidth)
         ? (p.readWidth as ReadWidth)
         : "readable",
+      readTheme: READ_THEMES.includes(p.readTheme as ReadTheme)
+        ? (p.readTheme as ReadTheme)
+        : themeDefault(),
     };
   } catch {
     return fallback;
@@ -62,11 +87,13 @@ export interface DocViewPrefs {
   fontScale: number;
   pdfLayout: PdfLayout;
   readWidth: ReadWidth;
+  readTheme: ReadTheme;
   zoomIn: () => void;
   zoomOut: () => void;
   reset: () => void;
   setPdfLayout: (layout: PdfLayout) => void;
   setReadWidth: (width: ReadWidth) => void;
+  setReadTheme: (theme: ReadTheme) => void;
 }
 
 export const useDocView = create<DocViewPrefs>((set, get) => {
@@ -78,6 +105,7 @@ export const useDocView = create<DocViewPrefs>((set, get) => {
           fontScale: get().fontScale,
           pdfLayout: get().pdfLayout,
           readWidth: get().readWidth,
+          readTheme: get().readTheme,
         }),
       );
     } catch {
@@ -89,6 +117,7 @@ export const useDocView = create<DocViewPrefs>((set, get) => {
     fontScale: init.fontScale,
     pdfLayout: init.pdfLayout,
     readWidth: init.readWidth,
+    readTheme: init.readTheme,
     zoomIn: () => {
       set({ fontScale: clamp(get().fontScale + STEP) });
       persist();
@@ -107,6 +136,10 @@ export const useDocView = create<DocViewPrefs>((set, get) => {
     },
     setReadWidth: (readWidth) => {
       set({ readWidth });
+      persist();
+    },
+    setReadTheme: (readTheme) => {
+      set({ readTheme });
       persist();
     },
   };

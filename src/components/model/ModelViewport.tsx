@@ -9,6 +9,7 @@ import { rescueTextures, type RescueResult } from "../../model/rescueTextures";
 import { packDirOf, useAtlasStore } from "../../stores/atlasStore";
 import { useRenderPrefs, type ModelLight } from "../../stores/renderPrefs";
 import { gradientBackground } from "../../model/gradientBg";
+import { useThemeStore } from "../../stores/theme";
 
 /**
  * Build a light rig for `mode`. Every rig keeps a hemisphere fill so nothing
@@ -180,6 +181,7 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
   const [modelGen, setModelGen] = useState(0);
 
   const modelLight = useRenderPrefs((s) => s.modelLight);
+  const themeId = useThemeStore((s) => s.themeId);
   const wireframe = useRenderPrefs((s) => s.modelWireframe);
   const checker = useRenderPrefs((s) => s.modelChecker);
   const silhouette = useRenderPrefs((s) => s.modelSilhouette);
@@ -379,7 +381,9 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
     lightsRef.current = rig;
     scene.background = gradientBackground(modelLight);
     dirtyRef.current = true;
-  }, [modelLight]);
+    // themeId: the backdrop follows the app's light/dark mode, and a texture is
+    // baked pixels — it has to be rebuilt when the mode flips, not just re-read.
+  }, [modelLight, themeId]);
 
   // --- keep the rAF loop's turntable flag in sync with the pref ------------
   useEffect(() => {
@@ -626,12 +630,12 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
   ];
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl bg-[#0c0c12] shadow-e1">
+    <div className="relative h-full w-full overflow-hidden rounded-xl bg-stage shadow-e1">
       <div ref={hostRef} className="h-full w-full" />
       {/* Viewport toggles — global renderPrefs, so the drawer and fullscreen
           viewports always agree, like the light rig. */}
       {path !== null && error === null && (
-        <div className="absolute left-1.5 top-1.5 flex gap-0.5 rounded-lg bg-black/55 p-0.5">
+        <div className="absolute left-1.5 top-1.5 flex gap-1 rounded-lg bg-black/55 p-1">
           {toggles.map((t) => (
             <button
               key={t.title}
@@ -706,7 +710,7 @@ export default function ModelViewport({ path, onStats, onRescue }: ModelViewport
           showing what the file asked for, and that is worth admitting. */}
       {rescued !== null && rescued.brokenSlots > 0 && (
         <div
-          className="pointer-events-none absolute right-1.5 top-1.5 max-w-[70%] truncate rounded bg-kind-model/85 px-1.5 py-0.5 text-[9px] font-medium text-[#1a1208]"
+          className="pointer-events-none absolute right-1.5 top-1.5 max-w-[70%] truncate rounded bg-kind-model/85 px-1.5 py-0.5 text-[9px] font-medium text-on-kind"
           title={
             rescued.applied !== null
               ? `Textures assigned from your pick:\n${rescued.applied}`

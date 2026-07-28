@@ -236,7 +236,7 @@ export default function DuplicatesModal({ onClose }: { onClose: () => void }): R
                   return (
                   <div
                     key={p}
-                    className="group flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-[120ms] hover:bg-overlay"
+                    className="group flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-[120ms] hover:bg-hover-strong"
                   >
                     {lf === undefined ? (
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-bg">

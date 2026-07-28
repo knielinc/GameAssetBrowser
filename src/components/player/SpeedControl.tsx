@@ -52,7 +52,7 @@ export default function SpeedControl(): ReactElement {
           "h-[26px] min-w-11 rounded-md px-2 text-[11px] font-semibold tabular-nums transition-colors duration-[120ms]",
           speed !== 1
             ? "bg-accent/15 text-accent hover:bg-accent/20 hover:text-accent-hover"
-            : "text-dim hover:bg-raised hover:text-text",
+            : "text-dim hover:bg-hover hover:text-text",
         )}
       >
         {speedLabel(speed)}
@@ -72,7 +72,7 @@ export default function SpeedControl(): ReactElement {
                 "flex w-full items-center justify-between rounded-lg px-2 py-1 text-[11px] tabular-nums transition-colors duration-[120ms]",
                 s === speed
                   ? "bg-accent-fill text-accent-fg"
-                  : "text-dim hover:bg-overlay hover:text-text",
+                  : "text-dim hover:bg-hover-strong hover:text-text",
               )}
             >
               {speedLabel(s)}

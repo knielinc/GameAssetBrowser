@@ -244,7 +244,7 @@ export default function AboutModal({ onClose }: { onClose: () => void }): ReactE
             </p>
             <button
               type="button"
-              className="mt-3 rounded-lg bg-bg px-3 py-1.5 text-[12px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+              className="mt-3 rounded-lg bg-bg px-3 py-1.5 text-[12px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
               onClick={() => setTab("licenses")}
             >
               Browse all components →
@@ -318,7 +318,7 @@ export default function AboutModal({ onClose }: { onClose: () => void }): ReactE
                         type="button"
                         aria-expanded={open}
                         onClick={() => expandComponent(key, c)}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-[120ms] hover:bg-overlay"
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-[120ms] hover:bg-hover-strong"
                       >
                         <ChevronRight
                           size={12}

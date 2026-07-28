@@ -761,9 +761,25 @@ fn drain(app: AppHandle) {
                 // the stored 256px PNG purely to recompute stats that cannot
                 // have changed â€” cheap per cell, but it recurs for every cell
                 // on every warm launch, and this in-RAM LRU exists to skip it.
-                if let Some(hit) = app.state::<ThumbState>().cache.lock().get(&job.path) {
-                    pending_ref.lock().push((job.id, hit.1, hit.0.clone()));
-                    return;
+                //
+                // Only trust that memo while the PIXELS are still there. It is
+                // bounded by ENTRY COUNT (2048) and ThumbCache by a BYTE budget,
+                // so the two evict independently: on a large library the blob
+                // drops a thumbnail whose memo entry is still live. Taking the
+                // shortcut then answers with a key that has nothing behind it —
+                // `tex://` 404s and the cell strands showing badges and
+                // dimensions (both come from this `info`) but no image, with no
+                // way back, because the frontend never re-asks for an id it
+                // already has. Verify, and on a miss fall through to a real
+                // re-decode.
+                let memo = app.state::<ThumbState>().cache.lock().get(&job.path).cloned();
+                if let Some((key, info)) = memo {
+                    if crate::thumbcache::parse_key(&key).is_some_and(|h| blob_ref.contains(h)) {
+                        pending_ref.lock().push((job.id, info, key));
+                        return;
+                    }
+                    // Stale memo — drop it so build() below replaces it.
+                    app.state::<ThumbState>().cache.lock().pop(&job.path);
                 }
                 match build(&job.path, blob_ref) {
                     Ok((key, info)) => {

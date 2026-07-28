@@ -118,7 +118,7 @@ function Stepper({
 }
 
 function Row({ children }: { children: ReactElement[] }): ReactElement {
-  return <div className="flex gap-0.5 rounded-full bg-bg p-0.5">{children}</div>;
+  return <div className="flex gap-1 rounded-full bg-bg p-1">{children}</div>;
 }
 
 function Seg({
@@ -139,8 +139,8 @@ function Seg({
       className={clsx(
         "h-[23px] flex-1 rounded-full px-2 text-[10px] transition-colors duration-[120ms]",
         on
-          ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-          : "text-dim hover:bg-overlay hover:text-text",
+          ? "bg-accent-fill font-medium text-accent-fg"
+          : "text-dim hover:bg-hover-strong hover:text-text",
       )}
       onClick={onClick}
     >
@@ -313,8 +313,8 @@ export default function PreviewControls({
           className={clsx(
             "h-[23px] rounded-full px-3 text-[10px] transition-colors duration-[120ms]",
             pixelArt
-              ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-              : "bg-bg text-dim hover:bg-overlay hover:text-text",
+              ? "bg-accent-fill font-medium text-accent-fg"
+              : "bg-bg text-dim hover:bg-hover-strong hover:text-text",
           )}
           onClick={togglePixelArt}
           title="Nearest-neighbour scaling — applies to every thumbnail and preview at once"
@@ -398,8 +398,8 @@ export default function PreviewControls({
           className={clsx(
             "h-[23px] rounded-full text-[10px] transition-colors duration-[120ms]",
             value.spriteOn
-              ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-              : "bg-bg text-dim hover:bg-overlay hover:text-text",
+              ? "bg-accent-fill font-medium text-accent-fg"
+              : "bg-bg text-dim hover:bg-hover-strong hover:text-text",
           )}
           onClick={() => onChange({ spriteOn: !value.spriteOn })}
           title="Slice the image into a grid and play it as an animation"
@@ -416,8 +416,8 @@ export default function PreviewControls({
               className={clsx(
                 "h-[23px] rounded-full text-[10px] transition-colors duration-[120ms]",
                 value.spritePlaying
-                  ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-                  : "bg-bg text-dim hover:bg-overlay hover:text-text",
+                  ? "bg-accent-fill font-medium text-accent-fg"
+                  : "bg-bg text-dim hover:bg-hover-strong hover:text-text",
               )}
               onClick={() => onChange({ spritePlaying: !value.spritePlaying })}
             >

@@ -12,6 +12,7 @@ import { Bookmark, ChevronDown, ChevronUp } from "lucide-react";
 import { docUrl } from "./doc";
 import { basename } from "../../stores/libraryStore";
 import { useDocView, MD_BASE_EBOOK } from "../../stores/docView";
+import { readVars, useReadPalette } from "./readTheme";
 import { useEbookBookmarks } from "../../stores/ebookBookmarks";
 import type { FoliateSection } from "../../vendor/foliate-js/view.js";
 
@@ -44,10 +45,12 @@ const XHTML = "application/xhtml+xml";
 
 type LoadState = "loading" | "ready" | "error";
 
-/** Reading stylesheet injected into every section's shadow root. Sizing comes
- *  from CSS custom properties set on the scroll container (they inherit across
- *  the shadow boundary). `position: static !important` on descendants neutralises
- *  any author position:fixed/absolute so a book can never overlay the app. */
+/** Reading stylesheet injected into every section's shadow root. Sizing AND
+ *  colour come from CSS custom properties set on the scroll container (they
+ *  inherit across the shadow boundary), so switching the reading theme restyles
+ *  every already-mounted section without re-injecting any shadow root.
+ *  `position: static !important` on descendants neutralises any author
+ *  position:fixed/absolute so a book can never overlay the app. */
 const READER_CSS = `
   :host { display: block; }
   .ebk {
@@ -57,7 +60,7 @@ const READER_CSS = `
     font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Cambria, "Noto Serif", serif;
     font-size: var(--eb-fs, 18px);
     line-height: 1.62;
-    color: #1a1712;
+    color: var(--rd-fg);
     overflow-wrap: break-word;
     -webkit-hyphens: auto;
     hyphens: auto;
@@ -68,15 +71,19 @@ const READER_CSS = `
     max-width: 100% !important; height: auto !important; display: block; margin: 1em auto;
   }
   .ebk p { margin: 0 0 1em; text-align: start; }
-  .ebk h1,.ebk h2,.ebk h3,.ebk h4,.ebk h5,.ebk h6 { line-height: 1.25; margin: 1.3em 0 .5em; font-weight: 600; }
-  .ebk a { color: #1a5fb4; text-decoration: underline; cursor: pointer; }
+  .ebk h1,.ebk h2,.ebk h3,.ebk h4,.ebk h5,.ebk h6 { line-height: 1.25; margin: 1.3em 0 .5em; font-weight: 600; color: var(--rd-head); }
+  .ebk a { color: var(--rd-link); text-decoration: underline; cursor: pointer; }
   .ebk ul,.ebk ol { padding-left: 1.4em; margin: 0 0 1em; }
   .ebk li { margin: 0 0 .3em; }
-  .ebk pre { white-space: pre-wrap; overflow-x: auto; }
-  .ebk hr { border: 0; border-top: 1px solid #ccc3ad; margin: 1.6em 0; }
-  .ebk blockquote { margin: 1em 0 1em 1em; padding-left: 1em; border-left: 3px solid #d8cdb0; color: #4a4436; }
+  .ebk pre, .ebk code { background: var(--rd-well); border-radius: 3px; }
+  .ebk code { padding: 0 .25em; }
+  .ebk pre { white-space: pre-wrap; overflow-x: auto; padding: .7em .9em; }
+  .ebk pre code { background: none; padding: 0; }
+  .ebk hr { border: 0; border-top: 1px solid var(--rd-rule); margin: 1.6em 0; }
+  .ebk blockquote { margin: 1em 0 1em 1em; padding-left: 1em; border-left: 3px solid var(--rd-rule); color: var(--rd-quote); }
   .ebk table { border-collapse: collapse; max-width: 100%; }
-  .ebk td,.ebk th { border: 1px solid #d8cdb0; padding: .3em .5em; }
+  .ebk td,.ebk th { border: 1px solid var(--rd-rule); padding: .3em .5em; }
+  .ebk ::selection { background: var(--rd-sel); }
 `;
 
 const DANGEROUS = "script, style, link, meta, title, base, iframe, object, embed, noscript, head";
@@ -160,6 +167,7 @@ export default function EbookView({
 }): ReactElement {
   const scale = useDocView((s) => s.fontScale);
   const full = useDocView((s) => s.readWidth) === "full";
+  const theme = useReadPalette();
   const scrollRef = useRef<HTMLDivElement>(null);
   const hostsRef = useRef<(HTMLDivElement | null)[]>([]);
   const metaRef = useRef<FoliateSection[]>([]);
@@ -369,13 +377,16 @@ export default function EbookView({
   };
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      style={readVars(theme)}
+    >
       <div
         ref={scrollRef}
         tabIndex={0}
         onKeyDown={onKeyDown}
         onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-y-auto bg-[#f6f2e8] outline-none"
+        className="rd-scroll rd-page min-h-0 flex-1 overflow-y-auto outline-none"
         style={
           {
             "--eb-fs": `${Math.round(MD_BASE_EBOOK * scale)}px`,
@@ -391,30 +402,30 @@ export default function EbookView({
       </div>
 
       {state === "ready" && (
-        <div className="absolute bottom-2 left-1/2 z-10 flex max-w-[92%] -translate-x-1/2 items-center gap-1 rounded-full bg-black/65 px-1.5 py-1 text-[11px] text-white/90 shadow-e2">
+        <div className="hud absolute bottom-2 left-1/2 z-10 flex max-w-[92%] -translate-x-1/2 items-center gap-1 rounded-full px-1.5 py-1 text-[11px]">
           <button
             type="button"
             title="Back"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white"
+            className="hud-btn h-6 w-6 shrink-0"
             onClick={() => scrollByScreen(-1)}
           >
             <ChevronUp size={15} />
           </button>
-          <span className="shrink-0 tabular-nums text-white/60">{Math.round(progress * 100)}%</span>
+          <span className="hud-dim shrink-0 tabular-nums">{Math.round(progress * 100)}%</span>
           <button
             type="button"
             title="Forward"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white"
+            className="hud-btn h-6 w-6 shrink-0"
             onClick={() => scrollByScreen(1)}
           >
             <ChevronDown size={15} />
           </button>
-          <span className="mx-0.5 h-4 w-px shrink-0 bg-white/20" />
+          <span className="hud-sep mx-0.5 h-4 w-px shrink-0" />
           {bookmark !== null && !onBookmark && (
             <button
               type="button"
               title={`Go to bookmark (${Math.round(bookmark * 100)}%)`}
-              className="flex h-6 shrink-0 items-center gap-1 rounded-full pl-1.5 pr-2 text-amber-300/90 transition-colors hover:bg-white/15 hover:text-amber-300"
+              className="hud-btn hud-btn-mark h-6 shrink-0 gap-1 pl-1.5 pr-2"
               onClick={goToBookmark}
             >
               <Bookmark size={13} fill="currentColor" />
@@ -424,10 +435,7 @@ export default function EbookView({
           <button
             type="button"
             title={onBookmark ? "Remove bookmark" : "Bookmark this spot"}
-            className={
-              "flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors " +
-              (onBookmark ? "text-amber-300 hover:bg-white/15" : "text-white/80 hover:bg-white/15 hover:text-white")
-            }
+            className={"hud-btn h-6 w-6 shrink-0" + (onBookmark ? " hud-btn-mark" : "")}
             onClick={toggleBookmark}
           >
             <Bookmark size={14} fill={onBookmark ? "currentColor" : "none"} />
@@ -435,12 +443,18 @@ export default function EbookView({
         </div>
       )}
       {state === "loading" && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-dim">
+        <div
+          className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs"
+          style={{ color: "var(--rd-quote)" }}
+        >
           Loading ebook…
         </div>
       )}
       {state === "error" && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-dim">
+        <div
+          className="absolute inset-0 flex items-center justify-center text-xs"
+          style={{ color: "var(--rd-quote)" }}
+        >
           Couldn’t open this ebook.
         </div>
       )}

@@ -29,6 +29,8 @@ export function useThumbRequests(files: readonly LibFile[], enabled: boolean): (
     asked.current.clear();
   }, [files]);
 
+  const thumbRetry = useLibraryStore((s) => s.thumbRetry);
+
   // Re-arm the debounce after ids come back un-asked, so the cells that are
   // still on screen get picked up on the next tick rather than waiting for
   // the user to scroll again.
@@ -75,6 +77,12 @@ export function useThumbRequests(files: readonly LibFile[], enabled: boolean): (
     timer.current = window.setTimeout(flush, DEBOUNCE_MS);
   }, [flush]);
   scheduleRef.current = arm;
+
+  useEffect(() => {
+    if (thumbRetry === 0) return;
+    asked.current.clear();
+    arm();
+  }, [thumbRetry, arm]);
 
   useEffect(() => {
     return () => {

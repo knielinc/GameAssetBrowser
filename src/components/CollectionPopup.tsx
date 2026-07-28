@@ -96,7 +96,7 @@ export default function CollectionPopup({
           <button
             key={c.name}
             type="button"
-            className="flex h-7 w-full items-center gap-2.5 px-3 text-[13px] text-text transition-colors duration-[120ms] hover:bg-overlay"
+            className="flex h-7 w-full items-center gap-2.5 px-3 text-[13px] text-text transition-colors duration-[120ms] hover:bg-hover-strong"
             onClick={() => {
               addToCollection(c.name, paths);
               onClose();
@@ -130,7 +130,7 @@ export default function CollectionPopup({
             "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-[120ms]",
             name.trim() === ""
               ? "text-faint"
-              : "text-accent hover:bg-overlay",
+              : "text-accent hover:bg-hover-strong",
           )}
           onClick={createAndAdd}
         >

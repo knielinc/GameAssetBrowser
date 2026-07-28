@@ -118,7 +118,11 @@ export default function StatusBar({ kind, visibleCount }: StatusBarProps): React
             : `in ${scopeParts.length} scopes`;
 
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-x border-bg bg-panel px-3 text-[11px] text-dim">
+    // border-t, not the border-x this used to carry: the vertical seams now
+    // belong to the resizers either side (see .sidebar-resizer::after), while
+    // the edge that had nothing was the one against the content above — and in
+    // a light theme that content is the same `panel` white as this bar.
+    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-bg bg-panel px-3 text-[11px] text-dim">
       <span className="tabular-nums">
         {visibleCount.toLocaleString()} / {scopeCount.toLocaleString()} {NOUN[kind]}
       </span>

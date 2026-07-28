@@ -90,8 +90,10 @@ export default function AtlasPicker({ modelPath, candidates, applied }: AtlasPic
                 type="button"
                 title={basename(c)}
                 className={clsx(
+                  // Flat, like the asset grid: a ring states selection/hover,
+                  // no drop shadow under the swatch.
                   "alpha-checker aspect-square overflow-hidden rounded-lg transition-[box-shadow] duration-[120ms]",
-                  on ? "shadow-sel" : "shadow-e1 hover:shadow-e2",
+                  on ? "shadow-sel" : "hover:shadow-[0_0_0_2px_var(--color-hover-strong)]",
                 )}
                 onClick={() => choose(c)}
               >
@@ -109,7 +111,7 @@ export default function AtlasPicker({ modelPath, candidates, applied }: AtlasPic
 
       <button
         type="button"
-        className="flex h-[26px] items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+        className="flex h-[26px] items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
         onClick={() => void browse()}
       >
         <FolderOpen size={12} />
@@ -123,8 +125,8 @@ export default function AtlasPicker({ modelPath, candidates, applied }: AtlasPic
           className={clsx(
             "h-[23px] rounded-full text-[10px] transition-colors duration-[120ms]",
             flipY
-              ? "bg-accent-fill font-medium text-accent-fg shadow-e1"
-              : "bg-bg text-dim hover:bg-overlay hover:text-text",
+              ? "bg-accent-fill font-medium text-accent-fg"
+              : "bg-bg text-dim hover:bg-hover-strong hover:text-text",
           )}
           onClick={toggleFlip}
         >

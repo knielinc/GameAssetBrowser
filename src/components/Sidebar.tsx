@@ -73,7 +73,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
           <button
             type="button"
             title="Load settings from a file you choose"
-            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
             onClick={onImport}
           >
             <Upload size={12} />
@@ -82,7 +82,7 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
           <button
             type="button"
             title="Save the current settings to a file you choose"
-            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-overlay hover:text-text"
+            className="flex h-[28px] flex-1 items-center justify-center gap-1.5 rounded-full bg-bg text-[11px] text-dim transition-colors duration-[120ms] hover:bg-hover-strong hover:text-text"
             onClick={onExport}
           >
             <Download size={12} />

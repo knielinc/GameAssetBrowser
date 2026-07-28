@@ -38,10 +38,14 @@ export function useThumbSrc(file: LibFile, kind: ThumbKind = "t"): ThumbSrc {
   const [attempt, setAttempt] = useState(0);
   const [broken, setBroken] = useState(false);
   const brokeRef = useRef(false);
+  /** How many times we've asked for a re-decode after a 404 on a key we hold.
+   *  Bounded so a file that genuinely cannot be decoded can't loop. */
+  const reasked = useRef(0);
 
   // The virtualizer reuses a mounted cell for a new file — reset on identity.
   useEffect(() => {
     brokeRef.current = false;
+    reasked.current = 0;
     setBroken(false);
     setAttempt(0);
   }, [file.path]);
@@ -64,8 +68,20 @@ export function useThumbSrc(file: LibFile, kind: ThumbKind = "t"): ThumbSrc {
     onError: () => {
       brokeRef.current = true;
       setBroken(true);
+      // A key we were HANDED just 404'd, so the Rust pixel cache evicted it (a
+      // miss on the optimistically-derived key is ordinary and needs none of
+      // this — the pending request already covers it). Drop the record so the
+      // decode is re-requested; the fresh `stored` then retries the <img> via
+      // the effect above.
+      if (stored !== undefined && reasked.current < 2) {
+        reasked.current++;
+        useLibraryStore.getState().forgetThumbs([stored.key]);
+      }
     },
-    onLoad: () => setBroken(false),
+    onLoad: () => {
+      reasked.current = 0;
+      setBroken(false);
+    },
     info: stored?.info ?? null,
   };
 }

@@ -2,6 +2,7 @@ import { useEffect, type ReactElement } from "react";
 import { AudioLines, X } from "lucide-react";
 import { useLibraryStore, type LibFile } from "../../stores/libraryStore";
 import { useThumbSrc } from "../../hooks/useThumbSrc";
+import { useRenderPrefs } from "../../stores/renderPrefs";
 import { requestThumbs } from "../../ipc/commands";
 import { humanSize } from "../FileRow";
 import { formatTime } from "../player/TimeDisplay";
@@ -53,13 +54,37 @@ export default function AudioInspector({ file, onClose, width }: AudioInspectorP
 function AudioInspectorBody({ file }: { file: LibFile }): ReactElement {
   // The "a"-keyed cover art / waveform, same optimistic path as AudioCell.
   const { src, imgKey, onError, onLoad } = useThumbSrc(file, "a");
+  // Honour the global nearest-neighbour preference, as AudioCell does for this
+  // same image — the inspector was silently ignoring it.
+  const pixelArt = useRenderPrefs((s) => s.pixelArt);
   // Probe results land asynchronously — re-render as each batch merges.
   useLibraryStore((s) => s.durationsVersion);
   useLibraryStore((s) => s.audioMetaVersion);
   useLibraryStore((s) => s.thumbsVersion);
   const seconds = useLibraryStore.getState().durations.get(file.id);
   const meta = useLibraryStore.getState().audioMeta.get(file.id);
-  const hasThumb = useLibraryStore.getState().thumbs.has(file.id);
+  const thumb = useLibraryStore.getState().thumbs.get(file.id);
+  const hasThumb = thumb !== undefined;
+  // Is this the GENERATED waveform rather than embedded cover art? It matters
+  // because the two want opposite scaling here: the waveform is synthetic pixel
+  // art (thumbs.rs::audio_waveform_image fills whole-pixel columns, no
+  // antialiasing) blown up 2-3x to fill this square, and smoothing turns its
+  // crisp bars to mush. Cover art is a photograph and wants the smoothing.
+  //
+  // The tell: the waveform is drawn at exactly THUMB_EDGE on a transparent
+  // background, so it is square, carries alpha, and — being already at the
+  // thumbnail edge — is the one audio thumb that never went through the
+  // Triangle downscale, leaving source dimensions equal to its own. A square
+  // cover ≤256px WITH alpha would also match, but covers are JPEG (opaque) and
+  // ship far larger, so the cost of being wrong is a blocky rare cover, not a
+  // broken one.
+  const info = thumb?.info ?? null;
+  const isWaveform =
+    info !== null &&
+    info.hasAlpha &&
+    info.width === info.height &&
+    info.width === info.sourceWidth &&
+    info.height === info.sourceHeight;
 
   // In list mode there's no grid to request the thumbnail, so decode it here
   // for the selected file. A pin (supersede=false): it jumps the queue without
@@ -83,6 +108,7 @@ function AudioInspectorBody({ file }: { file: LibFile }): ReactElement {
             draggable={false}
             onError={onError}
             onLoad={onLoad}
+            style={{ imageRendering: isWaveform || pixelArt ? "pixelated" : "auto" }}
             className="h-full w-full object-contain"
           />
         ) : (
