@@ -21,7 +21,6 @@ import FileList, { selectionFilePaths } from "./FileList";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
 import AssetGrid from "./grid/AssetGrid";
-import { hasWebGL2 } from "./grid/thumbGL";
 import TextureCell from "./grid/TextureCell";
 import MaterialCell from "./grid/MaterialCell";
 import ModelCell from "./grid/ModelCell";
@@ -362,10 +361,30 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     [grouped, visible, onVisibleRange],
   );
 
-  // Textures render through the shared WebGL canvas (no PNG round-trip, one
-  // draw call); everything else stays on the classic <img> path. Falls back to
-  // <img> if this WebView somehow lacks WebGL2.
-  const glThumbs = kind === "texture" && hasWebGL2();
+  // Every kind renders its thumbnail as an <img> over thumb://, textures
+  // included. The shared WebGL canvas (grid/ThumbGLOverlay) is off.
+  //
+  // WHY, since the overlay is the faster path on paper: it paints into a canvas
+  // that is a SIBLING of the scroller, not a child of it (see AssetGrid). The
+  // compositor therefore scrolls the cells but not the thumbnails, and JS has to
+  // re-measure every cell each frame and repaint the canvas to match — which it
+  // cannot do ahead of the compositor. Measured over an identical 3'273 px
+  // scroll, 73-76% of frames were showing the PREVIOUS paint slid into place by
+  // the overlay's translateY compensation, and a main-thread stall dragged the
+  // thumbnails up to 269 px away from their own frames before snapping back.
+  //
+  // Frame pacing was not the problem — the overlay actually paced better than
+  // this path (p90 7.8 ms vs 12 ms, no dropped frames). The jitter is that
+  // desync: an <img> shares one compositor layer with its frame and badges, so
+  // a stall freezes the cell whole instead of tearing it apart. Delivery cost is
+  // close enough not to outweigh that: thumb:// PNG plus the browser decode
+  // measured 3.76 ms per cell against tex:// RGBA at 3.00 ms.
+  //
+  // Flip this back to `kind === "texture" && hasWebGL2()` once the canvas lives
+  // INSIDE the scroller (positioned in content coordinates, sized to viewport +
+  // margin, repainted only when the scroll passes that margin) so the compositor
+  // carries it and the per-frame re-measure disappears.
+  const glThumbs = false;
 
   let content: ReactElement;
   if (scanning && !anyFiles) {
