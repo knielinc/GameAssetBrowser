@@ -74,12 +74,29 @@ cargo check            # from src-tauri/, for the Rust side
 **CI.** `.github/workflows/release.yml` is a manual `workflow_dispatch` release to itch.io
 (`kniti/gab`). It computes the next patch version from the latest `vX.Y.Z` tag, runs a cheap
 typecheck + unit‑test gate before spending three platform builds, builds Windows / macOS
-(universal) / Linux, verifies the attribution file is current, uploads via `butler`, and
-tags the released version. Without a `BUTLER_API_KEY` secret it still builds — it just skips
-the upload and the tag.
+(universal) / Linux, verifies the attribution file is current, uploads via `butler`, then
+commits the version bump back to `main` and tags it. Without a `BUTLER_API_KEY` secret it
+still builds — it just skips the upload, the commit, and the tag.
 
-The release version is stamped into **both** `tauri.conf.json` (the installer's version) and
-`package.json` (the build stamp the About dialog shows), so the two can't disagree.
+**Versioning.** `scripts/stamp-version.mjs <x.y.z>` writes the release version into every file
+that reports one: `package.json` (which `vite.config.ts`'s `buildStamp()` bakes into the About
+dialog, and which `export-release.ps1` writes into `VERSION.txt`), `package-lock.json`, and
+`tauri.conf.json` (the installer's version). Nothing in `src-tauri/src` reads
+`CARGO_PKG_VERSION` and the bundle version comes from the Tauri config, so `Cargo.toml` and
+`Cargo.lock` are deliberately left alone.
+
+CI runs that script twice: once per build job, so the artifacts carry the right version, and
+once in the itch job, to commit the same bump back. That second run is what keeps the repo
+honest — the build jobs stamp into workspaces that are then thrown away, so without it
+`package.json` would keep its old version and every build that is *not* the release workflow
+would report that stale number in the About dialog: a local `npm run tauri build`,
+`npm run export`, or a licensee building from source.
+
+The tag is pushed before the branch update, because the tag is what the next run reads to
+compute the following version. If `main` moved during the ~45‑minute build, or branch
+protection refuses the push, the fast‑forward fails and the job emits a warning rather than
+failing — the release is already out and correctly tagged, and the bump can be applied
+afterwards with `git cherry-pick <tag>`.
 
 **Code signing.** Unsigned Windows binaries trip SmartScreen, and Smart App Control blocks
 them outright (the `os error 4551` noted in `src-tauri/Cargo.toml`). `src-tauri/tauri.windows.conf.json`

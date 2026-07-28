@@ -7,8 +7,15 @@ name: Release
 #
 # Versioning is tag-driven: the next version is the latest `vX.Y.Z` tag with its
 # patch incremented (the first release uses the version in package.json). After a
-# successful upload a lightweight git tag records the version — that tag is the
-# only GitHub footprint (it is NOT a Release), and nothing else is committed back.
+# successful upload the bump is committed back to main and a lightweight git tag
+# records it — no GitHub Release is created either way.
+#
+# The commit-back is load-bearing, not bookkeeping. The build jobs stamp the
+# version into their own throwaway workspaces, so without it the repo keeps
+# whatever package.json last said and every build that is NOT this workflow
+# reports that stale number in the About dialog — a local `npm run tauri build`,
+# `npm run export` (and the VERSION.txt beside it), or a licensee building from
+# source, all of which read package.json exactly as vite.config.ts does.
 #
 # Requires a BUTLER_API_KEY repository secret
 # (https://itch.io/user/settings/api-keys). Without it the workflow still builds,
@@ -125,23 +132,14 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # Both files, not just tauri.conf.json: the installer version comes from
-      # the Tauri config, but the About dialog's build stamp is baked in from
-      # package.json by vite.config.ts. Stamping one and not the other ships an
-      # installer and an app that disagree about what version they are.
+      # Every file that reports a version, not just tauri.conf.json: the
+      # installer version comes from the Tauri config, but the About dialog's
+      # build stamp is baked in from package.json by vite.config.ts. Stamping one
+      # and not the other ships an installer and an app that disagree about what
+      # version they are. See scripts/stamp-version.mjs for who reads what.
       - name: Stamp release version
         shell: bash
-        run: |
-          node -e "
-            const fs = require('fs');
-            const v = '${{ needs.version.outputs.version }}';
-            for (const p of ['src-tauri/tauri.conf.json', 'package.json']) {
-              const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-              j.version = v;
-              fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
-              console.log(p, '->', v);
-            }
-          "
+        run: node scripts/stamp-version.mjs "${{ needs.version.outputs.version }}"
 
       - name: Install frontend dependencies
         run: npm ci
@@ -241,9 +239,14 @@ jobs:
         if: env.HAS_BUTLER != 'true'
         run: echo "::warning::BUTLER_API_KEY secret is not set — skipping itch.io upload. Add it under Settings → Secrets and variables → Actions."
 
-      - name: Checkout (to tag the released version)
+      # fetch-depth: 0 because the bump below pushes a new COMMIT. A shallow
+      # clone can push a tag that points at a commit the remote already has, but
+      # a commit of its own is refused as a shallow update.
+      - name: Checkout (to commit the bump and tag the release)
         if: env.HAS_BUTLER == 'true'
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Download build artifacts
         if: env.HAS_BUTLER == 'true'
@@ -272,10 +275,33 @@ jobs:
           push dl/itch-ubuntu-22.04/GameAssetBrowser.deb            linux-deb
           push dl/itch-macos-latest/GameAssetBrowser.dmg            osx
 
-      - name: Record the released version as a git tag
+      # The same stamp the build jobs applied, re-run here because their
+      # workspaces are long gone — this is the copy that gets committed, so the
+      # repo ends up saying what the shipped build says.
+      - name: Commit the version bump and tag the release
         if: env.HAS_BUTLER == 'true'
+        env:
+          V: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          node scripts/stamp-version.mjs "$V"
+          git add package.json package-lock.json src-tauri/tauri.conf.json
+          git commit -m "chore(release): v$V"
+
           # Lightweight tag only — this is NOT a GitHub Release; it just lets the
-          # next run compute the following patch version.
-          git tag "${{ needs.version.outputs.tag }}"
-          git push origin "${{ needs.version.outputs.tag }}"
+          # next run compute the following patch version. It sits on the bump
+          # commit, so the tagged tree is the one that claims that version.
+          git tag "$TAG"
+
+          # Push the tag first and on its own: it is what the next run reads, so
+          # it must land even if the branch update cannot. Fast-forwarding main
+          # is the convenience half — if main moved during the ~45 min build (or
+          # branch protection refuses the push) a warning is the right outcome,
+          # because the release is already out and correctly tagged.
+          git push origin "$TAG"
+          git push origin HEAD:main \
+            || echo "::warning::main moved during the build — $TAG is released and tagged, but the version bump did not merge. Apply it with: git cherry-pick $TAG"
