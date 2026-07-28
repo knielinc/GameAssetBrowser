@@ -78,7 +78,7 @@ export default function SettingsMenu(): ReactElement {
         <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-64 rounded-xl bg-raised p-3 shadow-e2">
           <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-faint">Theme</div>
           <div className="grid grid-cols-5 gap-1.5">
-            {THEMES.map((t) => {
+            {THEMES.filter((t) => t.glass !== true).map((t) => {
               const on = t.id === themeId;
               return (
                 <button
@@ -99,6 +99,35 @@ export default function SettingsMenu(): ReactElement {
               );
             })}
           </div>
+          {/* Glass themes get a featured full-width swatch — they aren't a flat
+              colour, so a grid square can't preview them. */}
+          {THEMES.filter((t) => t.glass === true).map((t) => {
+            const on = t.id === themeId;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                title={t.name}
+                onClick={() => setTheme(t.id)}
+                className="relative mt-1.5 flex h-9 w-full items-center justify-center rounded-lg text-[11px] font-medium transition-transform duration-[120ms] hover:-translate-y-0.5"
+                style={{
+                  // A miniature of the styles.css glass wallpaper, under the
+                  // same frost the panels wear.
+                  background:
+                    "linear-gradient(rgb(170 184 240 / 0.14), rgb(170 184 240 / 0.14)), linear-gradient(115deg, #2e3d78 0%, #24306b 35%, #0f4a63 70%, #57306b 100%)",
+                  color: "#dfe6ff",
+                  boxShadow: on ? "0 0 0 2px var(--color-accent)" : "var(--shadow-e1)",
+                }}
+              >
+                {t.name}
+                {on && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-bg">
+                    <Check size={10} strokeWidth={3} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <div className="mt-1.5 text-center text-[11px] text-dim">{active?.name}</div>
 
           <div className="mb-2 mt-4 flex items-center justify-between">
