@@ -55,15 +55,21 @@ const CACHE_VERSION: u32 = 3;
 /// Decode threads. Higher than metadata.rs's 2 because this is CPU-bound
 /// decode rather than disk probes. Scales with the machine so a screenful of
 /// audio waveforms (each a full symphonia decode) actually renders in parallel
-/// instead of trickling four at a time, but stays floored at 4 and capped at 8:
-/// each in-flight 4K RGBA texture decode is ~64 MB resident, so 8 workers is a
-/// ~512 MB ceiling. Audio decodes are memory-light, so the cap only bites on
-/// texture-heavy grids.
+/// instead of trickling four at a time, floored at 4 and capped at 12.
+///
+/// 12, not 8: measured on the real library (390 PNGs, 16-core machine), 8→12
+/// threads is +27% throughput (300→381 thumbs/s) and 12→16 only +8% more while
+/// taking every core from the UI and the scheme-handler threads — 12 is the
+/// knee. Memory: each in-flight 4K RGBA decode is ~67 MB resident, so 12
+/// workers is a ~800 MB transient ceiling; tolerable on the 12+-core machines
+/// that actually reach the cap, and JPEG no longer materializes full
+/// resolution at all (jpeg.rs decodes scaled). Audio decodes are memory-light,
+/// so the ceiling only bites on texture-heavy grids.
 fn decode_threads() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
-        .clamp(4, 8)
+        .clamp(4, 12)
 }
 const FLUSH_MS: u64 = 100;
 
@@ -657,20 +663,29 @@ fn audio_waveform_image(path: &str) -> Option<DynamicImage> {
 /// Returning the dropped ids keeps both properties: the queue stays bounded,
 /// and nothing is lost. Cheap â€” it is a Vec<u32> of at most a screenful.
 ///
-/// `supersede` distinguishes the two kinds of caller. The grid scroller owns
-/// the queue and supersedes (drops the previous window). A *pin* â€” the audio
-/// inspector or a fullscreen preview asking for one selected file â€” must NOT
-/// supersede: it shares the grid's queue but not its "asked" bookkeeping, so
-/// draining the grid's jobs here would report them dropped to the *pin's*
-/// promise, which discards them; the grid never re-asks and its cells strand.
-/// A pin therefore jumps to the front of the queue and drops nothing (returns
-/// empty), decoding its file next without disturbing the grid's window.
+/// `supersede`/`background` distinguish the three kinds of caller. The grid
+/// scroller owns the queue and supersedes (drops the previous window). A *pin*
+/// â€” the audio inspector or a fullscreen preview asking for one selected file
+/// â€” must NOT supersede: it shares the grid's queue but not its "asked"
+/// bookkeeping, so draining the grid's jobs here would report them dropped to
+/// the *pin's* promise, which discards them; the grid never re-asks and its
+/// cells strand. A pin therefore jumps to the front of the queue and drops
+/// nothing (returns empty), decoding its file next without disturbing the
+/// grid's window.
+///
+/// `background` is the idle prefetcher (thumbPrefetch.ts): append BEHIND
+/// everything and drop nothing, so warming future tabs can never delay a
+/// visible cell or a pin â€” and the next interactive supersede is free to
+/// discard the backfill wholesale. That costs the prefetcher nothing: it holds
+/// no "asked" bookkeeping, re-deriving what is still undone from the store
+/// each round, so a dropped backfill job is simply re-found later.
 #[tauri::command]
 pub async fn request_thumbs(
     app: AppHandle,
     state: State<'_, ThumbState>,
     items: Vec<(u32, String)>,
     supersede: bool,
+    background: Option<bool>,
 ) -> Result<Vec<u32>, String> {
     let n = items.len();
     // Take BOTH locks before touching either, and hold `running` across the
@@ -687,6 +702,12 @@ pub async fn request_thumbs(
                 q.push(Job { id, path });
             }
             dropped
+        } else if background == Some(true) {
+            // Backfill: strictly behind whatever is queued.
+            for (id, path) in items {
+                q.push(Job { id, path });
+            }
+            Vec::new()
         } else {
             // Pin: prepend so the selected file decodes next, keep the grid's
             // window intact, and drop nothing. `.rev()` preserves caller order
@@ -731,86 +752,116 @@ fn drain(app: AppHandle) {
     };
 
     let pending: Arc<Mutex<Vec<(u32, ThumbInfo, String)>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut last_flush = std::time::Instant::now();
+    // Shared across workers so ANY of them can flush once the cadence elapses —
+    // emissions stay batched (~FLUSH_MS apart) without a dedicated timer thread.
+    let last_flush = Mutex::new(std::time::Instant::now());
 
     loop {
         let state = app.state::<ThumbState>();
-
-        // Take a chunk from the FRONT so previews fill in top-left downward, the
-        // order the eye scans. The queue only ever holds the current visible
-        // window (request_thumbs clears it on each range change), so the front
-        // is the topmost on-screen row, not a stale fly-over.
-        let chunk: Vec<Job> = {
-            let mut q = state.queue.lock();
-            let take = q.len().min(threads * 2);
-            q.drain(0..take).collect()
-        };
-        if chunk.is_empty() {
-            flush(&app, &pending);
-            // Re-check the queue while holding `running`, in the same lock
-            // order request_thumbs uses. A request that landed between our
-            // split_off and here would otherwise be orphaned.
-            let mut running = state.running.lock();
-            if state.queue.lock().is_empty() {
-                *running = false;
-                return;
-            }
-            continue;
-        }
-
         let blob = app.state::<ThumbCache>();
         let blob_ref: &ThumbCache = &blob;
         let pending_ref = &pending;
+        let last_flush_ref = &last_flush;
+        let app_ref = &app;
+
+        // Every worker pulls ONE job at a time from the FRONT of the live
+        // queue, so previews fill in top-left downward, the order the eye
+        // scans — and there is NO chunk barrier. The old shape drained
+        // `threads * 2` jobs and par_iter'd them, which parked every finished
+        // worker until the chunk's slowest decode returned: one 380 ms PNG
+        // held 15 idle threads (measured 30% slower on a mixed batch), and
+        // its chunk-mates' finished results couldn't flush until it was done.
+        // Per-job pulling also shrinks the committed window (jobs cancellation
+        // can no longer reach) from threads*2 to threads.
         pool.install(|| {
-            use rayon::prelude::*;
-            chunk.into_par_iter().for_each(|job| {
-                // NOTE: deliberately no staleness gate on the RESULT, unlike
-                // waveform.rs. A waveform is single-slot state, so a stale one
-                // would clobber the current track's peaks; thumbnails are keyed
-                // by file id, so a late result is simply a correct result that
-                // arrived late. Dropping it would strand the cell forever â€”
-                // the frontend never re-asks for an id it already asked for.
-                //
-                // Memory hit: skip the blob decode entirely. build() decodes
-                // the stored 256px PNG purely to recompute stats that cannot
-                // have changed â€” cheap per cell, but it recurs for every cell
-                // on every warm launch, and this in-RAM LRU exists to skip it.
-                //
-                // Only trust that memo while the PIXELS are still there. It is
-                // bounded by ENTRY COUNT (2048) and ThumbCache by a BYTE budget,
-                // so the two evict independently: on a large library the blob
-                // drops a thumbnail whose memo entry is still live. Taking the
-                // shortcut then answers with a key that has nothing behind it —
-                // `tex://` 404s and the cell strands showing badges and
-                // dimensions (both come from this `info`) but no image, with no
-                // way back, because the frontend never re-asks for an id it
-                // already has. Verify, and on a miss fall through to a real
-                // re-decode.
-                let memo = app.state::<ThumbState>().cache.lock().get(&job.path).cloned();
-                if let Some((key, info)) = memo {
-                    if crate::thumbcache::parse_key(&key).is_some_and(|h| blob_ref.contains(h)) {
-                        pending_ref.lock().push((job.id, info, key));
-                        return;
-                    }
-                    // Stale memo — drop it so build() below replaces it.
-                    app.state::<ThumbState>().cache.lock().pop(&job.path);
-                }
-                match build(&job.path, blob_ref) {
-                    Ok((key, info)) => {
-                        app.state::<ThumbState>()
-                            .cache
-                            .lock()
-                            .put(job.path.clone(), (key.clone(), info));
-                        pending_ref.lock().push((job.id, info, key));
-                    }
-                    Err(e) => eprintln!("[thumbs] {e}"),
+            rayon::scope(|s| {
+                for _ in 0..threads {
+                    s.spawn(move |_| loop {
+                        let job = {
+                            let st = app_ref.state::<ThumbState>();
+                            let mut q = st.queue.lock();
+                            if q.is_empty() {
+                                return;
+                            }
+                            q.remove(0)
+                        };
+
+                        // NOTE: deliberately no staleness gate on the RESULT,
+                        // unlike waveform.rs. A waveform is single-slot state,
+                        // so a stale one would clobber the current track's
+                        // peaks; thumbnails are keyed by file id, so a late
+                        // result is simply a correct result that arrived late.
+                        // Dropping it would strand the cell forever â€” the
+                        // frontend never re-asks for an id it already asked for.
+                        //
+                        // Memory hit: skip the decode entirely — but only trust
+                        // the memo while the PIXELS are still there. The memo is
+                        // bounded by ENTRY COUNT (2048) and ThumbCache by a BYTE
+                        // budget, so the two evict independently: on a large
+                        // library the blob drops a thumbnail whose memo entry is
+                        // still live. Taking the shortcut then answers with a
+                        // key that has nothing behind it — `thumb://` 404s and
+                        // the cell strands showing badges and dimensions (both
+                        // come from this `info`) but no image, with no way back.
+                        // Verify, and on a miss fall through to a real re-decode.
+                        let memo =
+                            app_ref.state::<ThumbState>().cache.lock().get(&job.path).cloned();
+                        let mut served = false;
+                        if let Some((key, info)) = memo {
+                            if crate::thumbcache::parse_key(&key)
+                                .is_some_and(|h| blob_ref.contains(h))
+                            {
+                                pending_ref.lock().push((job.id, info, key));
+                                served = true;
+                            } else {
+                                // Stale memo — drop it so build() replaces it.
+                                app_ref.state::<ThumbState>().cache.lock().pop(&job.path);
+                            }
+                        }
+                        if !served {
+                            match build(&job.path, blob_ref) {
+                                Ok((key, info)) => {
+                                    app_ref
+                                        .state::<ThumbState>()
+                                        .cache
+                                        .lock()
+                                        .put(job.path.clone(), (key.clone(), info));
+                                    pending_ref.lock().push((job.id, info, key));
+                                }
+                                Err(e) => eprintln!("[thumbs] {e}"),
+                            }
+                        }
+
+                        // Cadence flush from whichever worker crosses the line
+                        // first. Under the old chunk barrier a straggler delayed
+                        // its chunk-mates' FINISHED results by its whole decode
+                        // time; now they reach the screen within ~FLUSH_MS.
+                        let due = {
+                            let mut lf = last_flush_ref.lock();
+                            if lf.elapsed().as_millis() as u64 >= FLUSH_MS {
+                                *lf = std::time::Instant::now();
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if due {
+                            flush(app_ref, pending_ref);
+                        }
+                    });
                 }
             });
         });
 
-        if last_flush.elapsed().as_millis() as u64 >= FLUSH_MS {
-            flush(&app, &pending);
-            last_flush = std::time::Instant::now();
+        // Workers only exit on an empty queue: emit what's left, then re-check
+        // the queue while holding `running`, in the same lock order
+        // request_thumbs uses. A request that landed between the workers
+        // exiting and here would otherwise be orphaned.
+        flush(&app, &pending);
+        let mut running = state.running.lock();
+        if state.queue.lock().is_empty() {
+            *running = false;
+            return;
         }
     }
 }

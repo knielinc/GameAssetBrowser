@@ -67,8 +67,12 @@ export function requestSpectrogram(path: string): Promise<void> {
  * for a pin). The caller must forget it ever asked for those, or their cells
  * strand forever.
  */
-export function requestThumbs(items: [number, string][], supersede = true): Promise<number[]> {
-  return invoke<number[]>("request_thumbs", { items, supersede });
+export function requestThumbs(
+  items: [number, string][],
+  supersede = true,
+  background = false,
+): Promise<number[]> {
+  return invoke<number[]>("request_thumbs", { items, supersede, background });
 }
 
 /**

@@ -12,6 +12,7 @@ import { useExternalDrop } from "./hooks/useExternalDrop";
 import { addFolders, useLibraryStore } from "./stores/libraryStore";
 import { pausePlayback, useAudioSelected, usePlayerStore } from "./stores/playerStore";
 import { usePanelPrefs } from "./stores/panelPrefs";
+import { startThumbPrefetch } from "./thumbPrefetch";
 
 export default function App(): ReactElement {
   const { width: sidebarWidth, isDragging, handleProps } = useSidebarWidth();
@@ -32,6 +33,11 @@ export default function App(): ReactElement {
   useEffect(() => {
     if (!audioSelected) pausePlayback();
   }, [audioSelected]);
+  // Warm thumbnails for not-yet-visited tabs in the background. Module-level
+  // singleton — survives this component's lifetime; the empty deps just start it.
+  useEffect(() => {
+    startThumbPrefetch();
+  }, []);
   const leftOpen = usePanelPrefs((s) => s.left);
 
   return (
