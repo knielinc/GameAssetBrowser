@@ -93,11 +93,6 @@ async function textThumb(path: string): Promise<string | null> {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return null;
   ctx.scale(dpr, dpr);
-  // Glass themes carry alpha in the surface tokens; the thumb is a standalone
-  // image, so flatten over an opaque near-wallpaper base first (invisible
-  // under an opaque theme's bg fill).
-  ctx.fillStyle = "#0d1126";
-  ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = fg;
@@ -187,9 +182,6 @@ function ebookTitleCard(
   const fg = cs.getPropertyValue("--color-text").trim() || "#edeff4";
   const dim = cs.getPropertyValue("--color-dim").trim() || "#9a9aae";
   const accent = cs.getPropertyValue("--color-accent").trim() || "#7c9cff";
-  // Flatten glass-theme alpha over an opaque base, as in textThumb.
-  ctx.fillStyle = "#0d1126";
-  ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
   // A spine-like accent bar on the left edge — the "this is a book" cue.

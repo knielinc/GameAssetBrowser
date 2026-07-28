@@ -3,32 +3,20 @@ import { useRenderPrefs } from "../../stores/renderPrefs";
 import { useThemeStore } from "../../stores/theme";
 import { ThumbGL, type DrawCell } from "./thumbGL";
 
-/** Read a `#rrggbb[aa]` CSS var as [r,g,b] in 0..1 for a GL uniform. The canvas
- *  paints opaque pixels, so a translucent value (the glass theme's surface
- *  tokens carry alpha) is flattened over `base`. */
-function cssRgb(
-  name: string,
-  fallback: [number, number, number],
-  base: [number, number, number] = fallback,
-): [number, number, number] {
+/** Read a `#rrggbb` CSS var as [r,g,b] in 0..1 for a GL uniform. */
+function cssRgb(name: string, fallback: [number, number, number]): [number, number, number] {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const m = /^#?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(v);
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(v);
   if (m === null) return fallback;
   const n = parseInt(m[1]!, 16);
-  const rgb: [number, number, number] = [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
-  if (m[2] === undefined) return rgb;
-  const a = parseInt(m[2], 16) / 255;
-  return [rgb[0] * a + base[0] * (1 - a), rgb[1] * a + base[1] * (1 - a), rgb[2] * a + base[2] * (1 - a)];
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 /** Letterbox = raised, checker = raised/panel — matches the CSS alpha-checker,
  *  so the thumbnail stage follows the active theme. */
 function applyThemeColors(gl: ThumbGL): void {
-  // What visually sits under a glass card — the wallpaper through the canvas
-  // tint. Only used to flatten alpha, so opaque themes never see it.
-  const glassBase: [number, number, number] = [0.1, 0.13, 0.25];
-  const raised = cssRgb("--color-raised", [0.153, 0.165, 0.208], glassBase);
-  const panel = cssRgb("--color-panel", [0.118, 0.129, 0.165], glassBase);
+  const raised = cssRgb("--color-raised", [0.153, 0.165, 0.208]);
+  const panel = cssRgb("--color-panel", [0.118, 0.129, 0.165]);
   gl.setColors(raised, raised, panel);
 }
 

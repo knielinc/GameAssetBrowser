@@ -67,15 +67,7 @@ export interface Theme {
   /** Preview swatch: [surface, accent]. */
   swatch: [string, string];
   light?: boolean;
-  /** Glass theme: surface tokens carry alpha and styles.css paints a gradient
-   *  wallpaper behind the app (see the `glass` section there). Stamped on
-   *  :root as `data-ui-glass` by applyTheme. */
-  glass?: boolean;
   vars: Vars;
-  /** Per-theme overrides applied AFTER the mode set. Every key here must also
-   *  exist in DARK_MODE/LIGHT_MODE, so switching to another theme resets it —
-   *  applyTheme never removes properties, it only overwrites. */
-  extra?: Vars;
 }
 
 export const THEMES: Theme[] = [
@@ -145,30 +137,6 @@ export const THEMES: Theme[] = [
   {
     id: "frost", name: "Frost", swatch: ["#d5dadc", "#0b7a8c"], light: true,
     vars: mk({ bg: "#d5dadc", header: "#eef1f2", panel: "#f8fbfc", raised: "#ffffff", overlay: "#ffffff", hover: "#e1e9ee", hoverStrong: "#d4dbe0", well: "#d2d7d8", border: "#cad1d6", text: "#15212a", dim: "#4b5a64", faint: "#8a9aa4", accent: "#0b7a8c", accentHover: "#086271", accentFill: "#0a7182", accentFg: "#eafafd", accentSolid: "#0a7182" }),
-  },
-  // ---- glass ----
-  // Liquid glass: every surface is an #rrggbbaa TINT over the wallpaper that
-  // styles.css paints behind the app. The wallpaper is smooth gradients, so
-  // plain translucency already reads as frosted glass — real backdrop-blur is
-  // reserved for the floating popups that overlap content (see styles.css).
-  // The ladder still steps panel < raised < overlay, but in OPACITY as much as
-  // tone: cards are a thin frost, popups are dense enough to carry text.
-  // `hover` diverges from `raised` (unlike the opaque dark themes): raised is a
-  // popup surface here, far too heavy for a transient row tint, so hover is a
-  // thin white wash instead.
-  {
-    id: "liquid-glass", name: "Liquid Glass", swatch: ["#2c3560", "#8fb8ff"], glass: true,
-    vars: mk({ bg: "#0709148c", header: "#1b254794", panel: "#3d4b8f61", raised: "#2a3358d9", overlay: "#39447180", hover: "#aebdff1f", hoverStrong: "#b7c5ff2e", well: "#05071099", border: "#aab8f029", text: "#eef1fc", dim: "#aab3d6", faint: "#707aa3", accent: "#8fb8ff", accentHover: "#aac9ff", accentFill: "#5d8bff52", accentFg: "#d6e4ff", accentSolid: "#4f74f2" }),
-    extra: {
-      // The chip's legibility comes from ITS opacity (see styles.css) — the
-      // dark set derives it from `bg`, which glass makes translucent, and
-      // 0.9 × 0.55 alpha left chips see-through over arbitrary thumbnails.
-      "--color-chip": "rgb(10 14 32 / 0.82)",
-      // White-glass scrollbar thumbs instead of the opaque midnight greys.
-      "--scroll-thumb": "#b9c6ff33",
-      "--scroll-thumb-strong": "#b9c6ff4d",
-      "--scroll-thumb-hover": "#b9c6ff66",
-    },
   },
 ];
 
@@ -286,13 +254,10 @@ function applyTheme(id: string): void {
   const root = document.documentElement;
   for (const [k, v] of Object.entries(light ? LIGHT_MODE : DARK_MODE)) root.style.setProperty(k, v);
   for (const [k, v] of Object.entries(theme.vars)) root.style.setProperty(k, v);
-  if (theme.extra !== undefined) for (const [k, v] of Object.entries(theme.extra)) root.style.setProperty(k, v);
   root.style.colorScheme = light ? "light" : "dark";
   // A hook for the few rules that can't be expressed as a var swap — chiefly
   // github-markdown-css, which ships hardcoded hex per mode (see styles.css).
   root.dataset.uiMode = light ? "light" : "dark";
-  // Glass themes: styles.css keys the wallpaper and popup blur off this.
-  root.dataset.uiGlass = theme.glass === true ? "true" : "false";
 }
 
 function applyScale(pct: number): void {
