@@ -1,9 +1,13 @@
 name: Release
 
-# Manual release to itch.io (kniti/gab). Bumps the patch version, builds all
-# three OSes, and uploads the portable build (+ installer) to itch.io via butler.
-# It does NOT create a GitHub Release. Run it from Actions → Release → "Run
-# workflow".
+# Release to itch.io (kniti/gab). Bumps the patch version, builds all three
+# OSes, and uploads the portable build (+ installer) to itch.io via butler. It
+# does NOT create a GitHub Release.
+#
+# Runs automatically on every push to main that touches something shippable, and
+# on demand from Actions → Release → "Run workflow". `paths-ignore` is what keeps
+# a README fix from cutting a version on a public storefront — the trigger list
+# below is the whole policy, so widen it carefully.
 #
 # Versioning is tag-driven: the next version is the latest `vX.Y.Z` tag with its
 # patch incremented (the first release uses the version in package.json). After a
@@ -28,15 +32,45 @@ name: Release
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [main]
+    # Documentation, licence text and the CI definition itself ship nothing, so
+    # they must not burn three 45-minute platform builds or advance the version
+    # on itch. A push that touches BOTH a doc and any source file still releases
+    # — paths-ignore only skips a push whose every changed file matches.
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE*"
+      - ".github/**"
 
 permissions:
   contents: write
+
+# One release at a time. Two pushes in quick succession would otherwise both
+# read the same latest tag (it is only written at the very end, ~45 minutes in),
+# claim the same version, and race to push the same tag — the loser failing
+# after a full build. Queued rather than cancelled: a run that is already
+# uploading to itch must be allowed to finish and tag itself.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   # Cheap gate first: a typecheck or unit-test failure should not cost three
   # 45-minute platform builds to discover. The attribution check needs extracted
   # crate sources, so it runs in the Windows build job instead (see below).
   check:
+    # Don't release our own release. The last job pushes a `chore(release): vX`
+    # bump back to main, and on a push trigger that commit would otherwise start
+    # the next release, which bumps and pushes again, forever.
+    #
+    # GitHub already breaks this loop — a push made with the default
+    # GITHUB_TOKEN does not trigger workflow runs — but that is an implicit rule
+    # about the CREDENTIAL, and it silently stops applying the day the push
+    # switches to a PAT or a deploy key (the usual fix for branch protection).
+    # This condition holds regardless of who pushed. Both root jobs carry it;
+    # skipping them skips everything downstream via `needs`.
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -52,6 +86,8 @@ jobs:
         run: npm test
 
   version:
+    # Same loop guard as `check` above — see the reasoning there.
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -288,6 +324,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # Bump the CURRENT tip of main, not the commit this run was triggered
+          # by. Under the automatic trigger those routinely differ: runs queue on
+          # the `release` concurrency group, so by the time a queued run gets
+          # here the previous run has already bumped main and this run's own
+          # checkout is behind it.
+          #
+          # Re-stamping the tip is what makes that safe. Committing on the built
+          # commit and replaying it forward cannot work — both bumps rewrite the
+          # same version line from the same base ("0.1.6" -> "0.1.7" and
+          # "0.1.6" -> "0.1.8"), so the replay conflicts every time. Generating
+          # the bump against whatever is there has no such base to disagree with.
+          #
+          # The cost is that the tagged tree is main-at-release-time rather than
+          # the exact tree that was built, when someone pushed during the ~45 min
+          # build. That is the right trade: main carrying the shipped version is
+          # load-bearing (see the header — every non-CI build reads package.json),
+          # whereas the tag's only job is to tell the next run what to bump from.
+          git fetch origin main
+          git checkout -B main origin/main
+
           node scripts/stamp-version.mjs "$V"
           git add package.json package-lock.json src-tauri/tauri.conf.json
           git commit -m "chore(release): v$V"
@@ -299,9 +355,9 @@ jobs:
 
           # Push the tag first and on its own: it is what the next run reads, so
           # it must land even if the branch update cannot. Fast-forwarding main
-          # is the convenience half — if main moved during the ~45 min build (or
-          # branch protection refuses the push) a warning is the right outcome,
-          # because the release is already out and correctly tagged.
+          # is the convenience half — if main moved in the seconds since the
+          # fetch (or branch protection refuses the push) a warning is the right
+          # outcome, because the release is already out and correctly tagged.
           git push origin "$TAG"
           git push origin HEAD:main \
-            || echo "::warning::main moved during the build — $TAG is released and tagged, but the version bump did not merge. Apply it with: git cherry-pick $TAG"
+            || echo "::warning::main moved during the release — $TAG is released and tagged, but the version bump did not merge. Apply it with: git cherry-pick $TAG"
