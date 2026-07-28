@@ -226,6 +226,23 @@ export function requestModelThumbs(files: readonly LibFileLike[]): void {
   if (!draining) void drain();
 }
 
+/**
+ * Append `files` BEHIND whatever is queued, without superseding — the model
+ * half of the idle prefetcher (thumbPrefetch.ts). A visible-range request
+ * still wipes the queue (including these), which is correct: the prefetcher
+ * re-derives what's still unrendered and re-appends later, so a discarded
+ * backfill job costs nothing, and a visible cell never waits behind one.
+ * Current-generation jobs, so they actually run; `done` still dedupes.
+ */
+export function backfillModelThumbs(files: readonly LibFileLike[]): void {
+  for (const f of files) {
+    if (done.has(f.path)) continue;
+    queue.push({ file: f, gen: generation });
+  }
+  emitProgress();
+  if (!draining) void drain();
+}
+
 export function resetModelThumbs(): void {
   generation++;
   queue.length = 0;
