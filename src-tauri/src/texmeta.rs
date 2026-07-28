@@ -109,7 +109,7 @@ fn flusher_loop(
 /// Unparseable files yield `None` — nothing is emitted, and the frontend keeps
 /// them visible forever (a filter may only remove files it has positively
 /// measured).
-fn probe_dims(path: &Path) -> Option<(u32, u32)> {
+pub(crate) fn probe_dims(path: &Path) -> Option<(u32, u32)> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     // Camera RAW: `image::image_dimensions` would read the TIFF CFA dims (or
     // fail); the meaningful size is the embedded preview's, which the thumbnail

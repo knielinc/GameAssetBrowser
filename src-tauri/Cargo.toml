@@ -45,6 +45,8 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.zune-jpeg]
 opt-level = 3
+[profile.dev.package.jpeg-decoder]
+opt-level = 3
 [profile.dev.package.zune-inflate]
 opt-level = 3
 [profile.dev.package.exr]
@@ -132,6 +134,14 @@ image = { version = "0.25", default-features = false, features = [
 # libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
 # animated WebP (launcher assets, etc.); libwebp reads them.
 webp = "0.3"
+# Scaled JPEG decoding (jpeg.rs). `image`'s zune-jpeg is the faster decoder at
+# 1:1 and stays the default, but it can only emit full resolution — and the
+# JPEGs in an asset folder are routinely 12-50 MP phone photos being squeezed
+# into a 256px cell. jpeg-decoder exposes the 1/8, 1/4 and 1/2 IDCT sizes, which
+# is 2.1x faster on a real folder and ~86x smaller in peak allocation.
+# default-features off drops its rayon pool for the same reason image's is off:
+# thumbs.rs schedules the parallelism itself.
+jpeg-decoder = { version = "0.3", default-features = false }
 # Bounded, downsampling EXR decode. In its OWN crate so its 67M-pixel setter is
 # compiled at opt-level 3 (see the profile override below) even in dev — inlined
 # into this opt-0 crate it took ~17 s per 67 MP file; in exrthumb, ~0.85 s.

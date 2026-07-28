@@ -4,6 +4,7 @@ mod celsock;
 mod dupes;
 mod explorer;
 mod index;
+mod jpeg;
 mod layered;
 mod metadata;
 mod modeltex;

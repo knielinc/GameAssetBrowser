@@ -49,7 +49,9 @@ const PREVIEW_EDGE: u32 = 4096;
 /// Bump to invalidate every cached thumbnail after a pipeline change.
 /// v2: default tone-mapper for HDR/EXR thumbnails changed Reinhard -> ACES and
 /// gamma 2.2 -> accurate sRGB (see tonemap.rs).
-const CACHE_VERSION: u32 = 2;
+/// v3: JPEGs decode from their embedded EXIF thumbnail or a scaled IDCT rather
+/// than at full resolution (see jpeg.rs) — same picture, different pixels.
+const CACHE_VERSION: u32 = 3;
 /// Decode threads. Higher than metadata.rs's 2 because this is CPU-bound
 /// decode rather than disk probes. Scales with the machine so a screenful of
 /// audio waveforms (each a full symphonia decode) actually renders in parallel
@@ -447,6 +449,10 @@ fn decode_image_inner(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, S
         // EXR gets a bounded, downsampling decode — a huge light bake would OOM
         // through image::open's full-resolution float path (see decode_exr).
         Some("exr") => return decode_exr(p, max_edge),
+        // JPEG likewise decodes no larger than the caller will show: an embedded
+        // EXIF thumbnail, or a scaled IDCT. The phone photos that land in asset
+        // folders are 12–50 MP and dominated grid decode time (see jpeg.rs).
+        Some("jpg") | Some("jpeg") => return crate::jpeg::decode_jpeg(p, max_edge),
         Some(ext) if crate::types::RAW_EXTENSIONS.contains(&ext) => {
             return crate::raw::decode_raw(p, max_edge)
         }
@@ -512,8 +518,16 @@ fn build(path: &str, cache: &ThumbCache) -> Result<(String, ThumbInfo), String> 
     let thumb = to_ldr(thumb);
 
     let mut info = analyze(&thumb);
-    info.source_width = w;
-    info.source_height = ih;
+    // What we decoded is NOT necessarily the source's size: JPEG lifts an EXIF
+    // thumbnail or scales the IDCT (jpeg.rs) and EXR downsamples, so the decoded
+    // dimensions would understate the file — and the grid badge and status bar
+    // report this as the real resolution. Ask the header prober, the app's
+    // authority on dimensions, so the badge agrees with the Textures filter.
+    // It returns None for camera RAW by design (see its doc): there the embedded
+    // preview's size IS the meaningful one, which is exactly the fallback.
+    let (sw, sh) = crate::texmeta::probe_dims(p).unwrap_or((w, ih));
+    info.source_width = sw;
+    info.source_height = sh;
     let rgba = thumb.to_rgba8();
     cache.put(
         h,

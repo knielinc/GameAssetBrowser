@@ -3,7 +3,9 @@
 //! most self-contained decoder — a TIFF/IFD walker (CR2/NEF/ARW/DNG/…), a Fuji
 //! RAF header reader, a Canon CR3 ISO-BMFF box parser, and a whole-file JPEG
 //! byte-scan fallback — with its own container-parsing risk surface. The only
-//! entry point is [`decode_raw`]; everything else is private to this module.
+//! entry point is [`decode_raw`]; everything else is private to this module,
+//! except the few byte-reading primitives [`jpeg`](crate::jpeg) shares for the
+//! same job on ordinary JPEGs ([`parse_sof`], [`rd_u16`], [`rd_u32`]).
 
 use std::path::Path;
 
@@ -438,7 +440,7 @@ fn jpeg_dims(file: &mut std::fs::File, off: usize, claimed_len: usize, file_len:
 
 /// Scan JPEG marker segments for the Start-Of-Frame and return (width, height).
 /// SOF always precedes the scan data, so we return before hitting entropy bytes.
-fn parse_sof(b: &[u8]) -> Option<(u32, u32)> {
+pub(crate) fn parse_sof(b: &[u8]) -> Option<(u32, u32)> {
     let mut i = 2usize; // past the SOI
     while i + 9 < b.len() {
         if b[i] != 0xFF {
@@ -509,7 +511,7 @@ fn read_exact_at(file: &mut std::fs::File, off: u64, buf: &mut [u8]) -> Option<(
     Some(())
 }
 
-fn rd_u16(b: &[u8], o: usize, le: bool) -> Option<u16> {
+pub(crate) fn rd_u16(b: &[u8], o: usize, le: bool) -> Option<u16> {
     let s = b.get(o..o + 2)?;
     Some(if le {
         u16::from_le_bytes([s[0], s[1]])
@@ -518,7 +520,7 @@ fn rd_u16(b: &[u8], o: usize, le: bool) -> Option<u16> {
     })
 }
 
-fn rd_u32(b: &[u8], o: usize, le: bool) -> Option<u32> {
+pub(crate) fn rd_u32(b: &[u8], o: usize, le: bool) -> Option<u32> {
     let s = b.get(o..o + 4)?;
     Some(if le {
         u32::from_le_bytes([s[0], s[1], s[2], s[3]])
