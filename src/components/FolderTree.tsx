@@ -5,7 +5,7 @@ import { basename, folderMatcher, removeRoot, useLibraryStore, type LibFile } fr
 import { useRevealFolder } from "../stores/revealFolder";
 import { openInExplorer } from "../ipc/commands";
 import type { AssetKind } from "../types";
-import ContextMenu from "./ContextMenu";
+import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 
 /** One directory in the derived folder tree. */
 export interface FolderNode {
@@ -187,6 +187,9 @@ interface TreeNodeProps {
   /** Path being flash-highlighted by "Show in navigator", or null. */
   flash: string | null;
   onToggle: (path: string) => void;
+  /** Row click, modifiers included — the range logic needs the whole visible
+   *  order, so it lives in FolderTree rather than in each node. */
+  onRowClick: (path: string, e: ReactMouseEvent) => void;
   onNodeContextMenu: (path: string, e: ReactMouseEvent) => void;
 }
 
@@ -198,13 +201,12 @@ function TreeNode({
   expanded,
   flash,
   onToggle,
+  onRowClick,
   onNodeContextMenu,
 }: TreeNodeProps): ReactElement {
   const selected = useLibraryStore((s) => s.folderScopes.includes(node.path));
   const hidden = useLibraryStore((s) => s.hiddenFolders.includes(node.path));
   const activeTab = useLibraryStore((s) => s.activeTab);
-  const soloScope = useLibraryStore((s) => s.soloScope);
-  const toggleScope = useLibraryStore((s) => s.toggleScope);
   const toggleHidden = useLibraryStore((s) => s.toggleHidden);
   const hasChildren = node.children.length > 0;
   const isExpanded = hasChildren && expanded.has(node.path);
@@ -215,16 +217,6 @@ function TreeNode({
   // content is out of the query, so present the row the same muted way.
   const effectiveHidden = hidden || ancestorHidden;
   const breakdown = `${node.counts.audio} audio · ${node.counts.texture} 2D · ${node.counts.model} 3D · ${node.counts.document} documents`;
-
-  // Every folder — root or subfolder — scopes the file list the same way: plain
-  // click shows ONLY this folder's content, ctrl/cmd-click adds it to what's
-  // shown, shift-click hides it. Expansion is the chevron's job; the eye handles
-  // its own clicks via stopPropagation.
-  const onRowClick = (e: ReactMouseEvent): void => {
-    if (e.shiftKey) toggleHidden(node.path);
-    else if (e.ctrlKey || e.metaKey) toggleScope(node.path);
-    else soloScope(node.path);
-  };
 
   // Leading disclosure column, one fixed width at every depth so the identity
   // icons below it line up. A childless folder keeps the empty slot.
@@ -282,7 +274,7 @@ function TreeNode({
         style={{
           paddingLeft: `${BASE_PAD_PX + Math.min(depth, MAX_INDENT_DEPTH) * INDENT_STEP_PX}px`,
         }}
-        onClick={onRowClick}
+        onClick={(e) => onRowClick(node.path, e)}
         onContextMenu={(e) => onNodeContextMenu(node.path, e)}
         title={isRoot ? node.path : `${node.path}\n${breakdown}`}
       >
@@ -314,6 +306,7 @@ function TreeNode({
             expanded={expanded}
             flash={flash}
             onToggle={onToggle}
+            onRowClick={onRowClick}
             onNodeContextMenu={onNodeContextMenu}
           />
         ))}
@@ -338,6 +331,9 @@ export default function FolderTree(): ReactElement {
     (s) => s.folderScopes.length === 0 && s.collectionScopes.length === 0,
   );
   const clearScopes = useLibraryStore((s) => s.clearScopes);
+  const soloScope = useLibraryStore((s) => s.soloScope);
+  const toggleScope = useLibraryStore((s) => s.toggleScope);
+  const rangeScope = useLibraryStore((s) => s.rangeScope);
   const toggleHidden = useLibraryStore((s) => s.toggleHidden);
   const resetHidden = useLibraryStore((s) => s.resetHidden);
   const totalCount = useMemo(
@@ -365,6 +361,49 @@ export default function FolderTree(): ReactElement {
   };
 
   const tree = useMemo(() => buildFolderTree(allFiles, roots), [allFiles, roots]);
+
+  // Every row currently on screen, top to bottom — the coordinate space a
+  // Shift+click range is measured in. Collapsed subtrees are absent on purpose:
+  // a range covers what you can see, never folders hidden behind a chevron.
+  const visibleOrder = useMemo(() => {
+    const out: string[] = [];
+    const walk = (node: FolderNode): void => {
+      out.push(node.path);
+      if (node.children.length > 0 && expanded.has(node.path)) {
+        for (const c of node.children) walk(c);
+      }
+    };
+    for (const root of tree) walk(root);
+    return out;
+  }, [tree, expanded]);
+
+  /** Shift-range pivot, set by plain/Ctrl click and kept across Shift+clicks. */
+  const [anchor, setAnchor] = useState<string | null>(null);
+
+  // Every folder — root or subfolder — scopes the file list the same way: plain
+  // click shows ONLY this folder's content, ctrl/cmd-click adds it to what's
+  // shown, shift-click shows the whole run from the pivot to here, and alt-click
+  // hides it. Expansion is the chevron's job; the eye handles its own clicks via
+  // stopPropagation.
+  const onRowClick = (path: string, e: ReactMouseEvent): void => {
+    if (e.altKey) {
+      toggleHidden(path);
+      return;
+    }
+    if (e.shiftKey) {
+      const b = visibleOrder.indexOf(path);
+      // No pivot yet, or one collapsed/rescanned away since — the range
+      // degenerates to the clicked row.
+      let a = anchor === null ? b : visibleOrder.indexOf(anchor);
+      if (a < 0) a = b;
+      rangeScope(visibleOrder.slice(Math.min(a, b), Math.max(a, b) + 1));
+      // Pivot deliberately unchanged: another Shift+click re-extends from it.
+      return;
+    }
+    setAnchor(path);
+    if (e.ctrlKey || e.metaKey) toggleScope(path);
+    else soloScope(path);
+  };
 
   // "Show in navigator": expand every ancestor of the requested folder, then
   // scroll to and flash its row. Fresh object per flash so revealing the same
@@ -457,6 +496,7 @@ export default function FolderTree(): ReactElement {
           expanded={expanded}
           flash={flash?.path ?? null}
           onToggle={onToggle}
+          onRowClick={onRowClick}
           onNodeContextMenu={onNodeContextMenu}
         />
       ))}
@@ -470,7 +510,7 @@ export default function FolderTree(): ReactElement {
           const under = revealScope !== null ? folderMatcher(revealScope) : null;
           const hasHiddenInScope =
             revealScope !== null && hiddenFolders.some((f) => f === revealScope || under!(f));
-          const items = [
+          const items: ContextMenuItem[] = [
             {
               label: "Open in Explorer",
               icon: FolderOpen,
@@ -494,6 +534,7 @@ export default function FolderTree(): ReactElement {
             items.push({
               label: menuHidden ? "Show this folder" : "Hide this folder",
               icon: menuHidden ? Eye : EyeOff,
+              hint: "Alt+click",
               onClick: () => toggleHidden(menu.path),
             });
           }

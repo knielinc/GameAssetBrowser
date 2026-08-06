@@ -133,6 +133,8 @@ jobs:
     # from an expression directly, only through the env context.
     env:
       GAB_SIGN_METHOD: ${{ secrets.GAB_SIGN_METHOD }}
+      # Whether a base64 .pfx was uploaded, for the signtool import step below.
+      HAS_PFX: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -188,6 +190,41 @@ jobs:
         if: matrix.platform == 'windows-latest' && env.GAB_SIGN_METHOD == 'trustedsigning'
         run: dotnet tool install --global sign --prerelease
 
+      # signtool signs against a certificate in the *runner's* store, and a fresh
+      # runner has none — so the .pfx travels as a base64 secret and is imported
+      # here, into CurrentUser\My (the store signtool searches by thumbprint; the
+      # build runs as the same user, so no machine store and no elevation).
+      #
+      # The imported certificate's own thumbprint is exported to GITHUB_ENV, so
+      # GAB_SIGN_THUMBPRINT is only worth setting as a secret when the cert store
+      # holds several certificates (a self-hosted runner with a token, say).
+      # Trusted Signing and `custom` need no import — their key never touches the
+      # runner. The .pfx is deleted immediately after import; the private key
+      # lives on for the job in the runner's per-user store, which is destroyed
+      # with the VM.
+      - name: Import the Windows signing certificate
+        if: matrix.platform == 'windows-latest' && env.GAB_SIGN_METHOD == 'signtool' && env.HAS_PFX == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "WINDOWS_CERTIFICATE is set but WINDOWS_CERTIFICATE_PASSWORD is not"
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          # Straight base64 -> bytes: `certutil -encode` output (with its BEGIN/END
+          # header lines) is accepted too, because FromBase64String is fed only the
+          # payload lines. Trim to survive a secret pasted with a trailing newline.
+          $b64 = ($env:WINDOWS_CERTIFICATE -split "`n" | Where-Object { $_ -notmatch "-----" }) -join ""
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($b64.Trim()))
+          $pw = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item $pfx -Force
+          "GAB_SIGN_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "imported '$($cert.Subject)', expires $($cert.NotAfter.ToString('yyyy-MM-dd'))"
+
       - name: Build the app (no GitHub Release — itch.io only)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -200,7 +237,9 @@ jobs:
           GAB_SIGN_ENDPOINT: ${{ secrets.GAB_SIGN_ENDPOINT }}
           GAB_SIGN_ACCOUNT: ${{ secrets.GAB_SIGN_ACCOUNT }}
           GAB_SIGN_PROFILE: ${{ secrets.GAB_SIGN_PROFILE }}
-          GAB_SIGN_THUMBPRINT: ${{ secrets.GAB_SIGN_THUMBPRINT }}
+          # Falls back to the thumbprint the import step exported, so a repo that
+          # ships a .pfx needs no second secret repeating what the file says.
+          GAB_SIGN_THUMBPRINT: ${{ secrets.GAB_SIGN_THUMBPRINT || env.GAB_SIGN_THUMBPRINT }}
           GAB_SIGN_COMMAND: ${{ secrets.GAB_SIGN_COMMAND }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -226,6 +265,26 @@ jobs:
       - name: Verify third-party attributions are current
         if: matrix.platform == 'windows-latest'
         run: npm run licenses:check
+
+      # The portable exe is copied straight out of target/release, which is NOT a
+      # bundler output — Tauri's signCommand only runs over what it packages, so
+      # without this the installer would ship signed and the portable build (the
+      # primary itch download) unsigned. Same script, called the way
+      # export-release.ps1 calls it locally. Re-signing an already-signed binary
+      # is harmless: signtool replaces the signature.
+      - name: Sign the portable exe
+        if: matrix.platform == 'windows-latest' && env.GAB_SIGN_METHOD != ''
+        shell: pwsh
+        env:
+          GAB_SIGN_ENDPOINT: ${{ secrets.GAB_SIGN_ENDPOINT }}
+          GAB_SIGN_ACCOUNT: ${{ secrets.GAB_SIGN_ACCOUNT }}
+          GAB_SIGN_PROFILE: ${{ secrets.GAB_SIGN_PROFILE }}
+          GAB_SIGN_THUMBPRINT: ${{ secrets.GAB_SIGN_THUMBPRINT || env.GAB_SIGN_THUMBPRINT }}
+          GAB_SIGN_COMMAND: ${{ secrets.GAB_SIGN_COMMAND }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: ./scripts/sign.ps1 "src-tauri/target/release/Game Asset Browser.exe"
 
       - name: Stage itch.io uploads
         shell: bash
@@ -255,6 +314,24 @@ jobs:
           # beside the download is what a compliance reviewer looks for.
           cp THIRD-PARTY-LICENSES.md LICENSE.md itch/ 2>/dev/null || true
           ls -la itch
+
+      # A signature that exists but does not chain to a trusted root is worse than
+      # no signature — it looks fine locally (where the CA is installed) and trips
+      # SmartScreen on every customer machine. Checked here, on the exact files
+      # that get uploaded, so a broken certificate fails the release instead of
+      # shipping. `NotSigned` fails too: reaching this step means signing was
+      # configured, so a missing signature is a silent regression in sign.ps1.
+      - name: Verify the shipped binaries are signed
+        if: matrix.platform == 'windows-latest' && env.GAB_SIGN_METHOD != ''
+        shell: pwsh
+        run: |
+          $bad = @()
+          foreach ($f in Get-ChildItem itch -Filter *.exe) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne "Valid") { $bad += "$($f.Name) [$($sig.Status)]" }
+          }
+          if ($bad.Count -gt 0) { throw "unsigned or untrusted: $($bad -join ', ')" }
 
       - name: Upload itch staging artifact
         uses: actions/upload-artifact@v5

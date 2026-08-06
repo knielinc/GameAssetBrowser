@@ -112,6 +112,29 @@ output — a failure shows up only as ``failed to bundle project: `failed to run
 so `sign.ps1` mirrors every run to `sign.log` in the repo root, which the release workflow
 prints when a Windows build fails.
 
+Repository secrets, by method (Settings → Secrets and variables → Actions). `GAB_SIGN_METHOD`
+is the switch: leave it unset and the release still builds, unsigned.
+
+| Method | Secrets |
+| --- | --- |
+| `trustedsigning` | `GAB_SIGN_ENDPOINT`, `GAB_SIGN_ACCOUNT`, `GAB_SIGN_PROFILE`, plus `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_CLIENT_SECRET` for the service principal |
+| `signtool` | `WINDOWS_CERTIFICATE` (base64 `.pfx`), `WINDOWS_CERTIFICATE_PASSWORD`; `GAB_SIGN_THUMBPRINT` only to disambiguate a store holding several certs |
+| `custom` | `GAB_SIGN_COMMAND` (`{FILE}` is replaced with the path) |
+
+`GAB_SIGN_TIMESTAMP_URL` is optional everywhere and defaults to DigiCert's RFC‑3161 server.
+
+The `signtool` path imports the `.pfx` into the runner's `CurrentUser\My` store and exports the
+certificate's thumbprint for `sign.ps1`; the file is deleted right after the import. Because a
+`.pfx` carries an exportable private key, that path is for self-signed or enterprise-internal
+certificates — a publicly trusted code-signing key has had to live on hardware or in a cloud HSM
+since June 2023, which is what `trustedsigning` and `custom` are for.
+
+Two things the bundler does not cover, both handled explicitly in the release workflow: the
+portable exe is copied out of `target/release` rather than produced by the bundler, so it gets
+its own `sign.ps1` call, and every staged `.exe` is then checked with `Get-AuthenticodeSignature`
+— anything not `Valid` fails the release, because a signature that doesn't chain to a trusted
+root looks fine on the build machine and trips SmartScreen on every customer's.
+
 **Installers.** NSIS installs **per‑user** (`installMode: currentUser`) so there is no UAC
 prompt — an admin elevation on first run costs more conversions than a per‑machine install
 is worth. English and German, no language picker.

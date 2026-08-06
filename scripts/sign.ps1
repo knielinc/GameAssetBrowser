@@ -33,6 +33,12 @@
 #   signtool (an OV/EV cert on a hardware token or in the local cert store;
 #             since June 2023 OV certs require a token or cloud HSM)
 #     GAB_SIGN_THUMBPRINT     SHA1 thumbprint of the signing certificate
+#     In CI there is no cert store to point at, so the release workflow imports a
+#     base64 .pfx (secrets WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD)
+#     into CurrentUser\My first and exports its thumbprint into this variable —
+#     which makes GAB_SIGN_THUMBPRINT itself optional there. A .pfx means the
+#     private key is a file, so this path suits self-signed or enterprise-
+#     internal certificates; a publicly trusted one cannot be exported that way.
 #
 #   custom (any other cloud-HSM provider: SSL.com eSigner, DigiCert KeyLocker...)
 #     GAB_SIGN_COMMAND        full command line; {FILE} is replaced with the path

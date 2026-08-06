@@ -6,6 +6,8 @@ import { useThemeStore } from "../stores/theme";
 export interface ContextMenuItem {
   label: string;
   icon: LucideIcon;
+  /** Optional shortcut hint, right-aligned and dimmed (e.g. "Alt+click"). */
+  hint?: string;
   onClick: () => void;
 }
 
@@ -92,7 +94,10 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps):
           }}
         >
           <item.icon size={14} className="shrink-0 text-dim" />
-          {item.label}
+          <span className="flex-1 text-left">{item.label}</span>
+          {item.hint !== undefined && (
+            <span className="shrink-0 pl-4 text-[11px] text-dim">{item.hint}</span>
+          )}
         </button>
       ))}
     </div>,

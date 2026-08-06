@@ -246,6 +246,10 @@ export interface LibraryState {
   /** Add/remove a folder from the shown set (ctrl-click). Keeps collection
    *  scopes (union). Adding un-hides it. */
   toggleScope: (path: string) => void;
+  /** Replace the shown set with a contiguous run of folders (shift-click range,
+   *  in tree order). soloScope's "only show these", widened past one folder:
+   *  collection scopes clear and every folder in the range un-hides. */
+  rangeScope: (paths: readonly string[]) => void;
   /** Clear both scope sets (→ show the whole library). */
   clearScopes: () => void;
   /** Focus the shown set on exactly this collection (plain click). Clears folder
@@ -653,6 +657,16 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       return {
         folderScopes: [...s.folderScopes, path],
         hiddenFolders: s.hiddenFolders.filter((p) => p !== path),
+      };
+    }),
+
+  rangeScope: (paths) =>
+    set((s) => {
+      const inRange = new Set(paths);
+      return {
+        folderScopes: [...inRange],
+        collectionScopes: [],
+        hiddenFolders: s.hiddenFolders.filter((p) => !inRange.has(p)),
       };
     }),
 
