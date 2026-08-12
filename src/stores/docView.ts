@@ -27,6 +27,13 @@ const PDF_LAYOUTS: readonly PdfLayout[] = ["width", "single", "spread"];
 export type ReadWidth = "readable" | "full";
 const READ_WIDTHS: readonly ReadWidth[] = ["readable", "full"];
 
+/** Adjustable px width of the centered readable column. */
+export const MIN_READ_W = 480;
+export const MAX_READ_W = 1600;
+const DEFAULT_READ_W = 820;
+const clampReadW = (n: number): number =>
+  Math.min(MAX_READ_W, Math.max(MIN_READ_W, Math.round(n)));
+
 /** Reading page for every prose document — ebook, markdown, plain text (NOT
  *  pdf, whose pages are images of paper the file itself produced). Dark or the
  *  light sepia paper.
@@ -52,6 +59,7 @@ interface Persisted {
   fontScale: number;
   pdfLayout: PdfLayout;
   readWidth: ReadWidth;
+  readableWidth: number;
   readTheme: ReadTheme;
 }
 
@@ -60,6 +68,7 @@ function load(): Persisted {
     fontScale: 1,
     pdfLayout: "width",
     readWidth: "readable",
+    readableWidth: DEFAULT_READ_W,
     readTheme: themeDefault(),
   };
   try {
@@ -67,12 +76,14 @@ function load(): Persisted {
     if (raw === null) return fallback;
     const p = JSON.parse(raw) as Partial<Persisted>;
     const n = Number(p.fontScale);
+    const w = Number(p.readableWidth);
     return {
       fontScale: Number.isFinite(n) ? clamp(n) : 1,
       pdfLayout: PDF_LAYOUTS.includes(p.pdfLayout as PdfLayout) ? (p.pdfLayout as PdfLayout) : "width",
       readWidth: READ_WIDTHS.includes(p.readWidth as ReadWidth)
         ? (p.readWidth as ReadWidth)
         : "readable",
+      readableWidth: Number.isFinite(w) ? clampReadW(w) : DEFAULT_READ_W,
       readTheme: READ_THEMES.includes(p.readTheme as ReadTheme)
         ? (p.readTheme as ReadTheme)
         : themeDefault(),
@@ -87,12 +98,15 @@ export interface DocViewPrefs {
   fontScale: number;
   pdfLayout: PdfLayout;
   readWidth: ReadWidth;
+  /** Px width of the centered readable column (used when readWidth is "readable"). */
+  readableWidth: number;
   readTheme: ReadTheme;
   zoomIn: () => void;
   zoomOut: () => void;
   reset: () => void;
   setPdfLayout: (layout: PdfLayout) => void;
   setReadWidth: (width: ReadWidth) => void;
+  setReadableWidth: (px: number) => void;
   setReadTheme: (theme: ReadTheme) => void;
 }
 
@@ -105,6 +119,7 @@ export const useDocView = create<DocViewPrefs>((set, get) => {
           fontScale: get().fontScale,
           pdfLayout: get().pdfLayout,
           readWidth: get().readWidth,
+          readableWidth: get().readableWidth,
           readTheme: get().readTheme,
         }),
       );
@@ -117,6 +132,7 @@ export const useDocView = create<DocViewPrefs>((set, get) => {
     fontScale: init.fontScale,
     pdfLayout: init.pdfLayout,
     readWidth: init.readWidth,
+    readableWidth: init.readableWidth,
     readTheme: init.readTheme,
     zoomIn: () => {
       set({ fontScale: clamp(get().fontScale + STEP) });
@@ -136,6 +152,10 @@ export const useDocView = create<DocViewPrefs>((set, get) => {
     },
     setReadWidth: (readWidth) => {
       set({ readWidth });
+      persist();
+    },
+    setReadableWidth: (px) => {
+      set({ readableWidth: clampReadW(px) });
       persist();
     },
     setReadTheme: (readTheme) => {

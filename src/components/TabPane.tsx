@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useVisibleFiles } from "../hooks/useVisibleFiles";
 import { usePanelWidth } from "../hooks/usePanelWidth";
 import { usePanelPrefs } from "../stores/panelPrefs";
-import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { scrollToIndexRef, useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useThumbRequests } from "../hooks/useThumbRequests";
 import { useModelThumbs } from "../hooks/useModelThumbs";
 import { activeFilterCount, thumbInfos, useLibraryStore, type LibFile } from "../stores/libraryStore";
@@ -134,6 +134,25 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     const f = visible.find((x) => x.path === t.selectedPath) ?? visible[t.selectedIndex] ?? visible[0];
     if (f !== undefined) onPreview(f);
   }, [visible, kind, onPreview]);
+  // Fullscreen ←/→ (and a document viewer stepping past its last/first page):
+  // advance the overlay through the visible flat order. Selection follows so
+  // closing the overlay lands where you navigated to.
+  const navigatePreview = useCallback(
+    (dir: 1 | -1) => {
+      setPreview((cur) => {
+        if (cur === null) return cur;
+        const idx = visible.findIndex((f) => f.path === cur.path);
+        if (idx < 0) return cur;
+        const nextIdx = idx + dir;
+        const next = visible[nextIdx];
+        if (next === undefined) return cur;
+        useLibraryStore.getState().select(kind, nextIdx, next.path);
+        scrollToIndexRef.current?.(nextIdx);
+        return next;
+      });
+    },
+    [visible, kind],
+  );
   useKeyboardShortcuts(kind, visible, kind === "audio" ? undefined : onPreview, visibleKeys);
   // Thumbnail sourcing splits by how each kind is produced: request_thumbs
   // decodes textures + audio (cover art / waveform) in Rust; models render in
@@ -544,6 +563,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
           item={preview.kind === "texture" ? selectedItem : null}
           preview3d={preview3d}
           onPreviewChange={patchPreview}
+          onNavigate={navigatePreview}
           onClose={() => setPreview(null)}
         />
       )}

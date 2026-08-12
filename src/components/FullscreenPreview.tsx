@@ -31,6 +31,9 @@ export interface FullscreenPreviewProps {
   item: TextureItem | null;
   preview3d: PreviewState;
   onPreviewChange: (patch: Partial<PreviewState>) => void;
+  /** ←/→ traversal to the previous/next visible file. Paged document viewers
+   *  page first and only chain here past their last/first page. */
+  onNavigate?: (dir: 1 | -1) => void;
   onClose: () => void;
 }
 
@@ -49,6 +52,7 @@ export default function FullscreenPreview({
   item,
   preview3d,
   onPreviewChange,
+  onNavigate,
   onClose,
 }: FullscreenPreviewProps): ReactElement {
   useLibraryStore((s) => s.thumbsVersion);
@@ -137,19 +141,34 @@ export default function FullscreenPreview({
   // Flat mode on a texture is the 2D lens — image / GIF / sprite sheet.
   const use2D = file.kind === "texture" && mesh === "flat";
 
+  // Paged document viewers own ←/→ for page turns (and chain to onNavigate
+  // themselves past the last/first page — see DocumentPreview's onPastEnd).
+  const docPages = file.kind === "document" && (docIsPdf(file.ext) || docIsEbook(file.ext));
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.code === "Escape" || e.code === "Space") {
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+      // ←/→ step to the previous/next visible file. Not on audio (arrows seek
+      // there, and the transport already has prev/next) and not on paged
+      // documents (the viewer pages; see above). Ignore when text is being
+      // typed into the page-jump box.
+      if (e.code === "ArrowRight" || e.code === "ArrowLeft") {
+        if (isAudio || docPages || onNavigate === undefined) return;
+        if (e.target instanceof HTMLElement && e.target.tagName === "INPUT") return;
+        e.preventDefault();
+        e.stopPropagation();
+        onNavigate(e.code === "ArrowRight" ? 1 : -1);
       }
     };
     // Capture phase: beat the global shortcut handler, which would otherwise
     // also see this Space and immediately re-open what we just closed.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [onClose, onNavigate, isAudio, docPages]);
 
   // top-10 starts the overlay below the 40px (h-10) TitleBar so its drag region
   // and the minimize/maximize/close controls stay reachable while an item is
@@ -183,7 +202,13 @@ export default function FullscreenPreview({
         <div className="min-h-0 flex-1">
           {file.kind === "document" || (file.kind === "texture" && docIsPsd(file.ext)) ? (
             <div className="flex h-full w-full flex-col overflow-hidden rounded-xl bg-panel shadow-e1">
-              <DocumentPreview key={file.path} path={file.path} ext={file.ext} autoFocusPdf />
+              <DocumentPreview
+                key={file.path}
+                path={file.path}
+                ext={file.ext}
+                autoFocusPdf
+                onPastEnd={onNavigate}
+              />
             </div>
           ) : file.kind === "texture" && isSpriteArt(file.ext) ? (
             <div className="flex h-full w-full flex-col overflow-hidden rounded-xl bg-panel shadow-e1">

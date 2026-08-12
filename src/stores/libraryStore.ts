@@ -198,6 +198,12 @@ export interface LibraryState {
    */
   hiddenFolders: string[];
   /**
+   * Whether a selected folder shows its whole subtree (true, the default) or
+   * only its DIRECT children (false) — the navigator's nested-files toggle.
+   * Persisted. With no folder selected the whole library shows either way.
+   */
+  nestedFolders: boolean;
+  /**
    * Active collection scopes, peers of the folder scopes: each is `"fav"`
    * (favorites), `"recent"`, or `"col:<name>"` (a user collection — see
    * favoritesStore). Selecting one behaves like selecting a folder — a plain
@@ -265,6 +271,12 @@ export interface LibraryState {
   onCollectionRenamed: (oldName: string, newName: string | null) => void;
   /** Add/remove a folder from the hidden set (shift-click / eye / context). */
   toggleHidden: (path: string) => void;
+  /** Batch eye-toggle: set every path to the OPPOSITE of `primary`'s current
+   *  hidden state (the folder actually clicked), so a mixed selection lands
+   *  uniform instead of flipping each side. */
+  toggleHiddenMany: (paths: readonly string[], primary: string) => void;
+  /** Flip the nested-files toggle (see `nestedFolders`). */
+  toggleNestedFolders: () => void;
   /** Un-hide a folder and every hidden folder beneath it (reset a subtree). */
   resetHidden: (path: string) => void;
   select: (kind: AssetKind, index: number, path: string | null) => void;
@@ -330,17 +342,36 @@ export function folderMatcher(folder: string): (path: string) => boolean {
 }
 
 /**
+ * Like folderMatcher, but only DIRECT children: the file must live in `folder`
+ * itself, not in any subfolder — the nested-files toggle's "off" matcher.
+ */
+export function folderDirectMatcher(folder: string): (path: string) => boolean {
+  const dir = folder.replace(/[\\/]+$/, "");
+  const len = dir.length;
+  return (path) => {
+    if (!path.startsWith(dir)) return false;
+    const c = path.charCodeAt(len);
+    if (c !== 92 /* \ */ && c !== 47 /* / */) return false;
+    // No further separator → the rest is the file name itself.
+    return path.indexOf("\\", len + 1) === -1 && path.indexOf("/", len + 1) === -1;
+  };
+}
+
+/**
  * Build the combined scope filter: keep a path only if it is inside one of the
  * selected `scopes` (empty = no scope restriction, keep everything) AND inside
- * none of the `hidden` folders (hidden always wins). Shared by every consumer
- * — the file list, ext chips, and all the counts — so they can never disagree
- * about what "in scope" means.
+ * none of the `hidden` folders (hidden always wins). `nested` false narrows a
+ * selected folder to its direct children (hidden folders stay subtree-wide —
+ * hiding is an exclusion, not a listing). Shared by every consumer — the file
+ * list, ext chips, and all the counts — so they can never disagree about what
+ * "in scope" means.
  */
 export function scopePredicate(
   scopes: readonly string[],
   hidden: readonly string[],
+  nested = true,
 ): (path: string) => boolean {
-  const scopeMatchers = scopes.map(folderMatcher);
+  const scopeMatchers = scopes.map(nested ? folderMatcher : folderDirectMatcher);
   const hiddenMatchers = hidden.map(folderMatcher);
   return (path) => {
     if (scopeMatchers.length > 0 && !scopeMatchers.some((m) => m(path))) return false;
@@ -384,6 +415,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
   dimsVersion: 0,
   folderScopes: [],
   hiddenFolders: [],
+  nestedFolders: true,
   collectionScopes: [],
   activeTab: "all",
   tabs: defaultTabs(),
@@ -741,6 +773,20 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
         ? s.hiddenFolders.filter((p) => p !== path)
         : [...s.hiddenFolders, path],
     })),
+
+  toggleHiddenMany: (paths, primary) =>
+    set((s) => {
+      const hide = !s.hiddenFolders.includes(primary);
+      if (hide) {
+        const add = paths.filter((p) => !s.hiddenFolders.includes(p));
+        return add.length === 0 ? {} : { hiddenFolders: [...s.hiddenFolders, ...add] };
+      }
+      const drop = new Set(paths);
+      const next = s.hiddenFolders.filter((p) => !drop.has(p));
+      return next.length === s.hiddenFolders.length ? {} : { hiddenFolders: next };
+    }),
+
+  toggleNestedFolders: () => set((s) => ({ nestedFolders: !s.nestedFolders })),
 
   resetHidden: (path) =>
     set((s) => {

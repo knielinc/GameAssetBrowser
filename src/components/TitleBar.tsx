@@ -72,11 +72,12 @@ export default function TitleBar(): ReactElement {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
 
   // Counts reflect the active folder scope — one pass over the library, not
   // three. Same derivation the tab row used before it moved up here.
   const counts = useMemo(() => {
-    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const inScope = scopePredicate(folderScopes, hiddenFolders, nestedFolders);
     const c: Record<AssetKind, number> = { all: 0, audio: 0, texture: 0, model: 0, document: 0 };
     for (const f of allFiles) {
       if (!inScope(f.path)) continue;
@@ -84,7 +85,7 @@ export default function TitleBar(): ReactElement {
       c.all++; // the "All" tab's badge is the whole in-scope library
     }
     return c;
-  }, [allFiles, folderScopes, hiddenFolders]);
+  }, [allFiles, folderScopes, hiddenFolders, nestedFolders]);
 
   // Keep the maximize/fullscreen icons honest against changes made outside these
   // buttons (F11, OS snap, double-click drag). Every such change resizes the

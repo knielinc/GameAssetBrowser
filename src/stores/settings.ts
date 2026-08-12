@@ -89,6 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   folderScopes: [],
   hiddenFolders: [],
+  nestedFolders: true,
   atlases: {},
   favorites: [],
   collections: [],
@@ -266,6 +267,7 @@ export function sanitize(raw: unknown): Settings {
     // finishScan, not here — this stays a pure structural sanitizer.
     folderScopes: strArray(v2.folderScopes, d.folderScopes),
     hiddenFolders: strArray(v2.hiddenFolders, d.hiddenFolders),
+    nestedFolders: bool(v2.nestedFolders, d.nestedFolders),
     atlases: sanitizeAtlases(v2.atlases),
     // Absent pre-feature → empty; malformed entries drop, the file never
     // crashes startup. Stale paths (files since deleted) are NOT pruned —
@@ -395,6 +397,7 @@ function currentSettings(): Settings {
     },
     folderScopes: lib.folderScopes,
     hiddenFolders: lib.hiddenFolders,
+    nestedFolders: lib.nestedFolders,
     atlases: useAtlasStore.getState().overrides,
     favorites: [...fav.favorites],
     collections: fav.collections.map((c) => ({ name: c.name, paths: [...c.paths] })),
@@ -436,7 +439,8 @@ function installSubscriptions(): void {
       state.tabs !== prev.tabs ||
       state.activeTab !== prev.activeTab ||
       state.folderScopes !== prev.folderScopes ||
-      state.hiddenFolders !== prev.hiddenFolders
+      state.hiddenFolders !== prev.hiddenFolders ||
+      state.nestedFolders !== prev.nestedFolders
     ) {
       saveSettings();
     }
@@ -538,6 +542,7 @@ function applySettings(settings: Settings): void {
     tabs,
     folderScopes: settings.folderScopes,
     hiddenFolders: settings.hiddenFolders,
+    nestedFolders: settings.nestedFolders,
     // Session-only; an import may drop the collection it referenced.
     collectionScopes: [],
   });

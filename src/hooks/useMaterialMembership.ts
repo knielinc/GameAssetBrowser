@@ -25,10 +25,11 @@ export function useMaterialMembership(
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
   const thumbsVersion = useLibraryStore((s) => s.thumbsVersion);
   return useMemo(() => {
     if (!enabled) return null;
-    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const inScope = scopePredicate(folderScopes, hiddenFolders, nestedFolders);
     const scoped: LibFile[] = [];
     for (const f of allFiles) {
       if (f.kind !== "texture") continue;
@@ -45,5 +46,5 @@ export function useMaterialMembership(
       }
     }
     return map;
-  }, [enabled, allFiles, folderScopes, hiddenFolders, thumbsVersion]);
+  }, [enabled, allFiles, folderScopes, hiddenFolders, nestedFolders, thumbsVersion]);
 }

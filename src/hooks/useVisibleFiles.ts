@@ -175,6 +175,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
   const collectionScopes = useLibraryStore((s) => s.collectionScopes);
   const tab = useLibraryStore((s) => s.tabs[kind]);
   const { query, extFilter, sortField, sortDir, filters } = tab;
@@ -231,7 +232,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
     const hasExtFilter = extFilter.size > 0;
     // Folder scope (selected minus hidden) narrows the library BEFORE query/ext
     // filters apply.
-    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const inScope = scopePredicate(folderScopes, hiddenFolders, nestedFolders);
 
     // Collection scopes: favorites, recents, and/or user collections. Each acts
     // like a FOLDER — its members show across the whole library — and the shown
@@ -359,7 +360,7 @@ export function useVisibleFiles(kind: AssetKind): LibFile[] {
       files.sort((a, b) => dir * cmp(a, b));
     }
     return files;
-  }, [kind, allFiles, folderScopes, hiddenFolders, collectionScopes, favorites, collections, recents, debouncedQuery, extFilter, sortField, sortDir, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, nestedFolders, collectionScopes, favorites, collections, recents, debouncedQuery, extFilter, sortField, sortDir, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
 }
 
 /**
@@ -377,8 +378,9 @@ export function usePresentExts(kind: AssetKind): { ext: string; count: number }[
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
   return useMemo(() => {
-    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const inScope = scopePredicate(folderScopes, hiddenFolders, nestedFolders);
     const allKind = kind === "all";
     const counts = new Map<string, number>();
     for (const f of allFiles) {
@@ -389,7 +391,7 @@ export function usePresentExts(kind: AssetKind): { ext: string; count: number }[
     return EXTENSIONS[kind]
       .filter((e) => counts.has(e))
       .map((e) => ({ ext: e, count: counts.get(e)! }));
-  }, [kind, allFiles, folderScopes, hiddenFolders]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, nestedFolders]);
 }
 
 /**
@@ -402,9 +404,10 @@ export function usePresentChannels(kind: AssetKind): { group: ChannelGroup; coun
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
   return useMemo(() => {
     if (kind !== "texture") return [];
-    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const inScope = scopePredicate(folderScopes, hiddenFolders, nestedFolders);
     const counts = new Map<ChannelGroup, number>();
     for (const f of allFiles) {
       if (f.kind !== kind) continue;
@@ -416,7 +419,7 @@ export function usePresentChannels(kind: AssetKind): { group: ChannelGroup; coun
       group: g,
       count: counts.get(g)!,
     }));
-  }, [kind, allFiles, folderScopes, hiddenFolders]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, nestedFolders]);
 }
 
 /**
@@ -447,9 +450,10 @@ export function useScopeCount(kind: AssetKind): number {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
   const collMembers = useCollectionMembers();
   return useMemo(() => {
-    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const inScope = scopePredicate(folderScopes, hiddenFolders, nestedFolders);
     const allKind = kind === "all";
     const hasFolderScope = folderScopes.length > 0;
     const hasCollScope = collMembers !== null;
@@ -465,5 +469,5 @@ export function useScopeCount(kind: AssetKind): number {
       n++;
     }
     return n;
-  }, [kind, allFiles, folderScopes, hiddenFolders, collMembers]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, nestedFolders, collMembers]);
 }

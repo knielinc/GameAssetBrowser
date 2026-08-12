@@ -209,6 +209,7 @@ export function useFacetCounts(
   const allFiles = useLibraryStore((s) => s.allFiles);
   const folderScopes = useLibraryStore((s) => s.folderScopes);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
   // Scope = union of the selected folders and collections, matching
   // useVisibleFiles. `favorites`/`collections` also drive their filter facet
   // rows; the popup is open-only, so unconditional subscriptions are fine.
@@ -235,7 +236,7 @@ export function useFacetCounts(
   return useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
     const hasQuery = q !== "";
-    const inScope = scopePredicate(folderScopes, hiddenFolders);
+    const inScope = scopePredicate(folderScopes, hiddenFolders, nestedFolders);
     const allKind = kind === "all";
     const flt = filters;
     // Mirror useVisibleFiles: exclusion narrows the pool that every OTHER
@@ -505,5 +506,5 @@ export function useFacetCounts(
       visible,
       scoped,
     };
-  }, [kind, allFiles, folderScopes, hiddenFolders, collMembers, favorites, collections, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
+  }, [kind, allFiles, folderScopes, hiddenFolders, nestedFolders, collMembers, favorites, collections, debouncedQuery, extFilter, filters, durations, durationsVersion, dims, dimsVersion, audioMeta, audioMetaVersion, thumbs, thumbsVersion, membership]);
 }

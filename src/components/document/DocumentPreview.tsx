@@ -71,6 +71,7 @@ function MarkdownView({
 }): ReactElement {
   const { text, state } = useDocText(path);
   const palette = useReadPalette();
+  const readableWidth = useDocView((s) => s.readableWidth);
   const [html, setHtml] = useState<string | null>(null);
   useEffect(() => {
     if (text === null) {
@@ -102,12 +103,8 @@ function MarkdownView({
       style={readVars(palette)}
     >
       <div
-        className={
-          full
-            ? "markdown-body w-full px-5 py-4"
-            : "markdown-body mx-auto max-w-[820px] px-5 py-4"
-        }
-        style={{ fontSize: MD_BASE * scale }}
+        className={full ? "markdown-body w-full px-5 py-4" : "markdown-body mx-auto px-5 py-4"}
+        style={{ fontSize: MD_BASE * scale, maxWidth: full ? undefined : readableWidth }}
         // Safe: markdown-it ran with html:false, so this is only the structural
         // HTML it generated, never raw markup from the file.
         dangerouslySetInnerHTML={{ __html: html }}
@@ -132,6 +129,7 @@ function TextView({
 }): ReactElement {
   const { text, state } = useDocText(path);
   const palette = useReadPalette();
+  const readableWidth = useDocView((s) => s.readableWidth);
   const lines = useMemo(() => (text === null ? [] : text.split(/\r\n|\r|\n/)), [text]);
   const shown = lines.length > TEXT_LINE_CAP ? lines.slice(0, TEXT_LINE_CAP) : lines;
   const gutterCh = String(Math.max(shown.length, 1)).length;
@@ -143,7 +141,10 @@ function TextView({
       className="rd-scroll rd-page min-h-0 flex-1 overflow-auto font-mono"
       style={{ ...readVars(palette), fontSize: TEXT_BASE * scale, lineHeight: 1.6, tabSize: 4 }}
     >
-      <div className={full ? "min-w-max py-1.5" : "mx-auto w-fit py-1.5"}>
+      <div
+        className={full ? "min-w-max py-1.5" : "mx-auto w-fit py-1.5"}
+        style={full ? undefined : { maxWidth: readableWidth }}
+      >
         {shown.map((line, i) => (
           <div key={i} className="flex">
             <span
@@ -157,7 +158,17 @@ function TextView({
             >
               {i + 1}
             </span>
-            <span className="whitespace-pre pl-3 pr-4" style={{ color: "var(--rd-fg)" }}>
+            {/* Readable mode wraps at the column width; full width keeps the
+                no-wrap horizontal-scroll editor feel. min-w-0 lets the flex
+                item shrink so wrapping can actually happen. */}
+            <span
+              className={
+                full
+                  ? "whitespace-pre pl-3 pr-4"
+                  : "min-w-0 whitespace-pre-wrap break-words pl-3 pr-4"
+              }
+              style={{ color: "var(--rd-fg)" }}
+            >
               {line.length > 0 ? line : " "}
             </span>
           </div>
@@ -177,6 +188,9 @@ export interface DocumentPreviewProps {
   ext: string;
   /** Fullscreen only: let the PDF grab focus so ←/→ page nav works at once. */
   autoFocusPdf?: boolean;
+  /** Fullscreen only: paging past the last/first page steps to the next/prev
+   *  file instead of dead-ending. */
+  onPastEnd?: (dir: 1 | -1) => void;
 }
 
 /** Format-dispatching preview surface. Keyed by path upstream so switching files
@@ -186,14 +200,15 @@ export default function DocumentPreview({
   path,
   ext,
   autoFocusPdf = false,
+  onPastEnd,
 }: DocumentPreviewProps): ReactElement {
   const scale = useDocView((s) => s.fontScale);
   const full = useDocView((s) => s.readWidth) === "full";
   const fmt = docFormat(ext);
   if (fmt === "markdown") return <MarkdownView path={path} scale={scale} full={full} />;
   if (fmt === "text") return <TextView path={path} scale={scale} full={full} />;
-  if (fmt === "pdf") return <PdfView path={path} autoFocus={autoFocusPdf} />;
-  if (fmt === "ebook") return <EbookView path={path} autoFocus={autoFocusPdf} />;
+  if (fmt === "pdf") return <PdfView path={path} autoFocus={autoFocusPdf} onPastEnd={onPastEnd} />;
+  if (fmt === "ebook") return <EbookView path={path} autoFocus={autoFocusPdf} onPastEnd={onPastEnd} />;
   if (fmt === "psd") return <LayeredView path={path} ext={ext} />;
   return <Centered>No in-app preview for “.{ext}” yet.</Centered>;
 }

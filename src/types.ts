@@ -421,6 +421,9 @@ export interface Settings {
   folderScopes: string[];
   /** Folders whose content is excluded from the query (the tree's eye-toggle). */
   hiddenFolders: string[];
+  /** Selected folders list their whole subtree (true) or only direct children
+   *  (false) — the navigator's nested-files toggle. Absent pre-feature → true. */
+  nestedFolders: boolean;
   /** packDir (lowercased) -> chosen atlas. Persisted because re-picking the
    *  atlas on every launch would be worse than the bug it fixes. */
   atlases: Record<string, AtlasChoiceSettings>;

@@ -63,6 +63,7 @@ function PdfPage({
 }): ReactElement {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
   const height = width / aspect;
 
   useEffect(() => {
@@ -73,6 +74,7 @@ function PdfPage({
     let rendering = false;
     let rendered = false; // painted at THIS effect's width
     let task: RenderTask | null = null;
+    let textTask: { cancel: () => void } | null = null;
 
     const ensure = async (): Promise<void> => {
       if (disposed || rendering || rendered || !visible) return;
@@ -93,6 +95,30 @@ function PdfPage({
         task = page.render({ canvas, canvasContext: ctx, viewport });
         await task.promise;
         rendered = true;
+        // Selectable text: pdf.js TextLayer overlays invisible glyphs on the
+        // canvas. Sized at CSS scale (the canvas rasterizes at dpr resolution
+        // but is CSS-stretched to `width`), so spans align with the pixels.
+        // Failure here only loses selection on this page — never the render.
+        const textDiv = textRef.current;
+        if (textDiv !== null && !disposed) {
+          try {
+            const cssViewport = page.getViewport({ scale: width / base.width });
+            textDiv.replaceChildren();
+            textDiv.style.setProperty("--scale-factor", String(cssViewport.scale));
+            const pdfjs = await import("pdfjs-dist");
+            const tl = new pdfjs.TextLayer({
+              textContentSource: page.streamTextContent(),
+              container: textDiv,
+              viewport: cssViewport,
+            });
+            textTask = tl;
+            await tl.render();
+          } catch {
+            /* text layer cancelled or unsupported — selection unavailable */
+          } finally {
+            textTask = null;
+          }
+        }
       } catch {
         rendered = false; // cancelled / failed — allow a retry
       } finally {
@@ -107,6 +133,7 @@ function PdfPage({
       if (canvas !== null && rendered) {
         canvas.width = 0;
         canvas.height = 0;
+        textRef.current?.replaceChildren();
         rendered = false;
       }
     };
@@ -134,6 +161,7 @@ function PdfPage({
       renderIo.disconnect();
       evictIo.disconnect();
       task?.cancel();
+      textTask?.cancel();
     };
   }, [doc, root, pageNum, width, aspect]);
 
@@ -144,6 +172,7 @@ function PdfPage({
       className="relative shrink-0 overflow-hidden rounded bg-white shadow-e1"
     >
       <canvas ref={canvasRef} className="block h-full w-full" />
+      <div ref={textRef} className="pdf-text-layer" />
     </div>
   );
 }
@@ -153,10 +182,13 @@ type LoadState = "loading" | "ready" | "error";
 export default function PdfView({
   path,
   autoFocus = false,
+  onPastEnd,
 }: {
   path: string;
   /** Grab keyboard focus on mount so ←/→ page nav works immediately (fullscreen). */
   autoFocus?: boolean;
+  /** Fullscreen: ←/→ past the first/last page steps to the prev/next file. */
+  onPastEnd?: (dir: 1 | -1) => void;
 }): ReactElement {
   const layout = useDocView((s) => s.pdfLayout);
   const zoom = useDocView((s) => s.fontScale);
@@ -356,10 +388,33 @@ export default function PdfView({
   );
 
   // In paginated modes `row` IS the shown page — advancing just swaps it. In
-  // continuous mode we scroll by a screen.
+  // continuous mode we scroll by a screen. Stepping past either end (already on
+  // the boundary page / already scrolled to the edge) chains to onPastEnd — the
+  // fullscreen overlay's next/prev file.
   const step = (dir: 1 | -1): void => {
-    if (framed) setRow((r) => Math.max(0, Math.min(rowCount - 1, r + dir)));
-    else navByScreen(dir);
+    if (framed) {
+      const next = row + dir;
+      if (next < 0 || next > rowCount - 1) {
+        onPastEnd?.(dir);
+        return;
+      }
+      setRow(next);
+      return;
+    }
+    const cont = root;
+    if (cont !== null && onPastEnd !== undefined) {
+      const pos = animRef.current !== null ? targetScroll.current : cont.scrollTop;
+      const max = cont.scrollHeight - cont.clientHeight;
+      if (dir > 0 && pos >= max - 2) {
+        onPastEnd(1);
+        return;
+      }
+      if (dir < 0 && pos <= 2) {
+        onPastEnd(-1);
+        return;
+      }
+    }
+    navByScreen(dir);
   };
 
   // Paginated wheel/trackpad: one page per gesture, no partial scrolling.

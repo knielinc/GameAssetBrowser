@@ -160,13 +160,17 @@ function Section({
 export default function EbookView({
   path,
   autoFocus = false,
+  onPastEnd,
 }: {
   path: string;
   /** Grab focus on mount so keyboard scrolling works immediately (fullscreen). */
   autoFocus?: boolean;
+  /** Fullscreen: paging past the top/bottom steps to the prev/next file. */
+  onPastEnd?: (dir: 1 | -1) => void;
 }): ReactElement {
   const scale = useDocView((s) => s.fontScale);
   const full = useDocView((s) => s.readWidth) === "full";
+  const readableWidth = useDocView((s) => s.readableWidth);
   const theme = useReadPalette();
   const scrollRef = useRef<HTMLDivElement>(null);
   const hostsRef = useRef<(HTMLDivElement | null)[]>([]);
@@ -321,20 +325,35 @@ export default function EbookView({
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el === null || state !== "ready") return;
-    const key = `${scale}|${full ? "full" : "col"}`;
+    const key = `${scale}|${full ? "full" : readableWidth}`;
     if (reflowKeyRef.current === key) return;
     const first = reflowKeyRef.current === "";
     reflowKeyRef.current = key;
     if (first) return; // initial layout — don't fight the bookmark restore
     const max = el.scrollHeight - el.clientHeight;
     el.scrollTop = max > 0 ? progressRef.current * max : 0;
-  }, [scale, full, state]);
+  }, [scale, full, readableWidth, state]);
 
-  const scrollByScreen = useCallback((dir: 1 | -1): void => {
-    const el = scrollRef.current;
-    if (el === null) return;
-    el.scrollBy({ top: dir * el.clientHeight * 0.9, behavior: "smooth" });
-  }, []);
+  const scrollByScreen = useCallback(
+    (dir: 1 | -1): void => {
+      const el = scrollRef.current;
+      if (el === null) return;
+      // Already at the edge: chain to the fullscreen overlay's next/prev file.
+      if (onPastEnd !== undefined) {
+        const max = el.scrollHeight - el.clientHeight;
+        if (dir > 0 && el.scrollTop >= max - 2) {
+          onPastEnd(1);
+          return;
+        }
+        if (dir < 0 && el.scrollTop <= 2) {
+          onPastEnd(-1);
+          return;
+        }
+      }
+      el.scrollBy({ top: dir * el.clientHeight * 0.9, behavior: "smooth" });
+    },
+    [onPastEnd],
+  );
 
   const toggleBookmark = useCallback((): void => {
     if (onBookmark) clearMark(path);
@@ -390,7 +409,7 @@ export default function EbookView({
         style={
           {
             "--eb-fs": `${Math.round(MD_BASE_EBOOK * scale)}px`,
-            "--eb-mw": full ? "none" : "40rem",
+            "--eb-mw": full ? "none" : `${readableWidth}px`,
           } as CSSProperties
         }
       >

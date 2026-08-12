@@ -190,6 +190,9 @@ interface TreeNodeProps {
   /** Row click, modifiers included — the range logic needs the whole visible
    *  order, so it lives in FolderTree rather than in each node. */
   onRowClick: (path: string, e: ReactMouseEvent) => void;
+  /** Eye toggle — routed through FolderTree so a multi-folder selection hides
+   *  or shows as one (see onToggleHidden there). */
+  onToggleHidden: (path: string) => void;
   onNodeContextMenu: (path: string, e: ReactMouseEvent) => void;
 }
 
@@ -202,12 +205,12 @@ function TreeNode({
   flash,
   onToggle,
   onRowClick,
+  onToggleHidden,
   onNodeContextMenu,
 }: TreeNodeProps): ReactElement {
   const selected = useLibraryStore((s) => s.folderScopes.includes(node.path));
   const hidden = useLibraryStore((s) => s.hiddenFolders.includes(node.path));
   const activeTab = useLibraryStore((s) => s.activeTab);
-  const toggleHidden = useLibraryStore((s) => s.toggleHidden);
   const hasChildren = node.children.length > 0;
   const isExpanded = hasChildren && expanded.has(node.path);
   const count = node.counts[activeTab];
@@ -257,7 +260,7 @@ function TreeNode({
 
   // The eye hides this folder's content — same control at every depth. Removing
   // a root lives in the context menu now.
-  const trailing = <EyeToggle hidden={hidden} onToggle={() => toggleHidden(node.path)} />;
+  const trailing = <EyeToggle hidden={hidden} onToggle={() => onToggleHidden(node.path)} />;
 
   return (
     <>
@@ -307,6 +310,7 @@ function TreeNode({
             flash={flash}
             onToggle={onToggle}
             onRowClick={onRowClick}
+            onToggleHidden={onToggleHidden}
             onNodeContextMenu={onNodeContextMenu}
           />
         ))}
@@ -325,6 +329,7 @@ export default function FolderTree(): ReactElement {
   const allFiles = useLibraryStore((s) => s.allFiles);
   const activeTab = useLibraryStore((s) => s.activeTab);
   const hiddenFolders = useLibraryStore((s) => s.hiddenFolders);
+  const folderScopes = useLibraryStore((s) => s.folderScopes);
   // "All Files" is the master switch across BOTH scope kinds — lit only when no
   // folder AND no collection is selected (a collection scope is a folder peer).
   const scopeIsAll = useLibraryStore(
@@ -334,8 +339,16 @@ export default function FolderTree(): ReactElement {
   const soloScope = useLibraryStore((s) => s.soloScope);
   const toggleScope = useLibraryStore((s) => s.toggleScope);
   const rangeScope = useLibraryStore((s) => s.rangeScope);
-  const toggleHidden = useLibraryStore((s) => s.toggleHidden);
+  const toggleHiddenMany = useLibraryStore((s) => s.toggleHiddenMany);
   const resetHidden = useLibraryStore((s) => s.resetHidden);
+  // Folder actions act on the whole multi-folder selection when the clicked
+  // folder is part of it — the same convention the file grid's context menu
+  // follows. Anywhere else they act on just the clicked folder.
+  const actionTargets = (path: string): string[] =>
+    folderScopes.length > 1 && folderScopes.includes(path) ? folderScopes : [path];
+  const onToggleHidden = (path: string): void => {
+    toggleHiddenMany(actionTargets(path), path);
+  };
   const totalCount = useMemo(
     () => allFiles.reduce((n, f) => (f.kind === activeTab ? n + 1 : n), 0),
     [allFiles, activeTab],
@@ -387,7 +400,7 @@ export default function FolderTree(): ReactElement {
   // stopPropagation.
   const onRowClick = (path: string, e: ReactMouseEvent): void => {
     if (e.altKey) {
-      toggleHidden(path);
+      onToggleHidden(path);
       return;
     }
     if (e.shiftKey) {
@@ -497,6 +510,7 @@ export default function FolderTree(): ReactElement {
           flash={flash?.path ?? null}
           onToggle={onToggle}
           onRowClick={onRowClick}
+          onToggleHidden={onToggleHidden}
           onNodeContextMenu={onNodeContextMenu}
         />
       ))}
@@ -504,6 +518,10 @@ export default function FolderTree(): ReactElement {
         (() => {
           const isRootMenu = roots.includes(menu.path);
           const menuHidden = hiddenFolders.includes(menu.path);
+          // Context menu on a folder inside the multi-folder selection acts on
+          // the whole selection, like the file grid's menu.
+          const targets = actionTargets(menu.path);
+          const many = targets.length > 1;
           // A root reveals its own subtree; a subfolder reveals its parent's
           // subtree, so hidden siblings come back too.
           const revealScope = isRootMenu ? menu.path : parentPathOf(tree, menu.path);
@@ -512,19 +530,21 @@ export default function FolderTree(): ReactElement {
             revealScope !== null && hiddenFolders.some((f) => f === revealScope || under!(f));
           const items: ContextMenuItem[] = [
             {
-              label: "Open in Explorer",
+              label: many ? `Open ${targets.length} in Explorer` : "Open in Explorer",
               icon: FolderOpen,
               onClick: () => {
-                void openInExplorer(menu.path).catch((err: unknown) => {
-                  console.error("[explorer]", err);
-                });
+                for (const p of targets) {
+                  void openInExplorer(p).catch((err: unknown) => {
+                    console.error("[explorer]", err);
+                  });
+                }
               },
             },
             {
-              label: "Copy path",
+              label: many ? `Copy ${targets.length} paths` : "Copy path",
               icon: Copy,
               onClick: () => {
-                void navigator.clipboard.writeText(menu.path).catch((err: unknown) => {
+                void navigator.clipboard.writeText(targets.join("\n")).catch((err: unknown) => {
                   console.error("[clipboard]", err);
                 });
               },
@@ -532,10 +552,16 @@ export default function FolderTree(): ReactElement {
           ];
           if (!isRootMenu) {
             items.push({
-              label: menuHidden ? "Show this folder" : "Hide this folder",
+              label: many
+                ? menuHidden
+                  ? `Show ${targets.length} selected folders`
+                  : `Hide ${targets.length} selected folders`
+                : menuHidden
+                  ? "Show this folder"
+                  : "Hide this folder",
               icon: menuHidden ? Eye : EyeOff,
               hint: "Alt+click",
-              onClick: () => toggleHidden(menu.path),
+              onClick: () => onToggleHidden(menu.path),
             });
           }
           if (hasHiddenInScope && revealScope !== null) {

@@ -13,7 +13,7 @@ import { useLibraryStore, type LibFile } from "./stores/libraryStore";
  *   to discard backfill wholesale. Discards need no bookkeeping: each round
  *   re-derives "still undone" from the store (bounded by MAX_ATTEMPTS so an
  *   undecodable file can't retry forever).
- * - Documents: `renderDocThumb` is path-cached and idempotent, so calling it
+ * - Documents: `renderDocThumb` is stamp-cached (path+size+mtime) and idempotent, so calling it
  *   ahead of the Docs tab IS the prefetch; the cell reads the cache on mount.
  *   One at a time — it renders on the main thread and shares docThumb's
  *   3-slot limiter with visible cells, so backfill may only ever hold one.
@@ -135,7 +135,7 @@ export function startThumbPrefetch(): void {
   // ── phase 2: documents (main-thread canvas renders, one at a time) ────────
   const docPhase = async (s: ReturnType<typeof useLibraryStore.getState>): Promise<boolean> => {
     if (docsDone >= DOC_CAP) return false;
-    const [{ docThumbCache, renderDocThumb }, { docFormat }] = await Promise.all([
+    const [{ docThumbCache, docThumbKey, renderDocThumb }, { docFormat }] = await Promise.all([
       import("./components/document/docThumb"),
       import("./components/document/doc"),
     ]);
@@ -143,14 +143,14 @@ export function startThumbPrefetch(): void {
     for (const f of s.allFiles) {
       if (f.kind !== "document") continue;
       if (docFormat(f.ext) === "unsupported") continue;
-      if (docThumbCache.has(f.path)) continue;
+      if (docThumbCache.has(docThumbKey(f))) continue;
       if ((pathAttempts.get(f.path) ?? 0) >= MAX_ATTEMPTS) continue;
       next = f;
       break;
     }
     if (next === undefined) return false;
     pathAttempts.set(next.path, (pathAttempts.get(next.path) ?? 0) + 1);
-    await renderDocThumb(next.path, next.ext);
+    await renderDocThumb(docThumbKey(next), next.path, next.ext);
     docsDone++;
     schedule(TICK_MS);
     return true;

@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import clsx from "clsx";
-import { FolderPlus, RefreshCw, Download, Upload } from "lucide-react";
+import { FolderPlus, ListTree, RefreshCw, Download, Upload } from "lucide-react";
 import { addFolders, rescanRoots, useLibraryStore } from "../stores/libraryStore";
 import { exportSettings, importSettings } from "../stores/settings";
 import FolderTree from "./FolderTree";
@@ -14,6 +14,8 @@ export interface SidebarProps {
 export default function Sidebar({ width }: SidebarProps): ReactElement {
   const rootCount = useLibraryStore((s) => s.roots.length);
   const scanning = useLibraryStore((s) => s.scanning);
+  const nestedFolders = useLibraryStore((s) => s.nestedFolders);
+  const toggleNestedFolders = useLibraryStore((s) => s.toggleNestedFolders);
 
   const onExport = (): void => {
     void exportSettings().catch((err: unknown) => {
@@ -37,9 +39,29 @@ export default function Sidebar({ width }: SidebarProps): ReactElement {
         <span className="text-[10px] font-medium uppercase tracking-widest text-dim">
           Folders
         </span>
-        {rootCount > 0 && (
-          <span className="text-[10px] tabular-nums text-dim">{rootCount}</span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {/* Nested-files toggle: a selected folder lists its whole subtree
+              (on, the default) or only its direct children (off). */}
+          <button
+            type="button"
+            aria-pressed={nestedFolders}
+            title={
+              nestedFolders
+                ? "Showing files in nested folders — click to show only a folder's direct files"
+                : "Showing only a folder's direct files — click to include nested folders"
+            }
+            className={clsx(
+              "rounded p-0.5 transition-colors duration-[120ms]",
+              nestedFolders ? "text-accent" : "text-dim hover:text-text",
+            )}
+            onClick={toggleNestedFolders}
+          >
+            <ListTree size={13} />
+          </button>
+          {rootCount > 0 && (
+            <span className="text-[10px] tabular-nums text-dim">{rootCount}</span>
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">

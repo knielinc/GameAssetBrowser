@@ -5,7 +5,7 @@ import { toggleFavoriteSmart, useFavoritesStore } from "../../stores/favoritesSt
 import { humanSize } from "../FileRow";
 import AssetCell, { type Badge } from "../grid/AssetCell";
 import { docFormat } from "./doc";
-import { docThumbCache, renderDocThumb } from "./docThumb";
+import { docThumbCache, docThumbKey, renderDocThumb } from "./docThumb";
 
 export interface DocumentCellProps {
   file: LibFile;
@@ -20,18 +20,27 @@ export default function DocumentCell({ file, selected, focused }: DocumentCellPr
   const fmt = docFormat(file.ext);
   const raster = fmt !== "unsupported"; // pdf/psd/md/txt all render a thumbnail
   const starred = useFavoritesStore((s) => s.favorites.has(file.path));
-  const [url, setUrl] = useState<string | null>(() => docThumbCache.get(file.path) ?? null);
+  // Keyed by path+size+mtime so a rescan that saw the file change re-renders
+  // the thumbnail instead of reusing the stale one.
+  const key = docThumbKey(file);
+  const [url, setUrl] = useState<string | null>(() => docThumbCache.get(key) ?? null);
+
+  // The virtualizer reuses cells and the stamp can change on rescan — re-check
+  // the cache under the current key before rendering.
+  useEffect(() => {
+    setUrl(docThumbCache.get(key) ?? null);
+  }, [key]);
 
   useEffect(() => {
     if (!raster || url !== null) return;
     let cancelled = false;
-    void renderDocThumb(file.path, file.ext).then((u) => {
+    void renderDocThumb(key, file.path, file.ext).then((u) => {
       if (!cancelled && u !== null) setUrl(u);
     });
     return () => {
       cancelled = true;
     };
-  }, [file.path, file.ext, raster, url]);
+  }, [key, file.path, file.ext, raster, url]);
 
   const Icon = fmt === "psd" ? Layers : fmt === "ebook" ? BookOpen : FileText;
   const badges: Badge[] = [{ text: file.ext.toUpperCase() }];

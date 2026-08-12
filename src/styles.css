@@ -157,6 +157,60 @@ textarea {
   user-select: text;
 }
 
+/* Reading surfaces show real prose — let the user select and copy it. The app
+   chrome around them keeps the global user-select:none. `.rd-page` covers the
+   text/markdown panes and the ebook scroll container (user-select inherits
+   across the shadow boundary into each section); `.pdf-text-layer` is the
+   pdf.js text overlay. The text-view line-number gutter stays select-none. */
+.rd-page,
+.pdf-text-layer {
+  user-select: text;
+  cursor: auto;
+}
+
+/* pdf.js text layer: invisible glyphs positioned over the rasterized canvas so
+   text can be selected/copied. Geometry (per-span absolute positioning and the
+   --scale-factor var) comes from pdf.js's TextLayer renderer; we only make the
+   glyphs transparent and paint the selection. */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 1;
+  cursor: text;
+}
+.pdf-text-layer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0 0;
+}
+.pdf-text-layer span::selection {
+  background: color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+/* Readable-column width slider (ReadWidthControls): minimal track + thumb in
+   the hud/pill language. */
+.rd-width-slider {
+  appearance: none;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-hover-strong);
+  outline: none;
+}
+.rd-width-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: ew-resize;
+}
+
 ::selection {
   background: color-mix(in srgb, var(--color-accent) 40%, transparent);
 }

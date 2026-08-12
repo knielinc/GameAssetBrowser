@@ -3,7 +3,9 @@ import { docFormat, docUrl } from "./doc";
 import { basename } from "../../stores/libraryStore";
 
 /**
- * Grid thumbnails for documents, rendered in the webview and cached by path.
+ * Grid thumbnails for documents, rendered in the webview and cached by
+ * path+size+mtime (see docThumbKey) — so a rescan that picks up a modified
+ * file re-renders its thumbnail instead of serving the stale one forever.
  * PDF → its first page (via the pdf_range IPC transport, so a 500 MB file only
  * reads the pages it needs). PSD → the baked composite (ag-psd, layer pixels
  * skipped for speed). Ebooks → the embedded cover (foliate-js). md/txt have no
@@ -13,8 +15,14 @@ import { basename } from "../../stores/libraryStore";
  * of parses at once, and memoised so a cell that scrolls back is instant.
  */
 
-const cache = new Map<string, string>(); // path → data URL
+const cache = new Map<string, string>(); // docThumbKey → data URL
 export const docThumbCache = cache;
+
+/** Cache key: same stamp discipline as the Rust thumbnail keys — a file that
+ *  changes on disk (new size/mtime after a rescan) misses and re-renders. */
+export function docThumbKey(f: { path: string; size: number; modified: number }): string {
+  return `${f.path}|${f.size}|${f.modified}`;
+}
 
 const MAX = 3;
 let active = 0;
@@ -255,14 +263,15 @@ async function psdThumb(path: string): Promise<string | null> {
   return canvas.toDataURL("image/webp", 0.85);
 }
 
-/** Data URL for a document's thumbnail, or null if the format has no raster. */
-export async function renderDocThumb(path: string, ext: string): Promise<string | null> {
-  const hit = cache.get(path);
+/** Data URL for a document's thumbnail, or null if the format has no raster.
+ *  `key` is docThumbKey(file); the path/ext drive the actual render. */
+export async function renderDocThumb(key: string, path: string, ext: string): Promise<string | null> {
+  const hit = cache.get(key);
   if (hit !== undefined) return hit;
   const fmt = docFormat(ext);
   if (fmt === "unsupported") return null;
   return withSlot(async () => {
-    const again = cache.get(path);
+    const again = cache.get(key);
     if (again !== undefined) return again;
     let url: string | null = null;
     try {
@@ -273,7 +282,7 @@ export async function renderDocThumb(path: string, ext: string): Promise<string 
     } catch (e) {
       console.error("[doc] thumb failed", path, e);
     }
-    if (url !== null) cache.set(path, url);
+    if (url !== null) cache.set(key, url);
     return url;
   });
 }
