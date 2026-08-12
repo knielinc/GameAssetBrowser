@@ -191,6 +191,7 @@ export const RAW_EXTENSIONS = [
 
 export const TEXTURE_EXTENSIONS = [
   "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp",
+  "svg", "svgz", "avif",
   "kra", "aseprite", "ase", "psd", "psb", "afphoto", "afdesign", "afpub",
   ...RAW_EXTENSIONS,
 ] as const;

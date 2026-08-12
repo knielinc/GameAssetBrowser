@@ -38,6 +38,8 @@ const EXT_COLORS: Record<string, CSSProperties> = {
   tiff: { color: "#6ec9b8", background: "rgba(110, 201, 184, 0.12)" },
   exr: { color: "#8fd97a", background: "rgba(143, 217, 122, 0.12)" },
   hdr: { color: "#8fd97a", background: "rgba(143, 217, 122, 0.12)" },
+  svg: { color: "#5fd8a4", background: "rgba(61, 220, 151, 0.12)" },
+  avif: { color: "#6ec9b8", background: "rgba(110, 201, 184, 0.12)" },
   // models — ambers, matching the kind hue
   fbx: { color: "#ffb454", background: "rgba(255, 180, 84, 0.12)" },
   obj: { color: "#e0a267", background: "rgba(224, 162, 103, 0.12)" },

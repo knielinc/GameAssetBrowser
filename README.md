@@ -60,7 +60,9 @@ in-memory — 20k+ file libraries stay smooth.
 
 ### 2D — textures & materials
 - GPU‑accelerated thumbnail grid, decoding `png` `jpg` `bmp` `tga` `dds` `tif` `exr` `hdr`
-  `gif` `webp` natively.
+  `gif` `webp` `avif` natively.
+- **Vector** — `svg` rasterizes at whatever size it is shown at, so thumbnails and the
+  preview panel are both sharp rather than an upscaled bitmap.
 - **Layered art** — `psd`/`psb`, Krita `kra`, and Aseprite `ase`/`aseprite` render from
   their composite, and Krita/Aseprite additionally expose the **layer tree, frames, and
   tags**, so you can toggle layers and step animation frames without opening the editor.

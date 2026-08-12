@@ -72,6 +72,20 @@ opt-level = 3
 # preview into a 1 s one.
 [profile.dev.package.psdcomp]
 opt-level = 3
+# SVG rasterization and AVIF decode — same reasoning as the image codecs above:
+# both run per thumbnail, and at opt-level 0 an AV1 frame takes seconds.
+[profile.dev.package.resvg]
+opt-level = 3
+[profile.dev.package.usvg]
+opt-level = 3
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.rav1d]
+opt-level = 3
+[profile.dev.package.yuv]
+opt-level = 3
 # Audio decode and waveform peaks are the same shape of work.
 [profile.dev.package.symphonia]
 opt-level = 3
@@ -134,6 +148,20 @@ image = { version = "0.25", default-features = false, features = [
 # libwebp fallback: the pure-Rust `image` WebP decoder rejects some extended /
 # animated WebP (launcher assets, etc.); libwebp reads them.
 webp = "0.3"
+# SVG rasterizer (svg.rs). `image` has no vector support, and the browser can
+# only help in an <img> — the grid thumbnail, the clipboard copy and the
+# dimension probe all need real pixels in Rust. Pure Rust, no C toolchain.
+resvg = "0.48"
+# AVIF (avif.rs). `image`'s own `avif-native` feature routes through the C
+# `dav1d` crate, which wants a system library + meson on every build machine;
+# these three are pure Rust and need no external toolchain. avif-parse walks the
+# HEIF container to the primary item's AV1 payload, rav1d (the Rust port of
+# dav1d) decodes it, and yuv converts the planes to RGBA. rav1d's `asm` default
+# feature is OFF on purpose: it would pull in nasm as a build requirement, and a
+# still image decodes in tens of ms without it.
+avif-parse = "2"
+rav1d = { version = "1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+yuv = "0.8"
 # Scaled JPEG decoding (jpeg.rs). `image`'s zune-jpeg is the faster decoder at
 # 1:1 and stays the default, but it can only emit full resolution — and the
 # JPEGs in an asset folder are routinely 12-50 MP phone photos being squeezed

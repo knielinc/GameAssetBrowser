@@ -479,6 +479,11 @@ fn decode_exr(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
 /// `raw` module; other formats go straight through `image`.
 fn decode_image_inner(p: &Path, max_edge: Option<u32>) -> Result<DynamicImage, String> {
     match p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        // Vector: rasterized AT `max_edge` rather than decoded and downscaled,
+        // so a thumbnail and a preview are two sharp renders, not one blurred.
+        Some("svg") | Some("svgz") => return crate::svg::decode(p, max_edge),
+        // AVIF: HEIF container + AV1 frame, decoded by rav1d (see avif.rs).
+        Some("avif") => return crate::avif::decode(p),
         Some("kra") => return decode_kra(p),
         Some("aseprite") | Some("ase") => return decode_aseprite(p),
         Some("psd") | Some("psb") => return decode_psd(p, max_edge),

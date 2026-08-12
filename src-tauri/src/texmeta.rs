@@ -104,8 +104,10 @@ fn flusher_loop(
     }
 }
 
-/// Header-only dimension probe. `image::image_dimensions` covers every format
-/// in TEXTURE_EXTENSIONS except DDS, which gets a manual header read.
+/// Header-only dimension probe. `image::image_dimensions` covers most of
+/// TEXTURE_EXTENSIONS; DDS and PSD get manual header reads, AVIF reads its AV1
+/// sequence header, and SVG reports its intrinsic (`width`/`height`/`viewBox`)
+/// size — the only honest number for a format with no pixels.
 /// Unparseable files yield `None` — nothing is emitted, and the frontend keeps
 /// them visible forever (a filter may only remove files it has positively
 /// measured).
@@ -121,6 +123,10 @@ pub(crate) fn probe_dims(path: &Path) -> Option<(u32, u32)> {
         dds_dims(path)?
     } else if ext == "psd" || ext == "psb" {
         psd_dims(path)?
+    } else if ext == "svg" || ext == "svgz" {
+        crate::svg::dims(path)?
+    } else if ext == "avif" {
+        crate::avif::dims(path)?
     } else {
         image::image_dimensions(path).ok()?
     };

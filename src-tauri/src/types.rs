@@ -6,6 +6,9 @@ use serde::Serialize;
 pub const AUDIO_EXTENSIONS: [&str; 7] = ["wav", "mp3", "flac", "ogg", "aiff", "aif", "m4a"];
 
 /// `gif` and `webp` are here for 2D artists — animated GIFs preview and play.
+/// `svg` is vector, so it has no intrinsic pixels: it is rasterized at whatever
+/// size the caller wants (see svg.rs). `avif` decodes through rav1d (see
+/// avif.rs) — `image` has no toolchain-free AVIF reader.
 /// `kra`/`aseprite`/`ase`/`psd`/`psb` are layered art sources decoded to their
 /// flattened image (see thumbs::decode_image); the preview shows their layers.
 /// `afphoto`/`afdesign`/`afpub` (Affinity) are closed-format art whose only
@@ -18,9 +21,10 @@ pub const RAW_EXTENSIONS: [&str; 13] = [
     "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "pef", "srw",
 ];
 
-pub const TEXTURE_EXTENSIONS: [&str; 33] = [
-    "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp", "kra",
-    "aseprite", "ase", "psd", "psb", "afphoto", "afdesign", "afpub", // camera raw (RAW_EXTENSIONS):
+pub const TEXTURE_EXTENSIONS: [&str; 36] = [
+    "png", "jpg", "jpeg", "bmp", "tga", "dds", "tif", "tiff", "exr", "hdr", "gif", "webp", "svg",
+    "svgz", "avif", "kra", "aseprite", "ase", "psd", "psb", "afphoto", "afdesign",
+    "afpub", // camera raw (RAW_EXTENSIONS):
     "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "pef", "srw",
 ];
 

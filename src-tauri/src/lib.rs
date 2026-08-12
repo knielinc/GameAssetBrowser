@@ -1,5 +1,6 @@
 mod audio;
 mod audio_probe;
+mod avif;
 mod celsock;
 mod dupes;
 mod explorer;
@@ -12,6 +13,7 @@ mod portable;
 mod raw;
 mod scanner;
 mod spectrogram;
+mod svg;
 mod texmeta;
 mod thumbcache;
 mod thumbs;
@@ -192,6 +194,14 @@ fn mime_for(path: &std::path::Path) -> &'static str {
         Some("webp") => "image/webp",
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("bmp") => "image/bmp",
+        // SVG is served as the original and re-rasterized by the webview at
+        // every zoom step — the one texture format where that beats our own
+        // full-res PNG (see svg.rs).
+        Some("svg") => "image/svg+xml",
+        // AVIF goes through `preview://` for the panel, not `model://`, because
+        // older WebKit builds cannot decode it; the honest MIME still matters if
+        // anything ever loads the URL directly.
+        Some("avif") => "image/avif",
         // Documents served over the `doc://` scheme. The frontend fetches these
         // as bytes/text (pdf.js takes the ArrayBuffer, md/txt are decoded as
         // UTF-8), so the Content-Type is advisory — but honest headers keep the

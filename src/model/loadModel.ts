@@ -46,8 +46,16 @@ export function previewUrl(path: string, tm?: string, ev?: number): string {
 }
 
 /** Formats the browser decodes natively — served as the ORIGINAL file at full
- *  resolution rather than round-tripped through Rust. */
-export const BROWSER_DECODABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
+ *  resolution rather than round-tripped through Rust.
+ *
+ *  `svg` is here for the opposite reason to the bitmaps: it has no resolution
+ *  at all, so the webview re-rasterizing it on every zoom step beats any PNG
+ *  Rust could hand over. Its gzipped twin `svgz` is NOT — an `<img>` would need
+ *  a `Content-Encoding: gzip` the scheme handler does not send, so it takes the
+ *  `preview://` path and is rasterized by resvg like any other opaque format.
+ *  `avif` is likewise absent: WebView2 decodes it, but the WebKit builds on
+ *  older macOS do not, and `preview://` (avif.rs) works everywhere. */
+export const BROWSER_DECODABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 
 /** Float, wider-than-display sources the tone-mapper actually shapes: HDR and
  *  EXR. Camera RAW is deliberately NOT here — its preview is the camera's own
