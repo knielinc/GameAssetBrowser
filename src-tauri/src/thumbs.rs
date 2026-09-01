@@ -78,10 +78,6 @@ fn decode_threads() -> usize {
 const FLUSH_MS: u64 = 100;
 
 pub struct ThumbState {
-    /// path -> cache key. Read on the way in so a re-scrolled cell skips both
-    /// the disk probe and the PNG re-decode that `build` would otherwise do
-    /// just to recompute stats.
-    cache: Mutex<LruCache<String, (String, ThumbInfo)>>,
     queue: Mutex<Vec<Job>>,
     running: Mutex<bool>,
 }
@@ -199,7 +195,6 @@ struct Job {
 impl Default for ThumbState {
     fn default() -> Self {
         Self {
-            cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(2048).unwrap())),
             queue: Mutex::new(Vec::new()),
             running: Mutex::new(false),
         }
@@ -834,42 +829,19 @@ fn drain(app: AppHandle) {
                         // Dropping it would strand the cell forever â€” the
                         // frontend never re-asks for an id it already asked for.
                         //
-                        // Memory hit: skip the decode entirely — but only trust
-                        // the memo while the PIXELS are still there. The memo is
-                        // bounded by ENTRY COUNT (2048) and ThumbCache by a BYTE
-                        // budget, so the two evict independently: on a large
-                        // library the blob drops a thumbnail whose memo entry is
-                        // still live. Taking the shortcut then answers with a
-                        // key that has nothing behind it — `thumb://` 404s and
-                        // the cell strands showing badges and dimensions (both
-                        // come from this `info`) but no image, with no way back.
-                        // Verify, and on a miss fall through to a real re-decode.
-                        let memo =
-                            app_ref.state::<ThumbState>().cache.lock().get(&job.path).cloned();
-                        let mut served = false;
-                        if let Some((key, info)) = memo {
-                            if crate::thumbcache::parse_key(&key)
-                                .is_some_and(|h| blob_ref.contains(h))
-                            {
+                        // No path-keyed memo in front of this: build() already
+                        // short-circuits on a warm pixel cache, and its key is a
+                        // hash of the file's CURRENT size+mtime — a memo keyed
+                        // by path alone kept answering with the old pixels after
+                        // the file changed on disk (the stale-thumbnail bug: an
+                        // edited PNG never refreshed until app restart). The
+                        // price is one fs::metadata per request, which the
+                        // scanner pays per file anyway.
+                        match build(&job.path, blob_ref) {
+                            Ok((key, info)) => {
                                 pending_ref.lock().push((job.id, info, key));
-                                served = true;
-                            } else {
-                                // Stale memo — drop it so build() replaces it.
-                                app_ref.state::<ThumbState>().cache.lock().pop(&job.path);
                             }
-                        }
-                        if !served {
-                            match build(&job.path, blob_ref) {
-                                Ok((key, info)) => {
-                                    app_ref
-                                        .state::<ThumbState>()
-                                        .cache
-                                        .lock()
-                                        .put(job.path.clone(), (key.clone(), info));
-                                    pending_ref.lock().push((job.id, info, key));
-                                }
-                                Err(e) => eprintln!("[thumbs] {e}"),
-                            }
+                            Err(e) => eprintln!("[thumbs] {e}"),
                         }
 
                         // Cadence flush from whichever worker crosses the line
