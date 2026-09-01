@@ -154,6 +154,35 @@ jobs:
             libasound2-dev \
             file wget curl
 
+      # The AppImage bundler downloads its tooling (AppRun, linuxdeploy and the
+      # gtk/gstreamer plugin scripts) from GitHub at bundle time with NO retry —
+      # one connection reset four minutes into the Linux build kills the whole
+      # release. tauri-bundler looks in ~/.cache/tauri first and skips any file
+      # that already exists, so fetch them up front with retries (and keep them
+      # in the Actions cache so most runs never touch the network at all).
+      # chmod matters: the bundler only marks executables on ITS download path.
+      - name: Cache AppImage tooling
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tauri
+          key: appimage-tools-x86_64-v1
+      - name: Prefetch AppImage tooling (with retries)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          set -e
+          mkdir -p ~/.cache/tauri
+          fetch() {
+            [ -f "$HOME/.cache/tauri/$2" ] && { echo "cached: $2"; return; }
+            curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
+              -o "$HOME/.cache/tauri/$2" "$1"
+            chmod +x "$HOME/.cache/tauri/$2"
+          }
+          fetch https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 AppRun-x86_64
+          fetch https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage linuxdeploy-x86_64.AppImage
+          fetch https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh linuxdeploy-plugin-gtk.sh
+          fetch https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh linuxdeploy-plugin-gstreamer.sh
+
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
