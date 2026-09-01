@@ -92,6 +92,8 @@ export const LIGHT_MODES: { id: LightMode; label: string }[] = [
 /** One channel's image source: the original path + ext drive the full-res
  *  preview URL; `key` is the 256px thumbnail, kept as a cheap fallback. */
 export interface ChannelSrc {
+  /** File mtime — busts the webview's cache when the file changes on disk. */
+  modified: number;
   key: string;
   path: string;
   ext: string;
@@ -423,7 +425,13 @@ export default function TexturePreview({
       // Tone-map only float sources; an LDR map (DDS/TGA/TIFF) keeps a stable,
       // cacheable URL so auditioning an operator never churns its preview.
       const float = isFloatPreview(src.ext);
-      const url = sourceUrl(src.path, src.ext, float ? toneOp : undefined, float ? toneEv : undefined);
+      const url = sourceUrl(
+        src.path,
+        src.ext,
+        float ? toneOp : undefined,
+        float ? toneEv : undefined,
+        src.modified,
+      );
       const cacheKey = `${url}|${srgb ? "s" : "l"}`;
       used.add(cacheKey);
       let t = cache.get(cacheKey);

@@ -24,8 +24,14 @@ function schemePath(path: string): string {
   return encodeURI(path.replace(/\\/g, "/").replace(/^\//, ""));
 }
 
-export function modelUrl(path: string): string {
-  return `${schemeBase("model")}/${schemePath(path)}`;
+/** `stamp` (the file's mtime) rides as `?v=` purely to bust the webview's
+ *  HTTP/image caches when the file changes on disk — the Rust handler ignores
+ *  the query and reads the path. Without it, editing a PNG externally keeps
+ *  showing the old pixels until the app restarts. Model loads omit it: three.js
+ *  derives sibling URLs from the base and a query there is just noise. */
+export function modelUrl(path: string, stamp?: number): string {
+  const base = `${schemeBase("model")}/${schemePath(path)}`;
+  return stamp !== undefined ? `${base}?v=${stamp}` : base;
 }
 
 /** Full-resolution preview of a texture the browser can't decode (HDR/EXR/DDS/
@@ -37,11 +43,14 @@ export function modelUrl(path: string): string {
  *  the query is part of the Rust preview cache key, so changing them re-fetches
  *  a freshly tone-mapped PNG. Omitted (or ev 0) => the default (ACES, 0 EV),
  *  and the query is left off so LDR previews keep a stable, cacheable URL. */
-export function previewUrl(path: string, tm?: string, ev?: number): string {
+export function previewUrl(path: string, tm?: string, ev?: number, stamp?: number): string {
   const base = `${schemeBase("preview")}/${schemePath(path)}`;
   const q: string[] = [];
   if (tm !== undefined && tm !== "aces") q.push(`tm=${tm}`);
   if (ev !== undefined && ev !== 0) q.push(`ev=${ev}`);
+  // Cache-buster: the scheme serves `immutable`, so a changed file must get a
+  // changed URL or the webview keeps the stale response until restart.
+  if (stamp !== undefined) q.push(`v=${stamp}`);
   return q.length > 0 ? `${base}?${q.join("&")}` : base;
 }
 
@@ -71,8 +80,16 @@ export function isFloatPreview(ext: string | undefined): boolean {
 /** Best source-quality URL for a texture: the original for browser-decodable
  *  formats, a Rust-decoded full-res PNG otherwise. `tm`/`ev` tone-map float
  *  sources (ignored by the native path — those are already sRGB). */
-export function sourceUrl(path: string, ext: string, tm?: string, ev?: number): string {
-  return BROWSER_DECODABLE.has(ext.toLowerCase()) ? modelUrl(path) : previewUrl(path, tm, ev);
+export function sourceUrl(
+  path: string,
+  ext: string,
+  tm?: string,
+  ev?: number,
+  stamp?: number,
+): string {
+  return BROWSER_DECODABLE.has(ext.toLowerCase())
+    ? modelUrl(path, stamp)
+    : previewUrl(path, tm, ev, stamp);
 }
 
 export interface LoadedModel {

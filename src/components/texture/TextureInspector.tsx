@@ -28,7 +28,8 @@ export function keysForMaterial(
     const m = material.channels.get(ch);
     if (m === undefined) return;
     const t = thumbs.get(m.file.id);
-    if (t !== undefined) keys[slot] = { key: t.key, path: m.file.path, ext: m.file.ext };
+    if (t !== undefined)
+      keys[slot] = { key: t.key, path: m.file.path, ext: m.file.ext, modified: m.file.modified };
   };
   put("baseColor", "baseColor");
   put("normal", "normal");
@@ -47,7 +48,12 @@ export function keysForMaterial(
     // The same texture into all three slots — three reads aoMap from .r,
     // roughnessMap from .g and metalnessMap from .b, so a packed map needs no
     // channel extraction and no extra VRAM. ORM was designed for exactly this.
-    const src: ChannelSrc = { key: t.key, path: m.file.path, ext: m.file.ext };
+    const src: ChannelSrc = {
+      key: t.key,
+      path: m.file.path,
+      ext: m.file.ext,
+      modified: m.file.modified,
+    };
     keys.roughness ??= src;
     keys.ao ??= src;
     keys.metallic ??= src;
@@ -62,7 +68,7 @@ export function keysForFile(
 ): ChannelKeys {
   const t = thumbs.get(file.id);
   if (t === undefined) return {};
-  const src: ChannelSrc = { key: t.key, path: file.path, ext: file.ext };
+  const src: ChannelSrc = { key: t.key, path: file.path, ext: file.ext, modified: file.modified };
   // A lone normal map previewed on a sphere should BE the normal map, not the
   // albedo — showing raw blue-purple on a sphere is useless.
   switch (channel) {
@@ -161,6 +167,7 @@ export default function TextureInspector({
             <Sprite2DView
               path={file2d.path}
               ext={file2d.ext}
+              modified={file2d.modified}
               sprite={{
                 enabled: preview.spriteOn,
                 cols: preview.spriteCols,

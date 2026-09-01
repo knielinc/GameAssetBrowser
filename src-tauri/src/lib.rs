@@ -446,7 +446,10 @@ pub fn run() {
                 let resp = match thumbs::preview_png(&app, &decoded, tm, ev) {
                     Some(bytes) => tauri::http::Response::builder()
                         .header("Content-Type", "image/png")
-                        // Keyed by path+stamp inside; the URL's bytes are stable.
+                        // Immutable is only honest because the frontend stamps
+                        // the URL with the file's mtime (`?v=`, previewUrl) —
+                        // a changed file gets a new URL; this one's bytes are
+                        // stable. The Rust cache re-keys on mtime regardless.
                         .header("Cache-Control", "public, max-age=31536000, immutable")
                         .header("Access-Control-Allow-Origin", "*")
                         .body(bytes),

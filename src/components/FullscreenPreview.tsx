@@ -119,7 +119,7 @@ export default function FullscreenPreview({
   const keys =
     item === null
       ? file.kind === "texture" && thumb !== undefined
-        ? { baseColor: { key: thumb.key, path: file.path, ext: file.ext } }
+        ? { baseColor: { key: thumb.key, path: file.path, ext: file.ext, modified: file.modified } }
         : {}
       : item.kind === "material"
         ? keysForMaterial(item.material, thumbs)
@@ -240,7 +240,7 @@ export default function FullscreenPreview({
                   ) : null}
                   {sharpFailedPath !== audioFile.path && (
                     <img
-                      src={previewUrl(audioFile.path)}
+                      src={previewUrl(audioFile.path, undefined, undefined, audioFile.modified)}
                       alt=""
                       draggable={false}
                       onLoad={() => setSharpPath(audioFile.path)}
@@ -275,6 +275,7 @@ export default function FullscreenPreview({
               <Sprite2DView
                 path={file.path}
                 ext={file.ext}
+                modified={file.modified}
                 sprite={{
                   enabled: preview3d.spriteOn,
                   cols: preview3d.spriteCols,

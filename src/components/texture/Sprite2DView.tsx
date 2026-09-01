@@ -15,6 +15,8 @@ export interface SpriteConfig {
 export interface Sprite2DViewProps {
   path: string;
   ext: string;
+  /** File mtime — busts the webview's cache when the file changes on disk. */
+  modified: number;
   sprite: SpriteConfig;
   /** Scale the image to fill the available space (upscaling small textures).
    *  When false, show it at `zoomPct` of native size and scroll if it
@@ -110,6 +112,7 @@ function isolate(src: string, iso: Exclude<IsoChannel, "rgb">): Promise<string> 
 export default function Sprite2DView({
   path,
   ext,
+  modified,
   sprite,
   zoomFit,
   zoomPct,
@@ -123,7 +126,7 @@ export default function Sprite2DView({
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   const usable = BROWSER_DECODABLE.has(ext.toLowerCase());
-  const src = usable ? modelUrl(path) : previewUrl(path);
+  const src = usable ? modelUrl(path, modified) : previewUrl(path, undefined, undefined, modified);
   const isGif = ext.toLowerCase() === "gif";
 
   // The image changed — drop the old size until the new one loads.
