@@ -8,12 +8,15 @@ import DocViewControls from "./DocViewControls";
 import PdfLayoutControls from "./PdfLayoutControls";
 import ReadWidthControls from "./ReadWidthControls";
 import ReadThemeControls from "./ReadThemeControls";
+import ExpandButton from "../ExpandButton";
 
 export interface DocumentInspectorProps {
   path: string | null;
   ext: string | null;
   size: number | null;
   onClose: () => void;
+  /** Open the fullscreen preview (expand button in the preview corner). */
+  onExpand: () => void;
   /** Panel width in px; owned by usePanelWidth in TabPane. */
   width: number;
 }
@@ -26,6 +29,7 @@ export default function DocumentInspector({
   ext,
   size,
   onClose,
+  onExpand,
   width,
 }: DocumentInspectorProps): ReactElement {
   const hasDoc = path !== null && ext !== null;
@@ -59,7 +63,8 @@ export default function DocumentInspector({
             </div>
           )}
           {/* The preview fills the drawer and scrolls internally. */}
-          <div className="flex min-h-0 flex-1 flex-col border-b border-bg">
+          <div className="relative flex min-h-0 flex-1 flex-col border-b border-bg">
+            <ExpandButton onClick={onExpand} />
             <DocumentPreview key={path} path={path} ext={ext} />
           </div>
           <div className="shrink-0 p-3">

@@ -6,10 +6,14 @@ import { useRenderPrefs } from "../../stores/renderPrefs";
 import { requestThumbs } from "../../ipc/commands";
 import { humanSize } from "../FileRow";
 import { formatTime } from "../player/TimeDisplay";
+import ExpandButton from "../ExpandButton";
 
 export interface AudioInspectorProps {
   file: LibFile | null;
   onClose: () => void;
+  /** Open the fullscreen preview. The ONLY way in for audio: Space and
+   *  double-click are the play gestures there and must not steal the track. */
+  onExpand: () => void;
   /** Panel width in px; owned by usePanelWidth in TabPane. */
   width: number;
 }
@@ -30,7 +34,12 @@ function channelLabel(n: number): string {
  * mtime (to read the probe maps and the "a"-keyed thumbnail), so it takes the
  * whole LibFile rather than loose path/ext/size props.
  */
-export default function AudioInspector({ file, onClose, width }: AudioInspectorProps): ReactElement {
+export default function AudioInspector({
+  file,
+  onClose,
+  onExpand,
+  width,
+}: AudioInspectorProps): ReactElement {
   return (
     <aside style={{ width }} className="flex shrink-0 flex-col bg-panel">
       <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-bg px-2.5">
@@ -45,13 +54,19 @@ export default function AudioInspector({ file, onClose, width }: AudioInspectorP
         </div>
       ) : (
         // Keyed on the path so the hooks reset cleanly between selections.
-        <AudioInspectorBody key={file.path} file={file} />
+        <AudioInspectorBody key={file.path} file={file} onExpand={onExpand} />
       )}
     </aside>
   );
 }
 
-function AudioInspectorBody({ file }: { file: LibFile }): ReactElement {
+function AudioInspectorBody({
+  file,
+  onExpand,
+}: {
+  file: LibFile;
+  onExpand: () => void;
+}): ReactElement {
   // The "a"-keyed cover art / waveform, same optimistic path as AudioCell.
   const { src, imgKey, onError, onLoad } = useThumbSrc(file, "a");
   // Honour the global nearest-neighbour preference, as AudioCell does for this
@@ -99,7 +114,8 @@ function AudioInspectorBody({ file }: { file: LibFile }): ReactElement {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-      <div className="aspect-square w-full shrink-0 overflow-hidden rounded-lg bg-raised">
+      <div className="relative aspect-square w-full shrink-0 overflow-hidden rounded-lg bg-raised">
+        <ExpandButton onClick={onExpand} />
         {src !== null ? (
           <img
             key={imgKey}

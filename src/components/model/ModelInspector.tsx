@@ -7,11 +7,14 @@ import type { RescueResult } from "../../model/rescueTextures";
 import ModelViewport, { CM_HEURISTIC_MIN } from "./ModelViewport";
 import ModelLightControls from "./ModelLightControls";
 import AtlasPicker from "./AtlasPicker";
+import ExpandButton from "../ExpandButton";
 
 export interface ModelInspectorProps {
   path: string | null;
   size: number | null;
   onClose: () => void;
+  /** Open the fullscreen preview (expand button in the viewport corner). */
+  onExpand: () => void;
   /** Panel width in px; owned by usePanelWidth in TabPane. */
   width: number;
 }
@@ -21,7 +24,13 @@ const fmt = (n: number): string => n.toLocaleString();
 /** Right-side drawer. Model metadata is intrinsically tall-and-narrow, and the
  *  grid stays the tool for the stated core need — browsing beats inspecting,
  *  so browsing keeps the space. Drag it wider for a big 3D view. */
-export default function ModelInspector({ path, size, onClose, width }: ModelInspectorProps): ReactElement {
+export default function ModelInspector({
+  path,
+  size,
+  onClose,
+  onExpand,
+  width,
+}: ModelInspectorProps): ReactElement {
   const [stats, setStats] = useState<ModelStats | null>(null);
   const onStats = useCallback((s: ModelStats | null) => setStats(s), []);
   const [rescue, setRescue] = useState<RescueResult | null>(null);
@@ -37,7 +46,8 @@ export default function ModelInspector({ path, size, onClose, width }: ModelInsp
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-        <div className="aspect-square w-full shrink-0">
+        <div className="relative aspect-square w-full shrink-0">
+          {path !== null && <ExpandButton onClick={onExpand} />}
           <ModelViewport path={path} onStats={onStats} onRescue={onRescue} />
         </div>
 

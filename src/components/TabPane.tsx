@@ -124,16 +124,36 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
     },
     [grouped, kind],
   );
-  // Double-click / activation → fullscreen the CURRENT selection (the click
-  // that precedes the double-click already selected it). Reading selection live
-  // from the store rather than a stale closure keeps it correct after that
-  // click's state update. This is the universal "open big" gesture — it works
-  // for every kind on every tab, including auditioning-Space's audio tab.
-  const previewSelection = useCallback(() => {
+  // The CURRENT selection, read live from the store rather than a stale
+  // closure so it is correct right after the click that changed it.
+  const selectedNow = useCallback((): LibFile | undefined => {
     const t = useLibraryStore.getState().tabs[kind];
-    const f = visible.find((x) => x.path === t.selectedPath) ?? visible[t.selectedIndex] ?? visible[0];
+    return visible.find((x) => x.path === t.selectedPath) ?? visible[t.selectedIndex] ?? visible[0];
+  }, [visible, kind]);
+  // The inspector's expand button: fullscreen whatever is selected, every
+  // kind, no exceptions — this is the one gesture audio shares with the rest.
+  const expandSelection = useCallback(() => {
+    const f = selectedNow();
     if (f !== undefined) onPreview(f);
-  }, [visible, kind, onPreview]);
+  }, [selectedNow, onPreview]);
+  // Double-click / activation → fullscreen the selection (the click that
+  // precedes the double-click already selected it). EXCEPT audio: there the
+  // gesture is "play it", not "blow up the cover art" — an overlay opening
+  // mid-audition is disruptive. On the Audio tab the click already auditioned
+  // the track, so the double-click adds nothing; on the "all" tab a plain
+  // click is browse-only, so the double-click is what starts playback.
+  const previewSelection = useCallback(() => {
+    const f = selectedNow();
+    if (f === undefined) return;
+    if (f.kind === "audio") {
+      if (kind === "all") {
+        const idx = audioVisibleRef.current.findIndex((x) => x.path === f.path);
+        loadAndSelect(f, idx, 0, true);
+      }
+      return;
+    }
+    onPreview(f);
+  }, [selectedNow, kind, onPreview]);
   // Fullscreen ←/→ (and a document viewer stepping past its last/first page):
   // advance the overlay through the visible flat order. Selection follows so
   // closing the overlay lands where you navigated to.
@@ -546,6 +566,7 @@ export default function TabPane({ kind }: TabPaneProps): ReactElement {
             preview3d={preview3d}
             onPreviewChange={patchPreview}
             onClose={toggleInspector}
+            onExpand={expandSelection}
             width={inspector.width}
           />
         )}

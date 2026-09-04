@@ -3,12 +3,15 @@ import { X } from "lucide-react";
 import { basename } from "../../stores/libraryStore";
 import { humanSize } from "../FileRow";
 import LayeredView from "../layered/LayeredView";
+import ExpandButton from "../ExpandButton";
 
 export interface SpriteArtInspectorProps {
   path: string | null;
   ext: string | null;
   size: number | null;
   onClose: () => void;
+  /** Open the fullscreen preview (expand button in the preview corner). */
+  onExpand: () => void;
   width: number;
 }
 
@@ -19,6 +22,7 @@ export default function SpriteArtInspector({
   ext,
   size,
   onClose,
+  onExpand,
   width,
 }: SpriteArtInspectorProps): ReactElement {
   return (
@@ -36,7 +40,8 @@ export default function SpriteArtInspector({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col border-b border-bg">
+          <div className="relative flex min-h-0 flex-1 flex-col border-b border-bg">
+            <ExpandButton onClick={onExpand} />
             <LayeredView key={path} path={path} ext={ext ?? ""} />
           </div>
           <div className="shrink-0 p-3">

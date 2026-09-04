@@ -4,6 +4,7 @@ import { useLibraryStore, type LibFile } from "../stores/libraryStore";
 import { toggleFavoriteSmart } from "../stores/favoritesStore";
 import { switchTab } from "../stores/tabs";
 import {
+  audioVisibleRef,
   loadAndSelect,
   positionRef,
   replayCurrent,
@@ -38,7 +39,8 @@ const AUTOPLAY_DEBOUNCE_MS = 60;
  *
  *   ↑/↓        move selection — by 1 in a list, by one row in a grid
  *   ←/→        seek ±2 s (audio list) · move ∓1 cell (grid)
- *   Space      play/pause · Enter replay · L loop
+ *   Space      play/pause (audio, on any tab) · fullscreen preview (other kinds)
+ *   Enter      replay · L loop
  *   F          toggle favorite (whole selection when the focused item is in it)
  *   Ctrl+1–5  switch tab (All / Audio / 2D / 3D / Docs)
  *   Ctrl+A     select all visible · Escape collapse multi-selection
@@ -162,7 +164,22 @@ export function useKeyboardShortcuts(
           const tab = useLibraryStore.getState().tabs[activeKind];
           const file =
             files.find((f) => f.path === tab.selectedPath) ?? files[tab.selectedIndex] ?? files[0];
-          if (file !== undefined) previewRef.current?.(file);
+          if (file === undefined) break;
+          // An audio file on the "all" tab keeps the audio meaning: play/pause
+          // the selected track, never the fullscreen overlay — an overlay
+          // opening mid-audition is disruptive. Fullscreen for audio is the
+          // inspector's expand button. A track not yet in the player loads and
+          // plays (forcePlay: Space is a deliberate "sound now" gesture).
+          if (file.kind === "audio") {
+            if (usePlayerStore.getState().currentPath === file.path) {
+              usePlayerStore.getState().togglePlay();
+            } else {
+              const idx = audioVisibleRef.current.findIndex((f) => f.path === file.path);
+              loadAndSelect(file, idx, 0, true);
+            }
+            break;
+          }
+          previewRef.current?.(file);
           break;
         }
 

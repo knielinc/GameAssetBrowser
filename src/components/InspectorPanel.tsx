@@ -21,6 +21,9 @@ export interface InspectorPanelProps {
   preview3d: PreviewState;
   onPreviewChange: (patch: Partial<PreviewState>) => void;
   onClose: () => void;
+  /** Open the fullscreen preview of the current selection (the expand button
+   *  in every inspector's preview corner). */
+  onExpand: () => void;
   width: number;
 }
 
@@ -37,18 +40,22 @@ export default function InspectorPanel({
   preview3d,
   onPreviewChange,
   onClose,
+  onExpand,
   width,
 }: InspectorPanelProps): ReactElement {
   const inspectorKind = kind === "all" ? (selectedFile?.kind ?? null) : kind;
   switch (inspectorKind) {
     case "audio":
-      return <AudioInspector file={selectedFile} onClose={onClose} width={width} />;
+      return (
+        <AudioInspector file={selectedFile} onClose={onClose} onExpand={onExpand} width={width} />
+      );
     case "model":
       return (
         <ModelInspector
           path={selectedFile?.path ?? null}
           size={selectedFile?.size ?? null}
           onClose={onClose}
+          onExpand={onExpand}
           width={width}
         />
       );
@@ -61,6 +68,7 @@ export default function InspectorPanel({
           ext={selectedFile?.ext ?? null}
           size={selectedFile?.size ?? null}
           onClose={onClose}
+          onExpand={onExpand}
           width={width}
         />
       ) : docIsPsd(selectedFile?.ext ?? "") ? (
@@ -69,6 +77,7 @@ export default function InspectorPanel({
           ext={selectedFile?.ext ?? null}
           size={selectedFile?.size ?? null}
           onClose={onClose}
+          onExpand={onExpand}
           width={width}
         />
       ) : (
@@ -77,6 +86,7 @@ export default function InspectorPanel({
           preview={preview3d}
           onPreviewChange={onPreviewChange}
           onClose={onClose}
+          onExpand={onExpand}
           width={width}
         />
       );
@@ -87,6 +97,7 @@ export default function InspectorPanel({
           ext={selectedFile?.ext ?? null}
           size={selectedFile?.size ?? null}
           onClose={onClose}
+          onExpand={onExpand}
           width={width}
         />
       );

@@ -10,6 +10,7 @@ import TexturePreview, { type ChannelKeys, type ChannelSrc } from "./TexturePrev
 import PreviewControls, { type PreviewState } from "./PreviewControls";
 import { isFloatPreview } from "../../model/loadModel";
 import Sprite2DView from "./Sprite2DView";
+import ExpandButton from "../ExpandButton";
 
 /**
  * Map a material's resolved channels onto the preview's texture slots.
@@ -118,6 +119,8 @@ export interface TextureInspectorProps {
   preview: PreviewState;
   onPreviewChange: (patch: Partial<PreviewState>) => void;
   onClose: () => void;
+  /** Open the fullscreen preview (expand button in the preview corner). */
+  onExpand: () => void;
   /** Panel width in px; owned by usePanelWidth in TabPane. */
   width: number;
 }
@@ -127,6 +130,7 @@ export default function TextureInspector({
   preview,
   onPreviewChange,
   onClose,
+  onExpand,
   width,
 }: TextureInspectorProps): ReactElement {
   useLibraryStore((s) => s.thumbsVersion);
@@ -158,7 +162,8 @@ export default function TextureInspector({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-        <div className="aspect-square w-full shrink-0 overflow-hidden rounded-xl bg-stage shadow-e1">
+        <div className="relative aspect-square w-full shrink-0 overflow-hidden rounded-xl bg-stage shadow-e1">
+          {item !== null && <ExpandButton onClick={onExpand} />}
           {item === null ? (
             <div className="flex h-full items-center justify-center text-[11px] text-dim">
               Select a texture

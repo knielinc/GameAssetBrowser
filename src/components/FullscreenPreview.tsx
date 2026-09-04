@@ -40,7 +40,9 @@ export interface FullscreenPreviewProps {
 /**
  * In-app fullscreen preview: an overlay filling the window, NOT the OS
  * fullscreen (that's F11 and is a separate concern — see useWindowFullscreen).
- * Space toggles it, Escape closes.
+ * Opened by Space / double-click on visual kinds and by the inspector's expand
+ * button on every kind. Escape closes; so does Space, except on audio, where
+ * Space stays play/pause (the overlay hosts the transport).
  *
  * Textures show the cached thumbnail rather than the source file: the source
  * may be a DDS/TGA/EXR the webview cannot decode at all, and a 4K PNG at
@@ -146,6 +148,14 @@ export default function FullscreenPreview({
   const docPages = file.kind === "document" && (docIsPdf(file.ext) || docIsEbook(file.ext));
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // Audio: Space is play/pause here as everywhere else — the overlay is
+      // the player blown up, and Space must not throw it away mid-track.
+      if (e.code === "Space" && isAudio) {
+        e.preventDefault();
+        e.stopPropagation();
+        usePlayerStore.getState().togglePlay();
+        return;
+      }
       if (e.code === "Escape" || e.code === "Space") {
         e.preventDefault();
         e.stopPropagation();
@@ -191,7 +201,9 @@ export default function FullscreenPreview({
             </>
           )}
           {file.kind === "document" && docSupportsZoom(file.ext) && <DocViewControls />}
-          <span className="text-[10px] text-dim">Space or Esc to close</span>
+          <span className="text-[10px] text-dim">
+            {isAudio ? "Esc to close" : "Space or Esc to close"}
+          </span>
           <button type="button" className="icon-btn" title="Close" onClick={onClose}>
             <X size={14} />
           </button>
