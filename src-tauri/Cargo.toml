@@ -227,10 +227,14 @@ tungstenite = { version = "0.30.0", default-features = false, features = ["hands
 # the user's asset library.
 getrandom = "0.4.3"
 
-# Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs).
+# Direct Win32 for the maximize<->fullscreen placement dance (winmode.rs) and
+# the shell "select this file in Explorer" call (explorer.rs).
 # Same 0.61 tauri/tao already use, so no new crate in the tree.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
 ] }
