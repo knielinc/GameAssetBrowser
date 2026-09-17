@@ -254,6 +254,42 @@ jobs:
           "GAB_SIGN_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "imported '$($cert.Subject)', expires $($cert.NotAfter.ToString('yyyy-MM-dd'))"
 
+      # The MSI bundler downloads WiX3 from GitHub at bundle time with NO retry —
+      # one transient error kills the whole Windows build. tauri-bundler looks in
+      # %LOCALAPPDATA%\tauri\WixTools314 first and skips any file that already
+      # exists, so fetch the zip up front with retries (and keep it in the
+      # Actions cache so most runs never touch the network at all).
+      - name: Cache WiX tooling
+        if: matrix.platform == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri\WixTools314
+          key: wix-tools-3.14.1-v1
+
+      - name: Prefetch WiX tooling (with retries)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $dest = "$env:LOCALAPPDATA\tauri\WixTools314"
+          if (Test-Path "$dest\heat.exe") { Write-Host "cached: WixTools314"; exit 0 }
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $zip = "$env:RUNNER_TEMP\wix314-binaries.zip"
+          $url = "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
+          $maxRetries = 5
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+              break
+            } catch {
+              if ($i -eq $maxRetries) { throw }
+              Write-Host "Attempt $i failed — retrying in 10 s…"
+              Start-Sleep -Seconds 10
+            }
+          }
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          Remove-Item $zip
+          Write-Host "WiX tools installed to $dest"
+
       - name: Build the app (no GitHub Release — itch.io only)
         uses: tauri-apps/tauri-action@v0
         env:
