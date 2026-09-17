@@ -183,6 +183,32 @@ jobs:
           fetch https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh linuxdeploy-plugin-gtk.sh
           fetch https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh linuxdeploy-plugin-gstreamer.sh
 
+      # Same story for the MSI bundler: it downloads wix314-binaries.zip from
+      # GitHub at bundle time with no retry, and one HTTP 500 there throws away
+      # a finished Windows build. tauri-bundler extracts the zip into
+      # %LOCALAPPDATA%\tauri\WixTools314 and skips the download when candle.exe
+      # and friends are already present, so fill that folder up front with
+      # retries and keep it in the Actions cache.
+      - name: Cache WiX tooling
+        if: matrix.platform == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri\WixTools314
+          key: wix-tools-314-v1
+      - name: Prefetch WiX tooling (with retries)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $wix = Join-Path $env:LOCALAPPDATA 'tauri\WixTools314'
+          if (Test-Path (Join-Path $wix 'candle.exe')) { Write-Host "cached: WixTools314"; exit 0 }
+          New-Item -ItemType Directory -Force $wix | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
+          curl.exe -fL --retry 5 --retry-all-errors --retry-delay 5 `
+            -o $zip https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          if ($LASTEXITCODE -ne 0) { throw "WiX download failed" }
+          Expand-Archive -Path $zip -DestinationPath $wix -Force
+          if (-not (Test-Path (Join-Path $wix 'candle.exe'))) { throw "candle.exe missing after extract" }
+
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
