@@ -1,7 +1,8 @@
 //! "Show in file manager": reveal a file (or open a folder) in the OS file
 //! manager, for the file-list and folder-tree context menus. Windows Explorer
 //! (shell `SHOpenFolderAndSelectItems`, falling back to `explorer.exe
-//! /select`), macOS Finder (`open -R`), or the Linux desktop's xdg handler.
+//! /select`), macOS Finder (`open -R`), or on Linux the freedesktop
+//! FileManager1 D-Bus interface with the xdg handler as fallback.
 
 use std::path::Path;
 
@@ -105,16 +106,51 @@ pub async fn show_in_explorer(path: String) -> Result<(), String> {
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        // No portable "select this file" across Linux file managers, so open
-        // its containing folder — every xdg-compliant desktop handles that.
-        let dir = Path::new(&path)
-            .parent()
-            .ok_or_else(|| format!("no parent directory for {path}"))?;
-        std::process::Command::new("xdg-open")
-            .arg(dir)
-            .spawn()
-            .map_err(|e| format!("failed to launch file manager: {e}"))?;
+        // Best effort: the freedesktop FileManager1 D-Bus interface (Nautilus,
+        // Dolphin, Nemo, Thunar, Caja...) reveals the file selected. If the
+        // call fails (no dbus-send, no file manager on the bus, headless), fall
+        // back to opening the containing folder, which every xdg-compliant
+        // desktop handles.
+        if let Err(e) = reveal_selected_dbus(&path) {
+            eprintln!("[explorer] FileManager1.ShowItems failed, falling back to xdg-open: {e}");
+            let dir = Path::new(&path)
+                .parent()
+                .ok_or_else(|| format!("no parent directory for {path}"))?;
+            std::process::Command::new("xdg-open")
+                .arg(dir)
+                .spawn()
+                .map_err(|e| format!("failed to launch file manager: {e}"))?;
+        }
         Ok(())
+    }
+}
+
+/// `org.freedesktop.FileManager1.ShowItems([file URI], "")` over the session
+/// bus via `dbus-send`. Waited on (unlike the spawn-and-forget launchers)
+/// because the exit status is the only signal that a file manager answered;
+/// `--print-reply` makes dbus-send block for the reply and fail if none comes.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn reveal_selected_dbus(path: &str) -> Result<(), String> {
+    let uri = url::Url::from_file_path(path).map_err(|_| format!("not an absolute path: {path}"))?;
+    let status = std::process::Command::new("dbus-send")
+        .args([
+            "--session",
+            "--print-reply",
+            "--reply-timeout=3000",
+            "--dest=org.freedesktop.FileManager1",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1.ShowItems",
+        ])
+        .arg(format!("array:string:{uri}"))
+        .arg("string:")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|e| format!("failed to run dbus-send: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("dbus-send exited with {status}"))
     }
 }
 

@@ -1452,6 +1452,7 @@ dependencies = [
  "tauri-plugin-drag",
  "tauri-plugin-store",
  "tungstenite",
+ "url",
  "walkdir",
  "webp",
  "windows 0.61.3",

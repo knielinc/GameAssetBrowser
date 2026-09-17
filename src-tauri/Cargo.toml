@@ -238,3 +238,8 @@ windows = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_System_Com",
 ] }
+
+# file:// URI building for the FileManager1 D-Bus reveal (explorer.rs).
+# Already in the tree via tauri, so no new crate.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+url = "2"
